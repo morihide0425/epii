@@ -935,8 +935,9 @@ const ADMIN_FUNCS = {
   bookFix: adminBookFix,
   bookIgnore: adminBookIgnore,
   bookAi: adminBookAi,
-  bookCash: adminBookCash,
-  bookCashAdjust: adminBookCashAdjust,
+  bookClose: adminBookClose,
+  bookAdjust: adminBookAdjust,
+  bookAsk: adminBookAsk,
   sqUnentered: adminSqUnentered,
   sqEnter: adminSqEnter,
   saveCustomer: async (env, b) => {

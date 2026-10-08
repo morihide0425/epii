@@ -91,6 +91,13 @@ function seedJournals() {
   // 請求書の売上：登録した日から20日あとに入金
   journals.push({ id: 'BK20', transaction_date: addDays(today, -30), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 4600, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 4600, tax_value: 0 }, remark: 'No.1 il Centrino' }] });
   txs.push({ id: 'TXS2', date: addDays(today, -10), value: 4600, side: 'INCOME', content: 'ﾌﾘｺﾐ ｲﾙｾﾝﾄﾘﾉ', journalizing_status: 'registered' });
+  // 振込手数料を引かれて入金（帳簿6,000円／銀行5,560円）
+  journals.push({ id: 'BK21', transaction_date: addDays(today, -25), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 6000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 6000, tax_value: 0 }, remark: 'No.3 il Centrino' }] });
+  txs.push({ id: 'TXS3', date: addDays(today, -15), value: 5560, side: 'INCOME', content: 'ﾌﾘｺﾐ ｲﾙｾﾝﾄﾘﾉ', journalizing_status: 'ignored' });
+  // 2件の請求が、まとめて1回で入金
+  journals.push({ id: 'BK22', transaction_date: addDays(today, -20), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 3000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 3000, tax_value: 0 }, remark: 'No.4 il Centrino' }] });
+  journals.push({ id: 'BK23', transaction_date: addDays(today, -19), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 2000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 2000, tax_value: 0 }, remark: 'No.5 il Centrino' }] });
+  txs.push({ id: 'TXS4', date: addDays(today, -12), value: 5000, side: 'INCOME', content: 'ﾌﾘｺﾐ ｲﾙｾﾝﾄﾘﾉ', journalizing_status: 'ignored' });
   // 口座の仕訳が二重（銀行の明細は1回分）
   jb('BK16', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
   jb('BK17', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
@@ -118,6 +125,11 @@ function seedJournals() {
 function aiAnswer(body) {
   const sys = typeof body.system === 'string' ? body.system : JSON.stringify(body.system || '');
   const text = JSON.stringify(body.messages);
+  if (sys.includes('帳簿の気になる仕訳1件')) {
+    const t = String(body.messages[0].content[0].text);
+    if (t.includes('手数料の候補')) return { choice: 'fee', why: '近い日に440円少ない入金があります' };
+    return { choice: '', why: '前後の通帳に同じ金額の入金がないか見てください' };
+  }
   if (sys.includes('帳簿を確定申告の前に見直す')) {
     const lines = String(body.messages[0].content[0].text).split('\n').filter(l => l.includes('消耗品費') && l.includes('野菜'));
     return { items: lines.map(l => { const p = l.split('｜'); return { id: p[0], bi: Number(p[1]), from: '消耗品費', to: '仕入高', title: '食材なので仕入高', why: 'アベノセイカは青果店' }; }) };

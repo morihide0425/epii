@@ -254,76 +254,101 @@ try {
   res = await post('/admin/api/book', {}, A);
   const bkOf = k => res.body.issues.find(x => x.id === k);
   check(res.body.connected && bkOf('BK1') && bkOf('BK1').kind === 'same' && bkOf('BK1').to === '仕入高' && bkOf('BK2').to === '事業主貸', 'same-account entries found ' + JSON.stringify(res.body.issues.map(x => [x.id, x.kind, x.to])));
-  check(bkOf('BK3').kind === 'pair' && bkOf('BK5').kind === 'vs' && bkOf('BK5').to === '通信費' && bkOf('BK6').kind === 'ap' && res.body.issues.some(x => x.key.startsWith('ar:') && x.amount === 3410) && bkOf('BK9').title === '10万円以上の消耗品', 'other checks');
+  check(bkOf('BK3').kind === 'pair' && bkOf('BK5').kind === 'vs' && bkOf('BK5').to === '通信費' && bkOf('BK6').kind === 'ap' && res.body.notes.some(x => x.key.startsWith('ar:') && x.amount === 3410 && x.todo) && res.body.notes.some(x => x.id === 'BK9' && x.title === '10万円以上の消耗品') && !res.body.issues.some(x => x.kind === 'info'), 'other checks (notes only in 会計)');
   // デビットの返金は、番号と金額が元の支払いと合うときだけ、その科目をすすめる（根拠も出す）
   check(bkOf('BK12').kind === 'vs' && bkOf('BK12').to === '損害保険料' && bkOf('BK12').why.includes('番号と金額が同じ') && bkOf('BK12').why.includes('340円'), 'refund matched by number and amount ' + JSON.stringify(bkOf('BK12')));
-  check(!res.body.issues.some(x => x.id === 'BK13' && x.fix) && bkOf('BK15').kind === 'info' && bkOf('BK15').why.includes('一部の返金'), 'no guess without evidence');
+  check(!res.body.issues.some(x => x.id === 'BK13' && x.fix) && !bkOf('BK15'), 'no guess without evidence');
   check(bkOf('BK1').why.length > 0 && res.body.balanced === res.body.total && res.body.total > 10, 'evidence and debit=credit');
   // 口座：帳簿の動きと銀行の明細を照らし合わせる（二重・通帳にない動き）
   const dupB = res.body.issues.find(x => x.dupBank);
-  check(dupB && (dupB.id === 'BK16' || dupB.id === 'BK17') && res.body.issues.some(x => x.id === 'BK4' && x.title === '通帳にない口座の動き') && res.body.bank, 'bank reconciliation ' + JSON.stringify(res.body.bank));
-  check(!res.body.issues.some(x => x.id === 'BK19' || x.id === 'BK20'), 'split deposit and late payment are not flagged');
+  check(dupB && (dupB.id === 'BK16' || dupB.id === 'BK17') && res.body.bankOk, 'bank reconciliation');
+  const b4 = bkOf('BK4');
+  check(b4 && b4.kind === 'bank' && b4.title === '通帳にない出金' && b4.opts.map(o => o.v).join() === '現金,事業主借,del', 'bank-only item with choices ' + JSON.stringify(b4));
+  check(!res.body.issues.some(x => ['BK19', 'BK20', 'BK22', 'BK23'].includes(x.id)), 'split deposit, late payment and combined deposit are not flagged');
+  const b21 = bkOf('BK21');
+  check(b21 && b21.fee && b21.fee.v === 440 && b21.opts[0].v === 'fee' && b21.why.includes('5,560'), 'fee-deducted deposit ' + JSON.stringify(b21));
+  // Claudeに相談：選べる直し方から根拠つきで1つ（電話番号・振込の相手は送らない）
+  res = await post('/admin/api/bookAsk', { key: b21.key }, A);
+  check(bkOf0(res, 'BK21').ask.to === 'fee' && bkOf0(res, 'BK21').ask.why, 'claude consult');
+  check(String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('fee｜') && !String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('ｲﾙｾﾝﾄﾘﾉ'), 'consult input masked');
+  // 手数料を引かれた入金に直す：普通預金5,560＋支払手数料440／売上高6,000
+  res = await post('/admin/api/bookFix', { id: 'BK21', kind: 'bank', to: 'fee', fee: 440, date: b21.date, key: b21.key }, A);
+  const j21 = journals.find(j => j.id === 'BK21');
+  check(j21.branches.length === 2 && j21.branches[0].debitor.value === 5560 && j21.branches[1].debitor.account_id === 'A%3D17' && j21.branches[1].debitor.value + (j21.branches[1].debitor.tax_value || 0) === 440 && j21.branches[0].creditor.value + j21.branches[1].creditor.value === 6000 && !bkOf0(res, 'BK21'), 'fee fix ' + JSON.stringify(j21));
+  // 現金で払った：普通預金 → 現金
+  res = await post('/admin/api/bookFix', { id: 'BK4', kind: 'bank', to: '現金', date: b4.date, key: b4.key }, A);
+  check(journals.find(j => j.id === 'BK4').branches[0].creditor.account_id === 'A%3D5' && !bkOf0(res, 'BK4'), 'bank-only fixed to cash');
+  res = await post('/admin/api/book', {}, A);
   // Square：会計ひとつずつ照らし合わせて、理由を出す
   const sm = res.body.sales.find(m => m.diffN);
   check(sm && sm.diff.some(d => d.text.includes('マネーフォワードにありません')), 'per-payment causes ' + JSON.stringify(sm && sm.diff.slice(0, 2)));
-  // 現金：1月1日の額は、マネーフォワードの残高試算表の前期残高（前年からの繰り越し）を自動で使う。マイナスでも「知らせ」にはしない
+  // 同じ時刻の2つの会計が、マネーフォワードでは1つにまとまっていても、合っているとみなす
+  const gd = add(T, -20);
+  await db.prepare("INSERT INTO sq_payments (id, ts, date, amount, refunded, status) VALUES ('GRP1', ?, ?, 2630, 0, 'COMPLETED'), ('GRP2', ?, ?, 2630, 0, 'COMPLETED')").bind(gd + ' 15:00', gd, gd + ' 15:01', gd).run();
+  journals.push({ id: 'GRPJ', transaction_date: gd, journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D14', value: 5260, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 5260, tax_value: 0 }, remark: gd.replace(/-/g, '/') + ' 15:00 お取引 No.GRP' }] });
+  await db.prepare("DELETE FROM kv WHERE k = ?").bind('mfs:' + gd.slice(0, 7)).run();
   res = await post('/admin/api/book', {}, A);
-  check(res.body.cash.open === 42000 && res.body.cash.openSrc === 'mf' && res.body.cash.book === 42000 + res.body.cash.net, 'opening cash from trial balance ' + JSON.stringify(res.body.cash));
+  const gm = res.body.sales.find(m => m.ym === gd.slice(0, 7));
+  check(gm && !gm.diff.some(d => d.date === gd && /15:0/.test(d.text)), 'grouped payments match ' + JSON.stringify(gm && gm.diff.filter(d => d.date === gd)));
+  check(res.body.sales.every(m => m.sq !== m.mf || m.diffN === 0), 'equal month totals = 一致');
+  // 締めの確認：1月1日の残高は、残高試算表の前期残高（前年からの繰り越し）。現金も口座も
+  const lastEnd = add(T.slice(0, 7) + '-01', -1);
+  let C = res.body.close;
+  check(C.date === lastEnd && C.presets[0].label === '先月末' && C.monthEnd && C.cash.open === 42000 && C.cash.openSrc === 'mf' && C.bank.open === 458000, 'close defaults ' + JSON.stringify(C));
   check(calls.mf.some(c => c.startsWith('GET /reports/trial_balance_bs') && c.includes('start_date=2026-01-01')), 'trial balance asked from 1/1');
-  check(!res.body.issues.some(x => /cashneg/.test(x.key) || /現金がマイナス/.test(x.title)), 'no error-like cash notice');
-  // 数えた日の時点の帳簿と比べる → 差を雑損失で合わせる（数えた日の日付）
-  const cday = add(T, -3);
-  res = await post('/admin/api/bookCash', { counted: '1,000', at: cday }, A);
-  const c0 = res.body.cash;
-  check(c0.counted === 1000 && c0.countedAt === cday && c0.bookAt !== null && c0.openSrc === 'mf', 'count with date ' + JSON.stringify(c0));
-  res = await post('/admin/api/bookCash', { counted: '1,000', at: add(T, 1) }, A);
-  check(res.status >= 400, 'future count date refused');
-  // 確定申告の帳尻合わせは12月31日の分だけ。科目を選んで、差の金額を打ったときだけ登録する
-  res = await post('/admin/api/bookCashAdjust', { how: 'misc', amount: String(Math.abs(1000 - c0.bookAt)) }, A);
-  check(res.status >= 400 && /12月31日/.test(res.body.error || res.body.message || JSON.stringify(res.body)), 'adjust only for 12/31 ' + JSON.stringify(res.body));
-  const ye = T.slice(0, 4) + '-12-31';
-  const kvc = JSON.parse((await db.prepare("SELECT v FROM kv WHERE k = 'bookCash'").first()).v);
-  await db.prepare("UPDATE kv SET v = ? WHERE k = 'bookCash'").bind(JSON.stringify(Object.assign(kvc, { counted: 1000, at: ye }))).run();
-  res = await post('/admin/api/book', {}, A);
-  const dd = 1000 - res.body.cash.bookAt;
-  check(res.body.cash.countedAt === ye && dd !== 0, 'year-end count');
+  check(!res.body.issues.some(x => /現金がマイナス/.test(x.title)), 'no error-like cash notice');
+  res = await post('/admin/api/bookClose', { date: add(T, 1) }, A);
+  check(res.status >= 400, 'future close date refused');
+  res = await post('/admin/api/bookClose', { date: lastEnd, cash: '1,000', bank: '500,000' }, A);
+  C = res.body.close;
+  check(C.cash.counted === 1000 && C.cash.diff === 1000 - C.cash.book && C.bank.counted === 500000 && C.bank.diff === 500000 - C.bank.book && Array.isArray(C.bank.cands), 'close compare ' + JSON.stringify(C.bank));
+  // 帳尻合わせ：月末だけ。科目を選んで、差の金額を打ったときだけ。同じ日に2回は入れない
+  const dd = C.cash.diff;
   const nj = journals.length;
-  res = await post('/admin/api/bookCashAdjust', { how: 'misc', amount: String(Math.abs(dd) + 1) }, A);
+  res = await post('/admin/api/bookAdjust', { acct: 'cash', how: 'misc', amount: String(Math.abs(dd) + 1) }, A);
   check(res.status >= 400 && journals.length === nj, 'wrong amount refused');
-  res = await post('/admin/api/bookCashAdjust', { amount: String(Math.abs(dd)) }, A);
+  res = await post('/admin/api/bookAdjust', { acct: 'cash', amount: String(Math.abs(dd)) }, A);
   check(res.status >= 400 && journals.length === nj, 'no account chosen refused');
-  res = await post('/admin/api/bookCashAdjust', { how: 'misc', amount: Math.abs(dd).toLocaleString() }, A);
+  res = await post('/admin/api/bookAdjust', { acct: 'cash', how: 'misc', amount: Math.abs(dd).toLocaleString() }, A);
   const aj = journals[journals.length - 1];
-  check(res.status === 200 && journals.length === nj + 1 && aj.transaction_date === ye && aj.branches[0][dd < 0 ? 'debitor' : 'creditor'].account_id === (dd < 0 ? 'A%3D18' : 'A%3D13') && aj.branches[0][dd < 0 ? 'creditor' : 'debitor'].account_id === 'A%3D5' && aj.branches[0].debitor.value === Math.abs(dd), 'year-end adjust journal ' + JSON.stringify(aj));
-  await db.prepare("UPDATE kv SET v = ? WHERE k = 'bookCash'").bind(JSON.stringify(Object.assign(kvc, { counted: 1000 + 500, at: ye }))).run();
+  check(res.status === 200 && journals.length === nj + 1 && aj.transaction_date === lastEnd && aj.branches[0][dd < 0 ? 'debitor' : 'creditor'].account_id === (dd < 0 ? 'A%3D18' : 'A%3D13') && aj.branches[0][dd < 0 ? 'creditor' : 'debitor'].account_id === 'A%3D5' && aj.branches[0].debitor.value === Math.abs(dd), 'month-end cash adjust ' + JSON.stringify(aj));
+  check(res.body.close.cash.diff === 0 && res.body.close.adjusted.cash, 'after adjust the cash matches ' + JSON.stringify(res.body.close.cash));
+  await db.prepare("UPDATE kv SET v = json_set(v, '$.cash', 2000) WHERE k = 'bookClose'").run();
   res = await post('/admin/api/book', {}, A);
-  res = await post('/admin/api/bookCashAdjust', { how: 'owner', amount: String(Math.abs(1500 - res.body.cash.bookAt)) }, A);
+  res = await post('/admin/api/bookAdjust', { acct: 'cash', how: 'owner', amount: String(Math.abs(res.body.close.cash.diff)) }, A);
   check(res.status >= 400 && /もう登録/.test(JSON.stringify(res.body)) && journals.length === nj + 1, 'second adjust on the same day refused ' + JSON.stringify(res.body));
-  journals.splice(nj, 1);
-  await db.prepare("DELETE FROM kv WHERE k LIKE 'mfs:%'").run();
-  await db.prepare("UPDATE kv SET v = ? WHERE k = 'bookCash'").bind(JSON.stringify(Object.assign(kvc, { counted: 1000, at: cday }))).run();
-  // 自分で入れた額が先。空にすると繰り越しに戻る
-  res = await post('/admin/api/bookCash', { open: '60,000' }, A);
-  check(res.body.cash.open === 60000 && res.body.cash.openSrc === 'input', 'own opening wins');
-  res = await post('/admin/api/bookCash', { open: '' }, A);
-  check(res.body.cash.open === 42000 && res.body.cash.openSrc === 'mf', 'cleared -> carry-forward again');
-  // 試算表が取れないときは、前年までの仕訳を足して出す（はじめの年は0から）
-  opts.noTb = true;
-  await db.prepare("DELETE FROM kv WHERE k IN ('cashOpenAuto', 'mfMaster')").run();
+  // 口座：差の理由になりそうなものが残っていれば、先にそれを直してもらう。なければ帳尻合わせ（事業主貸・借）
   res = await post('/admin/api/book', {}, A);
-  check(res.body.cash.openSrc === '' && res.body.cash.open === null, 'no trial balance & first year -> unknown, quietly ' + JSON.stringify(res.body.cash));
-  // 前年もマネーフォワードにあれば、前年の仕訳から出す
+  const K = res.body.close.bank;
+  res = await post('/admin/api/bookAdjust', { acct: 'bank', how: 'owner', amount: String(Math.abs(K.diff)) }, A);
+  if (K.cands.length) check(res.status >= 400 && /先に/.test(JSON.stringify(res.body)), 'bank adjust waits for the candidates');
+  else check(res.status === 200 && journals[journals.length - 1].branches[0][K.diff < 0 ? 'creditor' : 'debitor'].account_id === 'A%3D9', 'bank adjust');
+  journals.splice(nj);
+  await db.prepare("DELETE FROM kv WHERE k LIKE 'mfs:%'").run();
+  // 月末でない日は帳尻合わせしない
+  const mid = T.slice(0, 7) + '-02';
+  res = await post('/admin/api/bookClose', { date: mid, cash: '1,000' }, A);
+  check(!res.body.close.monthEnd && res.body.close.cash.counted === 1000, 'mid-month close');
+  res = await post('/admin/api/bookAdjust', { acct: 'cash', how: 'misc', amount: String(Math.abs(res.body.close.cash.diff)) }, A);
+  check(res.status >= 400 && /月末/.test(JSON.stringify(res.body)), 'adjust only at month end');
+  // 自分で入れた1月1日の額が先。空にすると繰り越しに戻る
+  res = await post('/admin/api/bookClose', { open: { cash: '60,000' } }, A);
+  check(res.body.close.cash.open === 60000 && res.body.close.cash.openSrc === 'input' && res.body.close.bank.openSrc === 'mf', 'own opening wins');
+  res = await post('/admin/api/bookClose', { open: { cash: '' } }, A);
+  check(res.body.close.cash.open === 42000 && res.body.close.cash.openSrc === 'mf', 'cleared -> carry-forward again');
+  // 試算表が取れないときは、前年までの仕訳を足して出す（はじめの年は「わかりません」のまま、静かに）
+  opts.noTb = true;
+  await db.prepare("DELETE FROM kv WHERE k IN ('openAuto', 'mfMaster')").run();
+  res = await post('/admin/api/book', {}, A);
+  check(res.body.close.cash.openSrc === '' && res.body.close.cash.open === null && res.body.close.cash.book === null, 'no trial balance & first year -> unknown, quietly ' + JSON.stringify(res.body.close.cash));
   opts.oldTerm = true;
   journals.push({ id: 'OLD1', transaction_date: '2025-12-10', journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D5', value: 7000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 7000, tax_value: 0 }, remark: '現金売上' }] });
-  await db.prepare("DELETE FROM kv WHERE k IN ('cashOpenAuto', 'mfMaster')").run();
+  await db.prepare("DELETE FROM kv WHERE k IN ('openAuto', 'mfMaster')").run();
   res = await post('/admin/api/book', {}, A);
-  check(res.body.cash.openSrc === 'books' && res.body.cash.open === 7000, 'opening from last year journals ' + JSON.stringify(res.body.cash));
+  check(res.body.close.cash.openSrc === 'books' && res.body.close.cash.open === 7000, 'opening from last year journals ' + JSON.stringify(res.body.close.cash));
   journals.splice(journals.findIndex(j => j.id === 'OLD1'), 1);
   opts.noTb = false; opts.oldTerm = false;
-  await db.prepare("DELETE FROM kv WHERE k IN ('cashOpenAuto', 'mfMaster')").run();
-  // 現金：1月1日の残高と、数えた現金を入れると比べられる
-  res = await post('/admin/api/bookCash', { open: '50,000', counted: '30,000' }, A);
-  check(res.body.cash.open === 50000 && res.body.cash.counted === 30000 && res.body.cash.book === 50000 + res.body.cash.net, 'cash balance');
+  await db.prepare("DELETE FROM kv WHERE k IN ('openAuto', 'mfMaster', 'bookClose')").run();
   res = await post('/admin/api/book', {}, A);
   check(res.body.sales.length >= 1 && res.body.sales.some(m => m.diffN > 0), 'sales comparison ' + JSON.stringify(res.body.sales.slice(-1)));
   check(!String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('タキグチ'), 'transfer names not sent');
@@ -338,11 +363,11 @@ try {
   check(jOf('BK5').branches[0].creditor.account_id === 'A%3D10', 'refund to 通信費');
   res = await post('/admin/api/bookFix', { id: 'BK3', kind: 'pair', date: T }, A);
   check(!jOf('BK3') && !res.body.issues.some(x => x.id === 'BK3'), 'meaningless pair deleted');
-  res = await post('/admin/api/bookIgnore', { key: res.body.issues.find(x => x.id === 'BK9' && x.title === '10万円以上の消耗品').key }, A);
-  check(!res.body.issues.some(x => x.id === 'BK9' && x.title === '10万円以上の消耗品'), 'ignore');
+  res = await post('/admin/api/bookIgnore', { key: res.body.notes.find(x => x.id === 'BK9' && x.title === '10万円以上の消耗品').key }, A);
+  check(!res.body.notes.some(x => x.id === 'BK9'), 'ignore');
   check(res.body.hidden === 1, 'hidden count');
   res = await post('/admin/api/bookIgnore', { reset: true }, A);
-  check(res.body.hidden === 0 && res.body.issues.some(x => x.id === 'BK9' && x.title === '10万円以上の消耗品'), 'unhide');
+  check(res.body.hidden === 0 && res.body.notes.some(x => x.id === 'BK9' && x.title === '10万円以上の消耗品'), 'unhide');
   res = await post('/admin/api/bookAi', {}, A);
   const ai1 = res.body.issues.find(x => x.kind === 'acct' && x.id === 'BK8');
   const bkText = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
@@ -580,7 +605,7 @@ try {
   console.log(wk);
   console.log('ALL OK', ok, 'checks');
 } catch (e) {
-  console.error('FAILED after', ok, 'checks:', e.message);
+  console.error('FAILED after', ok, 'checks:', e.message, (e.stack || '').split('\n').slice(1, 3).join(' | '));
   process.exitCode = 1;
 } finally {
   await env.stop();
