@@ -347,6 +347,12 @@
   .goalbar .gnum { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; } .goalbar .gnum b { font-size: 17px; } .goalbar .gnum small { font-size: 11px; color: var(--sub); }
   .goalbar .gnum span { margin-left: auto; font-weight: 700; font-size: 15px; color: var(--green); }
   .goalbar .gtrack { height: 8px; border-radius: 4px; background: #fff; overflow: hidden; margin: 6px 0 4px; } .goalbar .gtrack i { display: block; height: 100%; background: var(--green); border-radius: 4px; }
+  .bulkbox { background: var(--green-l); border-radius: 12px; padding: 10px; margin: 4px 0 8px; }
+  .txr.picked { box-shadow: inset 3px 0 0 var(--green); padding-left: 10px; margin-left: -10px; }
+  .txacts { align-items: center; } .txacts .askbtn { margin: 0 0 0 auto; padding-right: 0; }
+  .txpick { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--green); cursor: pointer; margin-right: 4px; }
+  .txpick input { width: 20px; height: 20px; accent-color: var(--green); flex-shrink: 0; }
+  .txwhy { margin-top: 6px; }
   .custlist { margin-top: 8px; } .custrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
   .custrow .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pvnote { font-size: 12px; color: var(--amber); margin-bottom: 6px; white-space: normal; }
@@ -3417,21 +3423,25 @@ function txHtml() {
   const list = T.list || [];
   const total = Math.max(T.total || 0, list.length);
   let h = `<div class="card" data-key="txcard"><h2>${icon('i-coin')}口座から出たお金 <span class="cnt">まだ登録していないもの ${total}件</span></h2>
-    <div class="sub" style="margin-bottom:6px">${phr('デビットカードの支払いや引き落としです。Claudeのおすすめの科目で、そのまま登録できます。レシートは先でもあとからでも、撮れば同じ支払いにまとめます（二重になりません）。')}</div>`;
+    <div class="sub" style="margin-bottom:6px">${phr('デビットカード・引き落としで、まだ登録していないものです。')}</div>`;
   if (!list.length) return h + '<div class="sub">ありません。すべて登録済みです。</div></div>';
   const bulk = txBulkItems();
-  if (bulk.length >= 2) h += `<button class="btn primary wide" data-act="txSaveAll" style="margin:4px 0 6px">${spark()}おすすめの科目のまま ${bulk.length}件をまとめて登録</button><div class="sub" style="margin-bottom:6px">${phr('Claudeが迷ったもの・レシートと二重になりそうなものは入れていません。')}</div>`;
+  const can = list.filter(txBulkOk).length;
+  if (can >= 2) h += `<div class="bulkbox" data-key="txbulk"><button class="btn primary wide" data-act="txSaveAll" ${bulk.length ? '' : 'disabled'}>${spark()}チェックした${bulk.length}件をまとめて登録</button></div>`;
   h += list.map(t => {
     const sel = S.rcpt.txSel[t.id] || (S.rcpt.txSel[t.id] = { accountId: t.ai ? t.ai.accountId : '', rate: t.ai ? t.ai.rate : '10' });
     if (!sel.accountId && t.ai) { sel.accountId = t.ai.accountId; sel.rate = t.ai.rate; }
-    return `<div class="txr" data-key="tx:${esc(t.id)}"><div class="top"><span class="sub">${jdShort(t.date)}</span><span class="nm">${esc(t.content || '（内容なし）')}</span><span class="am">${yen(t.amount)}</span></div>
+    const ok = can >= 2 && txBulkOk(t);
+    const on = ok && !S.rcpt.txOff[t.id];
+    const why = can >= 2 && !ok && !t.receipt && (t.dupe || t.ai);
+    return `<div class="txr ${on ? 'picked' : ''}" data-key="tx:${esc(t.id)}"><div class="top"><span class="sub">${jdShort(t.date)}</span><span class="nm">${esc(t.content || '（内容なし）')}</span><span class="am">${yen(t.amount)}</span></div>
       ${t.dupe ? `<div class="warn" style="margin-top:6px">${phr(jdShort(t.dupe.date) + 'に「' + t.dupe.method + '」で登録したレシート（' + (t.dupe.payee || 'お店の名前なし') + '）と同じ金額です。同じ支払いなら、ここでは登録しないでください（二重になります）。')}</div>` : ''}
       ${t.receipt ? `<div class="sub"><span class="tag blue">レシートを預かっています</span> ${phr('明細と結びつけて登録します')}</div>` : `
       <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions((T.accounts || []).filter(a => !a.personal), sel.accountId)}${(T.accounts || []).filter(a => a.personal).map(a => `<optgroup label="経費ではないもの"><option value="${esc(a.id)}" ${a.id === sel.accountId ? 'selected' : ''}>${esc(a.name)}（自分のために使ったお金）</option></optgroup>`).join('')}</select>
         <select data-tx="${esc(t.id)}" data-tf="rate" aria-label="消費税" style="width:96px;flex-shrink:0">${['8', '10', 'none'].map(k => `<option value="${k}" ${sel.rate === k ? 'selected' : ''}>${{ '8': '8%', '10': '10%', none: '税なし' }[k]}</option>`).join('')}</select></div>
       ${t.ai ? `<div class="sub aiby" data-appear="txai:${esc(t.id)}">${aiTag('Claudeの見立て')}${phr(t.ai.reason + (t.ai.unsure ? '（明細だけでは分かりにくいので、確かめてください）' : ''))}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
-      <div class="acts"><button class="btn small ${t.dupe ? '' : 'primary'}" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : 'この科目で登録'}</button></div>
-      ${askHtml('tx:' + t.id, 'この明細')}`}
+      <div class="acts txacts">${ok ? `<label class="txpick"><input type="checkbox" data-txpick="${esc(t.id)}" ${on ? 'checked' : ''}>まとめて</label>` : why ? '<span class="tag gray">1件ずつ確認</span>' : ''}<button class="btn small ${t.dupe || on ? '' : 'primary'}" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : on ? 'これだけ登録' : 'この科目で登録'}</button>${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? '' : askHtml('tx:' + t.id, 'この明細')}</div>
+      ${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? askHtml('tx:' + t.id, 'この明細') : ''}`}
     </div>`;
   }).join('');
   if (total > list.length) h += `<div class="sub" style="margin-top:8px">${phr('新しい順に' + list.length + '件を出しています。登録すると、続きが出ます。')}</div>`;
@@ -3587,9 +3597,14 @@ async function rcptSaveAll(b) {
   loadTx();
 }
 // まとめて登録できるもの：科目が決まっていて、Claude が迷っておらず、二重の注意やレシートの預かりがないもの
+function txBulkOk(t) {
+  const sel = S.rcpt.txSel[t.id] || {};
+  return !t.receipt && !t.dupe && !!t.ai && !t.ai.unsure && !!(sel.accountId || t.ai.accountId);
+}
 function txBulkItems() {
   const R = S.rcpt;
-  return ((R.tx && R.tx.list) || []).filter(t => !t.receipt && !t.dupe && t.ai && !t.ai.unsure).map(t => {
+  R.txOff = R.txOff || {};
+  return ((R.tx && R.tx.list) || []).filter(t => txBulkOk(t) && !R.txOff[t.id]).map(t => {
     const sel = R.txSel[t.id] || {};
     return { id: t.id, date: t.date, content: t.content, accountId: sel.accountId || t.ai.accountId, rate: sel.rate || t.ai.rate };
   }).filter(x => x.accountId);
@@ -4054,6 +4069,12 @@ $('view').addEventListener('change', e => {
   if (e.target.id === 'rcptCam' || e.target.id === 'rcptLib') { rcptFiles(e.target); return; }
   if (e.target.id === 'igPhoto') { igPhoto(e.target); return; }
   if (S.tab === 'today') {
+    if (e.target.dataset.txpick && S.rcpt) {
+      S.rcpt.txOff = S.rcpt.txOff || {};
+      if (e.target.checked) delete S.rcpt.txOff[e.target.dataset.txpick]; else S.rcpt.txOff[e.target.dataset.txpick] = true;
+      refresh();
+      return;
+    }
     if (e.target.dataset.tx && S.rcpt && S.rcpt.txSel) {
       const sel = S.rcpt.txSel[e.target.dataset.tx] = S.rcpt.txSel[e.target.dataset.tx] || {};
       sel[e.target.dataset.tf] = e.target.value;
