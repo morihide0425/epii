@@ -1558,7 +1558,7 @@ async function weeklyReport(env, force) {
       if (secs[0].status === 'fulfilled') todos = secs[0].value.items.map(x => plain(x.todo)).filter(Boolean).slice(0, 3);
     } catch (e) { console.error('週のまとめ：分析', e.message); }
   }
-  if (todos.length) lines.push('', '【今週やること】', ...todos.map((t, i) => (i + 1) + '. ' + t));
+  if (todos.length) lines.push('', '【今週やること（Claudeの分析）】', ...todos.map((t, i) => (i + 1) + '. ' + t));
   const url = await adminUrl(env);
   if (url) lines.push('', 'くわしくは管理画面で', url);
   const res = await pushOwner(env, lines.join('\n'));

@@ -861,7 +861,7 @@ async function declineOffer(env, user, id) {
 const ADMIN_COOKIE = 'epii_admin';
 
 // 写真を送る操作だけ、大きな送信を受け付ける（ログインを確かめてから読む）
-const ADMIN_BIG = { rcptRead: 1, rcptSave: 1, igDraft: 1 };
+const ADMIN_BIG = { rcptRead: 1, rcptSave: 1, igDraft: 1, exportCsv: 1 };
 
 async function adminApi(name, request, env, ctx) {
   if (name === 'login') return adminLogin(env, request, await readJson(request));
@@ -926,6 +926,7 @@ const ADMIN_FUNCS = {
   },
   customers: adminCustomers,
   customer: adminCustomer,
+  exportCsv: adminExport,
   saveCustomer: async (env, b) => {
     const key = String(b.key || normPhone(b.phone) || '').slice(0, 60);
     if (!key) fail('お客様が見つかりません。');
@@ -1543,6 +1544,86 @@ async function adminCustomers(env, b) {
   }
   list.sort((a, b) => (b.next ? 1 : 0) - (a.next ? 1 : 0) || (a.next || '').localeCompare(b.next || '') || (b.last || '').localeCompare(a.last || '') || b.total - a.total);
   return { customers: list.slice(0, 500), total: list.length, dupes: q ? [] : dupes };
+}
+
+// CSVの書き出し（Excelで開ける形。電話番号はハイフン付きにして先頭の0が消えないようにする）
+function csvCell(v) {
+  let s = v === undefined || v === null ? '' : String(v);
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function csvText(rows) {
+  return rows.map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+}
+function telText(v) {
+  const p = normPhone(v);
+  if (p.length === 11) return p.slice(0, 3) + '-' + p.slice(3, 7) + '-' + p.slice(7);
+  if (p.length === 10 && /^0[36]/.test(p)) return p.slice(0, 2) + '-' + p.slice(2, 6) + '-' + p.slice(6);
+  if (p.length === 10) return p.slice(0, 3) + '-' + p.slice(3, 6) + '-' + p.slice(6);
+  return p;
+}
+// Squareの会計を、予約ごと・お客様ごとに合計する
+async function paidByRes(env) {
+  const r = await env.DB.prepare(
+    "SELECT link, res_id, cust_key, amount - refunded AS v FROM sq_payments WHERE status = 'COMPLETED' AND amount > refunded AND link IN ('auto','res','cust')"
+  ).all();
+  const byRes = {};
+  const byCust = {};
+  r.results.forEach(p => {
+    if (p.link === 'cust') { if (p.cust_key) byCust[p.cust_key] = (byCust[p.cust_key] || 0) + p.v; }
+    else if (p.res_id) byRes[p.res_id] = (byRes[p.res_id] || 0) + p.v;
+  });
+  return { byRes: byRes, byCust: byCust, any: r.results.length > 0 };
+}
+
+async function adminExport(env, b) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const stamp = today.replace(/-/g, '');
+  const paid = await paidByRes(env);
+  if (b.kind === 'reservations') {
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(b.from || '') ? b.from : '2000-01-01';
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : '2999-12-31';
+    const [rs, s] = await Promise.all([
+      env.DB.prepare('SELECT * FROM reservations WHERE date BETWEEN ? AND ? ORDER BY date, time').bind(from, to).all(),
+      getSettings(env)
+    ]);
+    const sessName = id => (s.sessions[id] && s.sessions[id].name) || DEFAULT_SESSION_NAME[id] || id || '';
+    const head = ['予約日', '曜日', '時間', '時間帯', '状態', '来店', 'お名前', '電話番号', '人数', 'コース', 'ご要望', 'お店のメモ', '受付', '受け付けた日時'];
+    if (paid.any) head.push('会計（Square）');
+    const rows = [head].concat(rs.results.map(r => {
+      const came = r.status !== ST.OK ? '' : r.arrived === 'no' ? '来店なし' : isVisit(r, today) ? '来店' : '予定';
+      const row = [r.date, WD[new Date(r.date + 'T00:00:00Z').getUTCDay()], r.time, sessName(r.session), r.status, came, r.name, telText(r.phone), Number(r.guests) || 0,
+        r.course_name || '', r.note || '', r.memo || '', r.source || '', String(r.created_at || '').slice(0, 16).replace('T', ' ')];
+      if (paid.any) row.push(paid.byRes[r.id] || '');
+      return row;
+    }));
+    const span = from === '2000-01-01' ? 'すべて' : from.replace(/-/g, '') + '-' + to.replace(/-/g, '');
+    return { csv: csvText(rows), name: '予約一覧_' + span + '_' + stamp + '.csv', count: rs.results.length };
+  }
+  const [rows, info] = await Promise.all([allCustomerRows(env), customerInfo(env)]);
+  const grouped = groupCustomers(rows, info);
+  const keys = Array.isArray(b.keys) ? b.keys.slice(0, 5000).map(k => String(k).slice(0, 60)) : null;
+  let list = Object.values(grouped.groups);
+  if (keys) { const want = {}; keys.forEach(k => { want[k] = 1; }); list = list.filter(c => want[c.key]); }
+  // 予約に結びついた会計は予約の持ち主へ、予約なしの会計はまとめ先のお客様へ
+  const spent = {};
+  Object.keys(paid.byRes).forEach(id => { const k = grouped.keyOf[id]; if (k) spent[k] = (spent[k] || 0) + paid.byRes[id]; });
+  Object.keys(paid.byCust).forEach(k => { const t = mergedTarget(info, k); spent[t] = (spent[t] || 0) + paid.byCust[k]; });
+  const head = ['お名前', '電話番号', '来店回数', 'うち予約なしの来店', '初めての来店', '前回の来店', '次回の予約', '来店した人数の合計', 'キャンセル', '来店なし', 'お客様メモ', '予約のときのご要望', '受付'];
+  if (paid.any) head.push('会計の合計（Square）');
+  const out = list.map(c => {
+    const sum = customerSummary(c, info, today);
+    const visits = c.rows.filter(r => isVisit(r, today));
+    const first = visits.length ? visits[visits.length - 1].date : '';
+    const people = visits.reduce((n, r) => n + (Number(r.guests) || 0), 0);
+    const notes = [];
+    c.rows.forEach(r => { if (r.note && notes.indexOf(r.note) < 0 && notes.length < 5) notes.push(r.note); });
+    const row = [sum.name, telText(sum.phone), sum.total, sum.extra, first, sum.last, sum.next, people, sum.cancels, sum.noShows, sum.memo, notes.join(' / '), sum.sources.join('・')];
+    if (paid.any) row.push(spent[c.key] || '');
+    return { row: row, sort: (sum.last || sum.next || '') };
+  });
+  out.sort((a, b2) => b2.row[2] - a.row[2] || b2.sort.localeCompare(a.sort));
+  return { csv: csvText([head].concat(out.map(x => x.row))), name: 'お客様一覧_' + stamp + '.csv', count: out.length };
 }
 
 async function adminCustomer(env, b) {

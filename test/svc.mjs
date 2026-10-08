@@ -93,6 +93,24 @@ try {
   const px = res.body.pays.find(p => p.id === 'PX1');
   check(px && px.link === 'auto' && px.resName === '佐藤 恵' && res.body.resGroups === 1 && res.body.resCount === 2, 'split bill auto ' + JSON.stringify(px));
 
+  // CSVの書き出し
+  await db1.prepare("UPDATE reservations SET note = '=1+1, \"夜\"' WHERE id = 'RT1'").run();
+  res = await post('/admin/api/exportCsv', { kind: 'customers' }, A);
+  let lines = res.body.csv.split('\r\n');
+  check(res.body.name.startsWith('お客様一覧_') && lines[0].startsWith('お名前,電話番号,来店回数') && lines[0].endsWith('会計の合計（Square）'), 'customers csv head ' + lines[0]);
+  const sato = lines.find(l => l.startsWith('佐藤 恵,'));
+  check(sato && sato.includes('090-1111-2222') && sato.includes(',' + past + ',') && sato.endsWith(',12600'), 'customers csv row ' + sato);
+  check(sato.includes('"\'=1+1, ""夜"" / 辛いもの苦手"'), 'csv escaping ' + sato);
+  res = await post('/admin/api/exportCsv', { kind: 'customers', keys: [custKey] }, A);
+  check(res.body.count === 1 && res.body.csv.split('\r\n')[1].startsWith('田中 美咲,'), 'customers csv filtered');
+  res = await post('/admin/api/exportCsv', { kind: 'reservations', from: T, to: T }, A);
+  lines = res.body.csv.split('\r\n');
+  const rt1 = lines.find(l => l.includes('佐藤 恵'));
+  check(res.body.count === 1 && lines[0].startsWith('予約日,曜日,時間,時間帯,状態,来店') && rt1.startsWith(T + ',') && rt1.includes(',ランチ,確定,予定,佐藤 恵,090-1111-2222,2,') && rt1.endsWith(',12600'), 'reservations csv ' + rt1);
+  res = await post('/admin/api/exportCsv', { kind: 'reservations' }, A);
+  check(res.body.count >= 3 && res.body.name.includes('すべて') && res.body.csv.includes(past + ',') && res.body.csv.includes(',来店,'), 'reservations csv all');
+  await db1.prepare("UPDATE reservations SET note = '' WHERE id = 'RT1'").run();
+
   // 売上・経費の分析
   res = await post('/admin/api/money', { period: 'last' }, A);
   check(res.body.hasSales && res.body.hasExpense && res.body.now.sales > 0 && res.body.now.expense > 0, 'money last ' + JSON.stringify(res.body.now));

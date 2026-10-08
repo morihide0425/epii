@@ -20,6 +20,7 @@
     --bg: #F3F2EF; --card: #FFFFFF; --ink: #1F1F1F; --sub: #6F6D69; --faint: #BDBAB4; --line: #E4E2DD; --line2: #D3CFC6;
     --red: #AE3F2C; --red-l: #F7E8E4; --blue: #3F7485; --blue-l: #E6EFF2; --green: #3F7D58; --green-l: #E6F1EA;
     --amber: #9A6A12; --amber-l: #F8EFD9; --gray-l: #E8E6E1;
+    --claude: #D97757; --claude-ink: #A94E2E; --claude-l: #FAEEE8;
     --gothic: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
@@ -42,6 +43,7 @@
   h2 svg { width: 22px; height: 22px; flex-shrink: 0; }
   h2 .cnt { font-size: 12px; color: var(--sub); font-weight: 400; }
   h2 .more { margin-left: auto; font-size: 12px; color: var(--blue); font-weight: 400; background: none; border: 0; padding: 0; }
+  h2 .more svg { width: 15px; height: 15px; stroke: var(--blue); margin: 0 2px 0 0; vertical-align: -3px; }
   h3 { font-size: 13px; margin: 12px 0 6px; color: var(--sub); font-weight: 500; }
   .sub { color: var(--sub); font-size: 12px; }
   .row { display: flex; align-items: center; gap: 8px; }
@@ -237,7 +239,37 @@
   /* Claude・Square・マネーフォワード */
   .ph { display: inline-block; }
   .hl { display: block; }
-  .aitag { display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 11px; line-height: 20px; background: var(--blue-l); color: var(--blue); font-weight: 400; white-space: nowrap; }
+  .aitag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px 0 6px; border-radius: 999px; font-size: 11px; line-height: 20px; background: var(--claude-l); color: var(--claude-ink); font-weight: 400; white-space: nowrap; vertical-align: 1px; }
+  /* Claudeのマーク：出てくるときにくるっと回り、ときどき瞬く。考えているあいだは回り続ける */
+  svg.spark { display: inline-block; width: 14px; height: 14px; flex-shrink: 0; fill: var(--claude) !important; stroke: none !important; transform-origin: 51.7% 48.3%;
+    animation: sp-in .7s cubic-bezier(.2,.9,.3,1.25) both, sp-idle 10s ease-in-out 1.4s infinite; }
+  svg.spark.busy { animation: sp-spin 1.2s cubic-bezier(.6,.05,.4,.95) infinite; }
+  @keyframes sp-in { from { opacity: 0; transform: rotate(-150deg) scale(.2); } to { opacity: 1; transform: none; } }
+  @keyframes sp-idle { 0%, 90%, 100% { transform: none; } 95% { transform: rotate(60deg) scale(1.15); } }
+  @keyframes sp-spin { 0% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(180deg) scale(.78); } 100% { transform: rotate(360deg) scale(1); } }
+  .aitag svg.spark { width: 13px; height: 13px; }
+  h2 svg.spark { width: 20px; height: 20px; }
+  .aiby .aitag { margin-right: 5px; }
+  .aithink { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; color: var(--claude-ink); font-size: 12px; }
+  .aithink svg.spark { width: 16px; height: 16px; }
+  .aithink.long { flex-direction: column; align-items: stretch; gap: 3px; }
+  .aiwalk { display: block; position: relative; height: 23px; }
+  .aiwalk::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; border-bottom: 1px dashed var(--line2); }
+  .aiwalk .trk { position: absolute; left: 0; right: 30px; top: 0; bottom: 1px; }
+  .aiwalk .mv { display: block; position: relative; height: 100%; animation: cl-walk 8s ease-in-out infinite alternate; }
+  @keyframes cl-walk { from { transform: translateX(0); } to { transform: translateX(100%); } }
+  svg.clawd { position: absolute; left: 0; bottom: 0; width: 30px; height: 20.4px; fill: var(--claude); shape-rendering: crispEdges; }
+  .clawd .ce { fill: #1F1F1F; transform-box: fill-box; transform-origin: center; animation: cl-blink 3.6s infinite; }
+  .clawd .l1 { animation: cl-leg .4s steps(1, end) infinite; }
+  .clawd .l2 { animation: cl-leg .4s steps(1, end) -.2s infinite; }
+  @keyframes cl-leg { 0% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+  @keyframes cl-blink { 0%, 92%, 100% { transform: none; } 95% { transform: scaleY(.2); } }
+  .who { display: flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; color: var(--claude-ink); margin-bottom: 1px; }
+  .who svg.spark { width: 12px; height: 12px; }
+  .draft mark.add svg.spark { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
+  .btn svg.spark { width: 15px; height: 15px; }
+  h3 svg.spark { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
+  @media (prefers-reduced-motion: reduce) { svg.spark, svg.spark.busy, .clawd *, .aiwalk .mv { animation: none !important; } }
   .dlabel { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub); margin: 12px 0 6px; flex-wrap: wrap; }
   .dlabel .tools { margin-left: auto; display: flex; gap: 6px; }
   .draft { display: block; width: 100%; border: 1px solid var(--line2); border-radius: 10px; background: #fff; padding: 10px 11px; font-size: 14px; line-height: 1.75; color: var(--ink); line-break: strict; cursor: text; text-align: left; }
@@ -245,8 +277,9 @@
   .draft mark.add { background: none; color: inherit; }
   .draft mark.add .ph { background: #FAF0D7; }
   .addwait { display: inline-block; width: 100%; vertical-align: top; }
-  .aimemo { margin-top: 6px; background: #F1F6F7; border-radius: 10px; padding: 7px 10px 8px; font-size: 12px; line-height: 1.65; color: var(--ink); }
-  .aimemo .mlbl { display: block; font-size: 10px; color: var(--blue); font-weight: 700; }
+  .aimemo { margin-top: 6px; background: #FBF4F0; border-radius: 10px; padding: 7px 10px 8px; font-size: 12px; line-height: 1.65; color: var(--ink); }
+  .aimemo .mlbl { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--claude-ink); font-weight: 700; }
+  .aimemo .mlbl svg.spark { width: 12px; height: 12px; }
   .vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
   .rcbtn { width: 100%; margin-bottom: 12px; }
   .backlink { border: 0; background: none; color: var(--blue); font-size: 13px; padding: 2px 0 8px; display: inline-flex; align-items: center; gap: 2px; }
@@ -365,6 +398,8 @@
     <symbol id="i-receipt" viewBox="0 0 32 32"><path d="M8.4 4.6c5.1-.3 10.2-.3 15.3 0 .3 7.6.3 15.2-.1 22.8l-2.6-1.7-2.6 1.8-2.7-1.8-2.6 1.8-2.6-1.7-2.7 1.7c-.4-7.6-.4-15.3 0-22.9z"/><path d="M12 11.2c2.7-.2 5.4-.2 8 0M12 15.6c2.6-.1 5.3-.1 7.9.1M12 20c1.7-.1 3.3-.1 5 0"/></symbol>
     <symbol id="i-camera" viewBox="0 0 32 32"><path d="M5.2 10.4c1.7-.2 3.3-.2 5-.1l1.8-2.8c2.7-.2 5.3-.2 8 0l1.8 2.8c1.7-.1 3.3-.1 5 .1.4 4.9.4 9.8 0 14.7-6.9.4-13.8.4-20.6 0-.4-4.9-.4-9.8 0-14.7z"/><path d="M16 13c2.6-.1 4.6 2 4.5 4.5-.1 2.5-2.1 4.4-4.6 4.3-2.4-.1-4.3-2.1-4.2-4.5.1-2.4 2-4.2 4.3-4.3z"/></symbol>
     <symbol id="i-coin" viewBox="0 0 32 32"><path d="M16 4.8c6.2-.2 11.3 4.8 11.2 11.1-.1 6.2-5.1 11.2-11.3 11.1-6.1-.1-11-5.1-10.9-11.2.1-6 5-10.8 11-11z"/><path d="M11.9 10.3l4.1 5.5 4.2-5.6M16 15.8v6.4M12.6 16.7c2.3-.1 4.5-.1 6.8 0M12.6 19.5c2.3-.1 4.5-.1 6.8 0"/></symbol>
+    <symbol id="i-claude" viewBox="0 0 100 100"><path d="M88.4 48.3L72.8 51.7L94.8 55.3L98.1 57.6L100.0 60.6L99.6 62.1L94.7 64.6L65.6 58.1L88.9 80.1L89.4 82.6L88.3 84.3L86.6 84.1L84.5 82.6L65.4 67.4L77.1 86.0L77.5 90.0L77.0 91.3L74.4 92.3L72.0 92.0L66.4 84.6L54.9 66.7L51.7 97.3L50.1 99.0L47.6 100.0L44.7 97.8L43.7 95.0L48.9 63.9L34.3 84.0L26.8 91.9L24.9 92.5L22.3 91.0L22.5 88.1L42.3 61.0L17.2 77.2L12.7 78.0L10.5 76.1L11.0 72.5L19.2 66.7L39.6 55.1L39.4 54.0L4.0 52.5L2.3 52.0L-0.1 49.0L0.2 48.3L2.1 46.4L39.0 47.8L10.9 28.6L8.2 25.4L7.7 21.9L10.2 19.0L14.8 19.2L38.7 37.1L39.3 36.7L24.0 9.9L23.3 4.6L25.9 0.9L28.6 -0.1L31.9 0.6L33.6 1.9L41.1 18.5L49.0 33.7L50.4 38.2L51.0 38.2L53.9 7.0L55.8 3.2L58.9 1.7L60.8 2.5L62.8 5.4L57.7 35.3L59.2 34.6L70.7 19.9L77.2 12.9L79.4 11.2L83.4 11.2L86.8 15.8L85.6 20.1L71.7 38.4L68.7 44.2L95.8 39.3L99.3 41.0L99.7 42.4L98.4 45.7Z"/></symbol>
+    <symbol id="i-export" viewBox="0 0 32 32"><path d="M16 4.8c.1 4.8.1 9.6 0 14.4"/><path d="M10.5 13.9l5.5 5.6 5.7-5.7"/><path d="M5.7 19.4c0 2.5.1 4.9.4 7.3 6.6.4 13.3.4 19.9-.1.2-2.3.3-4.7.3-7.1"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 32 32"><path d="M24.8 13.2c-1.2-4.1-4.9-6.9-9.2-6.7-5.2.3-9.1 4.6-8.8 9.8.3 5.1 4.7 9 9.8 8.7 3.6-.2 6.6-2.4 8-5.5"/><path d="M25.4 6.9l-.4 6.5-6.4-.6"/></symbol>
   </defs>
 </svg>
@@ -415,7 +450,7 @@ const S = {
   req: null, drafts: {},
   day: '', cancelFor: '', edit: null, addOpen: false, blockOpen: false, blockType: 'seats', upcoming: null,
   month: '', calOpen: false, planOpen: false, calWarn: '',
-  custQ: '', custList: null, custSel: null, memoEdit: false,
+  custQ: '', custList: null, custSel: null, memoEdit: false, custExport: false,
   custFilter: 'all', custAdd: null, mergeOpen: false, mergeQ: '', dupes: [],
   editCourse: null, quota: null, setPart: 'rules', an: null, anDays: 30, anView: 'dash', ig: null,
   // Claude・Square・マネーフォワード（つながっているものだけ画面に出す）
@@ -1748,7 +1783,8 @@ VIEWS.cust = {
           <button class="btn small" data-act="mergeDupe" data-into="${esc(g[0].key)}" data-from="${esc(g.slice(1).map(c => c.key).join('|'))}" style="margin-top:4px">1人にまとめる</button></div>`).join('')}
       </div>`;
     }
-    h += `<div class="card"><h2>${icon('i-person')}${S.custQ ? '検索結果' : f[1]} <span class="cnt">${list.length}名</span></h2>
+    if (S.custExport) h += custExportHtml(list, f);
+    h += `<div class="card"><h2>${icon('i-person')}${S.custQ ? '検索結果' : f[1]} <span class="cnt">${list.length}名</span>${S.custExport ? '' : `<button class="more" data-act="csvOpen">${icon('i-export')}書き出す</button>`}</h2>
     ${list.length ? list.map(custRow).join('') : '<div class="sub">当てはまるお客様はいません。</div>'}
     </div>
     <div class="sub" style="text-align:center">電話番号が同じ予約をまとめています。電話番号がない予約は、お名前でまとめています。</div>`;
@@ -1767,6 +1803,44 @@ function custRow(c) {
       <div class="m">${when ? `<span class="${c.next ? 'upnext' : ''}">${when}</span>` : ''}${c.cancels ? `<span style="margin-left:8px">取消 ${c.cancels}回</span>` : ''}${!c.phone ? '<span style="margin-left:8px">電話番号なし</span>' : ''}</div>
     </div>
     <span class="chev">›</span></button>`;
+}
+
+// CSVの書き出し（お客様の一覧は、いま表示している絞り込みのまま）
+const CSV_SPANS = [['month', '今月'], ['prev', '先月'], ['year', '今年'], ['lastyear', '去年'], ['all', 'すべて']];
+function csvSpan(v) {
+  const t = today();
+  const y = Number(t.slice(0, 4));
+  const ym = t.slice(0, 7);
+  const last = m => { const p = m.split('-').map(Number); return m + '-' + String(new Date(Date.UTC(p[0], p[1], 0)).getUTCDate()).padStart(2, '0'); };
+  if (v === 'month') return { from: ym + '-01', to: last(ym) };
+  if (v === 'prev') { const p = ym.split('-').map(Number); const pm = p[1] === 1 ? (p[0] - 1) + '-12' : p[0] + '-' + String(p[1] - 1).padStart(2, '0'); return { from: pm + '-01', to: last(pm) }; }
+  if (v === 'year') return { from: y + '-01-01', to: y + '-12-31' };
+  if (v === 'lastyear') return { from: (y - 1) + '-01-01', to: (y - 1) + '-12-31' };
+  return {};
+}
+function custExportHtml(list, f) {
+  const narrowed = S.custQ || f[0] !== 'all';
+  return `<div class="sheet" data-key="cexp" data-appear="cexp">
+    <h2>${icon('i-export')}CSVで書き出す</h2>
+    <div class="sub" style="margin-bottom:8px">${phr('Excelやスプレッドシートで開けます。電話番号も入るので、送り先に気をつけてください。')}</div>
+    <h3>お客様の一覧</h3>
+    <button class="btn wide" data-act="csvCust" ${list.length ? '' : 'disabled'}>${narrowed ? '表示中の' + list.length + '名（' + esc(S.custQ ? '検索結果' : f[1]) + '）' : 'お客様 全' + (S.custTotal || list.length) + '名'}</button>
+    <div class="sub" style="margin-top:4px">${phr('来店回数・前回と次回・メモ・ご要望' + (S.features.square ? '・Squareの会計の合計' : '') + 'が入ります。')}</div>
+    <h3>予約の一覧</h3>
+    <div class="acts" style="margin-top:0">${CSV_SPANS.map(x => `<button class="chip" data-act="csvRes" data-v="${x[0]}">${x[1]}</button>`).join('')}</div>
+    <div class="sub">${phr('日時・状態・来店・人数・コース・ご要望' + (S.features.square ? '・会計' : '') + 'が1予約1行で入ります。')}</div>
+    <button class="btn small ghost" data-act="csvClose" style="margin-top:6px">閉じる</button>
+  </div>`;
+}
+async function csvExport(b, body) {
+  const mo = M.busy(b);
+  try {
+    const r = await api('exportCsv', body);
+    mo.ok(); // 共有メニューは押した直後でないと開けないので、ボタンの動きは待たない
+    if (!r.count) { toast('書き出す内容がありません'); return; }
+    const done = await saveFile(r.name, r.csv);
+    if (done) toast(r.count + '件を書き出しました');
+  } catch (e) { mo.fail(); fail(e); }
 }
 
 function custAddForm() {
@@ -1868,6 +1942,14 @@ ACTIONS.cust = async (a, b) => {
   else if (a === 'closeCust') closeCust();
   else if (a === 'custAddOpen') { S.custAdd = { name: '', tel: '', memo: '', extra: 0 }; refresh(); setTimeout(() => $('caName') && $('caName').focus(), 50); }
   else if (a === 'custAddClose') { S.custAdd = null; refresh(); }
+  else if (a === 'csvOpen') { S.custExport = true; refresh(); }
+  else if (a === 'csvClose') { S.custExport = false; refresh(); }
+  else if (a === 'csvCust') {
+    const f = CUST_FILTERS.find(x => x[0] === S.custFilter) || CUST_FILTERS[0];
+    const narrowed = S.custQ || f[0] !== 'all';
+    await csvExport(b, narrowed ? { kind: 'customers', keys: (S.custList || []).filter(f[2]).map(c => c.key) } : { kind: 'customers' });
+  }
+  else if (a === 'csvRes') await csvExport(b, Object.assign({ kind: 'reservations' }, csvSpan(b.dataset.v)));
   else if (a === 'caExtra') { readCustAdd(); S.custAdd.extra = Math.max(0, S.custAdd.extra + Number(b.dataset.d)); refresh(); }
   else if (a === 'custAddSave') {
     readCustAdd();
@@ -2725,6 +2807,15 @@ function num(v) { return Number(String(v === undefined || v === null ? '' : v).r
 function fmtNum(v) { const n = num(v); return n ? n.toLocaleString() : ''; }
 function jdShort(date) { const p = date.split('-').map(Number); return p[1] + '/' + p[2]; }
 const WAIT = '<span class="waitbar"></span><span class="waitbar short"></span>';
+// Claudeが書いたものに付けるマーク（考えているあいだは回る）
+function spark(busy) { return `<svg class="spark${busy ? ' busy' : ''}" aria-hidden="true"><use href="#i-claude"/></svg>`; }
+function aiTag(label, busy) { return `<span class="aitag">${spark(busy)}${label}</span>`; }
+// 長く待つときは、Claudeのキャラクターが歩く
+const CLAWD = '<svg class="clawd" viewBox="0 0 25 17" aria-hidden="true"><rect x="4" y="0" width="17" height="13"/><rect x="0" y="4" width="25" height="5"/><rect class="ce" x="6" y="2" width="2" height="2"/><rect class="ce" x="17" y="2" width="2" height="2"/><rect class="l1" x="4" y="13" width="2" height="4"/><rect class="l2" x="8" y="13" width="2" height="4"/><rect class="l1" x="15" y="13" width="2" height="4"/><rect class="l2" x="19" y="13" width="2" height="4"/></svg>';
+function aiThink(text, long) {
+  if (long) return `<span class="aithink long"><span class="aiwalk"><span class="trk"><span class="mv">${CLAWD}</span></span></span><span>${phr(text)}</span></span>`;
+  return `<span class="aithink">${spark(true)}<span>${phr(text)}</span></span>`;
+}
 // 文面の欄の高さを中身に合わせる
 function fitAreas() {
   document.querySelectorAll('#view textarea[data-auto]').forEach(t => { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; });
@@ -2745,6 +2836,24 @@ async function toJpeg(file, max, quality) {
   }
 }
 function renderSet() { if (S.tab === 'set') renderWhenIdle('set'); }
+// ファイルを保存する（スマホは共有メニュー＝LINEやファイルに保存、パソコンはダウンロード）
+async function saveFile(name, text) {
+  const blob = new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' });
+  const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  if (coarse && navigator.canShare && typeof File === 'function') {
+    const file = new File([blob], name, { type: 'text/csv' });
+    if (navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return true; }
+      catch (e) { if (e && e.name === 'AbortError') return false; }
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return true;
+}
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); } catch (e) {
     const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
@@ -2783,14 +2892,15 @@ function wantAdd(kind, x, d, fresh) {
 }
 function draftTools(kind, x, d) {
   const add = curAdd(d);
-  return `<div class="dlabel"><span>送る文面</span>${S.features.ai && d.ai && add ? '<span class="aitag">Claudeの下書き</span>' : ''}</div>`;
+  const wait = S.features.ai && d.ai && d.wait[addKey(d)];
+  return `<div class="dlabel"><span>送る文面</span>${S.features.ai && d.ai && (add || wait) ? aiTag('Claudeの一言入り', wait) : ''}</div>`;
 }
 // 文面の下のボタン（Claudeの一言の書き直し・いつもの文面・直した文面を戻す）
 function draftActs(kind, d) {
   const reset = d.edited ? `<button class="btn small" data-act="${kind === 'g' ? 'cresetText' : 'resetText'}">文面を元に戻す</button>` : '';
   const ai = !S.features.ai ? '' : d.ai
     ? '<button class="btn small" data-act="aiAgain">一言を書き直す</button><button class="btn small" data-act="aiOff">いつもの文面にする</button>'
-    : '<button class="btn small" data-act="aiOn">Claudeの一言を足す</button>';
+    : `<button class="btn small" data-act="aiOn">${spark()}Claudeの一言を足す</button>`;
   return reset || ai ? `<div class="draftacts">${reset}${ai}</div>` : '';
 }
 function draftBox(kind, x, d) {
@@ -2801,15 +2911,15 @@ function draftBox(kind, x, d) {
   const p = kind === 'g' ? chgParts(x, d.mode) : parts(x, d);
   const add = curAdd(d);
   const wait = S.features.ai && d.ai && d.wait[addKey(d)];
-  const mid = wait ? '<br><br><span class="addwait">' + WAIT + '</span>'
-    : add ? `<br><br><mark class="add" data-appear="add:${esc(id)}:${hashStr(add)}">${phr(add)}</mark>` : '';
+  const mid = wait ? '<br><br><span class="addwait">' + aiThink('Claudeがご要望と来店の記録を読んで、一言を考えています') + WAIT + '</span>'
+    : add ? `<br><br><mark class="add" data-appear="add:${esc(id)}:${hashStr(add)}">${spark()}${phr(add)}</mark>` : '';
   return `<div class="draft" data-act="editDraft" role="button" tabindex="0" aria-label="送る文面（押すと直せます）">${phr(p.head)}${mid}${phr(p.tail)}</div>`;
 }
 function draftHint(kind, d) {
   const add = curAdd(d);
   const out = [];
   if (!d.editing && !d.edited) out.push('文面を押すと、自由に直せます。');
-  if (add && !d.edited) out.push('色の付いた部分は、ご要望や来店の記録を読んでClaudeが足した一言です。');
+  if (add && !d.edited) out.push('Claudeのマークが付いた色の部分は、ご要望や来店の記録を読んでClaudeが足した一言です（マークは送られません）。');
   if (d.err && S.features.ai && d.ai) out.push(d.err);
   if (kind === 'r') out.push(d.mode === 'offer' ? 'お客様には「確認して返事をする」ボタンが一緒に届きます。' : d.mode === 'ng' ? '' : 'お客様には「予約を確認する」ボタンが一緒に届きます。');
   else out.push(d.mode === 'ok' ? '承認すると、元の予約がこの日時に移ります。' : 'お断りすると、元の予約はそのまま残ります。');
@@ -2877,8 +2987,8 @@ async function loadRcpt() {
 
 function memoHtml(d, r) {
   const memo = d.aiMemos && d.aiMemos[r.id];
-  if (memo) return `<div class="aimemo" data-appear="memo:${esc(r.id)}:${hashStr(memo)}"><span class="mlbl">来店前メモ</span>${phr(memo)}</div>`;
-  if ((d.aiMissing || []).indexOf(r.id) >= 0) return `<div class="aimemo" data-key="mw:${esc(r.id)}"><span class="mlbl">来店前メモ</span>${WAIT}</div>`;
+  if (memo) return `<div class="aimemo" data-appear="memo:${esc(r.id)}:${hashStr(memo)}"><span class="mlbl">${spark()}Claudeの来店前メモ</span>${phr(memo)}</div>`;
+  if ((d.aiMissing || []).indexOf(r.id) >= 0) return `<div class="aimemo" data-key="mw:${esc(r.id)}"><span class="mlbl">${spark(true)}Claudeが来店の記録を読んでいます</span>${WAIT}</div>`;
   return '';
 }
 
@@ -3007,11 +3117,11 @@ function accOptions(list, sel) {
 // Claudeに相談（レシート・口座の明細ごとに、やりとりを覚えておく）
 function askHtml(key, ctxLabel) {
   const k = S.ask[key];
-  if (!k || !k.open) return `<button class="btn small ghost askbtn" data-act="askOpen" data-k="${esc(key)}">${icon('i-leaf')}Claudeに聞く</button>`;
+  if (!k || !k.open) return `<button class="btn small ghost askbtn" data-act="askOpen" data-k="${esc(key)}">${spark()}Claudeに聞く</button>`;
   return `<div class="askbox" data-key="ask:${esc(key)}" data-appear="ask:${esc(key)}">
     <div class="sub" style="margin-bottom:4px">${phr('分からないことを、ふだんの言葉で聞いてください。' + (ctxLabel ? '（' + ctxLabel + 'について聞きます）' : ''))}</div>
-    ${k.thread.map((t, i) => `<div class="ask-q">${esc(t.q)}</div><div class="ask-a" data-appear="aa:${esc(key)}:${i}">${phr(t.a)}${t.accountId ? `<div><button class="btn small" data-act="askUse" data-k="${esc(key)}" data-acc="${esc(t.accountId)}">「${esc(t.account)}」にする</button></div>` : ''}</div>`).join('')}
-    ${k.wait ? `<div class="ask-a">${WAIT}</div>` : ''}
+    ${k.thread.map((t, i) => `<div class="ask-q">${esc(t.q)}</div><div class="ask-a" data-appear="aa:${esc(key)}:${i}"><span class="who">${spark()}Claude</span>${phr(t.a)}${t.accountId ? `<div><button class="btn small" data-act="askUse" data-k="${esc(key)}" data-acc="${esc(t.accountId)}">「${esc(t.account)}」にする</button></div>` : ''}</div>`).join('')}
+    ${k.wait ? `<div class="ask-a">${aiThink('Claudeが考えています')}</div>` : ''}
     <div class="row" style="margin-top:6px"><input type="text" id="askIn-${esc(key)}" data-ask="${esc(key)}" value="${esc(k.input || '')}" placeholder="例）洗剤はどの科目？"><button class="btn small primary" data-act="askSend" data-k="${esc(key)}" style="flex-shrink:0">聞く</button></div>
     ${k.thread.length ? '' : `<div class="acts">${['これは何の科目？', 'デビットと現金の違いは？', '税率はどれ？'].map(x => `<button class="chip" data-act="askPreset" data-k="${esc(key)}" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>`}
     <button class="btn small ghost" data-act="askClose" data-k="${esc(key)}">閉じる</button>
@@ -3052,7 +3162,7 @@ function rcptQueueItem(q, R) {
   const f = q.form;
   const head = `<img src="${q.img}" alt="撮ったレシート">`;
   if (q.state === 'wait' || q.state === 'reading') {
-    return `<div class="rq" data-key="rq:${q.id}"><div class="rphoto">${head}<div style="flex:1;min-width:0">${WAIT}<div class="sub" style="margin-top:6px">${q.state === 'wait' ? '順番を待っています' : phr('金額・日付・お店の名前を読んでいます')}</div></div></div></div>`;
+    return `<div class="rq" data-key="rq:${q.id}"><div class="rphoto">${head}<div style="flex:1;min-width:0">${q.state === 'wait' ? '<div class="sub" style="margin-bottom:6px">順番を待っています</div>' : aiThink('Claudeが金額・日付・お店の名前を読んでいます')}${WAIT}</div></div></div>`;
   }
   if (q.state === 'error') {
     return `<div class="rq" data-key="rq:${q.id}"><div class="rphoto">${head}<div style="flex:1;min-width:0"><div class="warn" style="margin-top:0">${phr(q.err)}</div>
@@ -3082,7 +3192,7 @@ function rcptQueueItem(q, R) {
     ${pay ? `<div class="sub">${phr(pay.help)}</div>` : ''}
     <label class="f" for="rf-acc-${id}">何に使った？（勘定科目）</label>
     <select id="rf-acc-${id}" data-qid="${id}" data-rf="accountId" class="${uns('account')}">${accOptions(R.accounts, f.accountId)}</select>
-    ${f.reason ? `<div class="sub"><span class="aitag" style="margin-right:4px">Claude</span>${phr(f.reason)}</div>` : ''}
+    ${f.reason ? `<div class="sub aiby">${aiTag('Claudeの見立て')}${phr(f.reason)}</div>` : ''}
     ${askHtml(id, 'このレシート')}
     <div class="grid2"><div><label class="f" for="rf-rate-${id}">消費税</label><select id="rf-rate-${id}" data-qid="${id}" data-rf="rate" class="${uns('rate')}">${['8', '10', 'mixed', 'none'].map(k => `<option value="${k}" ${f.rate === k ? 'selected' : ''}>${RATE_LABEL[k]}</option>`).join('')}</select></div>
       <div><label class="f" for="rf-inv-${id}">登録番号</label><input type="text" id="rf-inv-${id}" data-qid="${id}" data-rf="invoiceNo" value="${esc(f.invoiceNo || '')}" placeholder="T＋13桁（なければ空）"></div></div>
@@ -3105,7 +3215,7 @@ function txHtml() {
       ${t.receipt ? `<div class="sub"><span class="tag blue">レシートを預かっています</span> ${phr('明細と結びつけて登録します')}</div>` : `
       <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions(T.accounts || [], sel.accountId)}</select>
         <select data-tx="${esc(t.id)}" data-tf="rate" aria-label="消費税" style="width:96px;flex-shrink:0">${['8', '10', 'none'].map(k => `<option value="${k}" ${sel.rate === k ? 'selected' : ''}>${{ '8': '8%', '10': '10%', none: '税なし' }[k]}</option>`).join('')}</select></div>
-      ${t.ai ? `<div class="sub" data-appear="txai:${esc(t.id)}"><span class="aitag" style="margin-right:4px">Claude</span>${phr(t.ai.reason + (t.ai.unsure ? '（明細だけでは分かりにくいので、確かめてください）' : ''))}</div>` : S.rcpt.txWait ? `<div class="sub">${WAIT}</div>` : ''}
+      ${t.ai ? `<div class="sub aiby" data-appear="txai:${esc(t.id)}">${aiTag('Claudeの見立て')}${phr(t.ai.reason + (t.ai.unsure ? '（明細だけでは分かりにくいので、確かめてください）' : ''))}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
       <div class="acts"><button class="btn small primary" data-act="txSave" data-id="${esc(t.id)}">この科目で登録</button></div>
       ${askHtml('tx:' + t.id, 'この明細')}`}
     </div>`;
@@ -3124,7 +3234,7 @@ function rcptHtml() {
       <div class="sub" style="margin-top:8px">${phr('分からないことは、レシートごとの「Claudeに聞く」で相談できます。')}</div>
       <input type="file" id="rcptCam" accept="image/*" capture="environment" class="vh" tabindex="-1"><input type="file" id="rcptLib" accept="image/*" multiple class="vh" tabindex="-1"></div>`;
   if (R.queue.length) {
-    h += `<div class="card" data-key="rqueue"><h2>読み取ったレシート <span class="aitag">Claudeの読み取り</span><span class="cnt" style="margin-left:auto">${R.queue.length}枚${reading ? '（読み取り中 ' + reading + '）' : ''}</span></h2>
+    h += `<div class="card" data-key="rqueue"><h2>読み取ったレシート ${aiTag('Claudeの読み取り', reading > 0)}<span class="cnt" style="margin-left:auto">${R.queue.length}枚${reading ? '（読み取り中 ' + reading + '）' : ''}</span></h2>
       ${R.queue.map(q => rcptQueueItem(q, R)).join('')}
       ${oks.length >= 2 ? `<button class="btn primary wide" data-act="rqSaveAll" style="margin-top:12px">「このまま登録できます」の${oks.length}枚をまとめて登録</button>` : ''}
       <div class="sub" style="margin-top:8px">${phr('科目は、これまでにマネーフォワードに登録したお店に合わせて選んでいます。')}</div></div>`;
@@ -3308,8 +3418,8 @@ function ensureSection(sec) {
 function aiSectionHtml(sec, title) {
   if (!S.features.ai) return '';
   const x = S.ai && S.ai[sec];
-  let h = `<div class="card insights" data-key="ai:${sec}"><h2>${icon('i-leaf')}${title || '気づきとやること'} <span class="aitag">Claudeの分析</span></h2>`;
-  if (S.aiWait[sec]) h += `<div class="aiwaitbox" data-key="aw:${sec}">${WAIT}${WAIT}<div class="sub">${phr('Claudeが' + SEC_LABEL[sec] + 'の数字を読んでいます（1分ほどかかります）')}</div></div>`;
+  let h = `<div class="card insights" data-key="ai:${sec}"><h2>${icon('i-leaf')}${title || '気づきとやること'} ${aiTag('Claudeの分析', !!S.aiWait[sec])}</h2>`;
+  if (S.aiWait[sec]) h += `<div class="aiwaitbox" data-key="aw:${sec}">${aiThink('Claudeが' + SEC_LABEL[sec] + 'の数字を読んでいます（1分ほどかかります）', true)}${WAIT}</div>`;
   if (S.aiErr[sec]) h += `<div class="warn">${phr(S.aiErr[sec])}</div>`;
   if (x && x.items && x.items.length) {
     h += x.items.map((it, i) => `<div class="ins ${it.tone}" data-appear="ai:${sec}:${esc(x.at)}:${i}"><span class="ic">${INSIGHT_ICON[it.tone]}</span><div><b>${phr(it.title)}</b><div class="sub">${phr(it.body)}</div>${it.todo ? `<div class="todo">${phr('やること：' + it.todo)}</div>` : ''}</div></div>`).join('');
@@ -3320,9 +3430,9 @@ function aiSectionHtml(sec, title) {
 // 分析のところで Claude と話す（やりとりはこの画面を開いているあいだだけ覚える）
 function chatHtml() {
   const c = S.chat;
-  let h = `<div class="card" data-key="chat"><h2>${icon('i-leaf')}Claudeと話す <span class="aitag">Claude</span></h2>
+  let h = `<div class="card" data-key="chat"><h2>${spark(c.wait)}Claudeと話す</h2>
     <div class="sub" style="margin-bottom:4px">${phr('売上・経費・予約・Instagramの数字について、ふだんの言葉で聞けます。やりとりは、この画面を開いているあいだだけ覚えています。')}</div>`;
-  h += c.thread.map((t, i) => `<div class="ask-q">${esc(t.q)}</div><div class="ask-a" data-appear="chat:${i}:${hashStr(t.a)}">${t.a ? phr(t.a) : WAIT}${t.remember ? `<div class="remember"><span class="sub">${phr('覚えておくとよいこと：' + t.remember)}</span><button class="btn small" data-act="chatRemember" data-i="${i}" ${t.saved ? 'disabled' : ''}>${t.saved ? 'メモに足しました' : 'メモに足す'}</button></div>` : ''}</div>`).join('');
+  h += c.thread.map((t, i) => `<div class="ask-q">${esc(t.q)}</div><div class="ask-a" data-appear="chat:${i}:${hashStr(t.a)}">${t.a ? '<span class="who">' + spark() + 'Claude</span>' + phr(t.a) : aiThink('Claudeが数字を見ています', true)}${t.remember ? `<div class="remember"><span class="sub">${phr('覚えておくとよいこと：' + t.remember)}</span><button class="btn small" data-act="chatRemember" data-i="${i}" ${t.saved ? 'disabled' : ''}>${t.saved ? 'メモに足しました' : 'メモに足す'}</button></div>` : ''}</div>`).join('');
   h += `<div class="row" style="margin-top:8px"><input type="text" id="chatIn" value="${esc(c.input)}" placeholder="例）先月より売上が落ちたのはなぜ？"><button class="btn small primary" data-act="chatSend" style="flex-shrink:0">聞く</button></div>`;
   if (!c.thread.length) h += `<div class="acts">${['先月と比べてどう？', '空いている席を埋めるには？', '食材費を下げるには？'].map(x => `<button class="chip" data-act="chatPreset" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
   else h += '<button class="btn small ghost" data-act="chatReset" style="margin-top:6px">新しく話す</button>';
@@ -3383,7 +3493,7 @@ function dashHtml() {
   if (S.features.ai) {
     h += chatHtml();
     const secs = ['booking', 'ig'].concat(S.features.square || S.features.mf ? ['money'] : []);
-    h += `<div class="card"><h2>${icon('i-leaf')}分野ごとの気づき</h2>${secs.map(sec => {
+    h += `<div class="card"><h2>${icon('i-leaf')}分野ごとの気づき ${aiTag('Claudeの分析')}</h2>${secs.map(sec => {
       const x = S.ai[sec];
       const it = x && x.items && x.items[0];
       return `<button class="secrow" data-act="anView" data-v="${sec === 'booking' ? 'site' : sec}"><div style="flex:1;min-width:0"><b>${SEC_LABEL[sec]}</b><div class="sub">${it ? phr(plainJa(it.title)) : '開くと、Claudeが数字を読みます'}</div></div><span class="chev">›</span></button>`;
@@ -3545,7 +3655,8 @@ async function igDelete(b) {
 function igDraftHtml() {
   if (!S.features.ai) return '';
   const g = S.igd;
-  let h = `<div class="card" data-key="igd"><h2>${icon('i-pen')}投稿の文案 <span class="aitag">Claude</span></h2>`;
+  const busy = !!g && !!g.wait[g.sel + '|' + g.kind];
+  let h = `<div class="card" data-key="igd"><h2>${icon('i-pen')}投稿の文案 ${aiTag('Claudeの文案', busy)}</h2>`;
   if (!g) return h + WAIT + '</div>';
   const opts = g.list.map(o => ({ key: o.date + ':' + o.session, label: jdShort(o.date) + '（' + WD[weekday(o.date)] + '）' + o.label, tag: '空き' + o.left + '席' }))
     .concat([{ key: 'free', label: 'ふだんの投稿', tag: '' }]);
@@ -3559,7 +3670,7 @@ function igDraftHtml() {
   const dr = g.drafts[g.sel] || {};
   const text = dr[g.kind];
   const wk = g.sel + '|' + g.kind;
-  if (g.wait[wk]) h += `<div class="igtext" data-key="igw">${WAIT}${WAIT}<div class="sub">${phr('Claudeがこれまでの投稿を読んで書いています')}</div></div>`;
+  if (g.wait[wk]) h += `<div class="igtext" data-key="igw">${aiThink('Claudeがこれまでの投稿を読んで書いています', true)}${WAIT}</div>`;
   else if (text) {
     const editing = g.editing === wk;
     h += `<div data-key="igbox">${editing
@@ -3569,7 +3680,7 @@ function igDraftHtml() {
       <div class="acts"><button class="btn primary small" data-act="igCopy">文をコピー</button>${g.kind === 'story' && S.liffUrl ? `<button class="btn small" data-act="copyUrl" data-v="${esc(S.liffUrl + '?src=ig-story')}">予約URLをコピー</button>` : ''}<button class="btn small" data-act="igAgain">書き直す</button><button class="btn small ghost" data-act="igDel">消す</button></div></div>`;
   } else h += `<button class="btn primary wide" data-act="igMake" style="margin-top:10px">${{ story: 'ストーリー', post: '投稿', reel: 'リール' }[g.kind]}の文案を作る</button>`;
   if (g.err) h += `<div class="warn">${phr(g.err)}</div>`;
-  if (g.style && g.style.length) h += `<h3>これまでの投稿から読んだ書き方</h3><div class="stylebox">${g.style.map(x => `<span class="hl">・${phr(x)}</span>`).join('')}</div>`;
+  if (g.style && g.style.length) h += `<h3>${spark()}Claudeが読んだ、これまでの投稿の書き方</h3><div class="stylebox">${g.style.map(x => `<span class="hl">・${phr(x)}</span>`).join('')}</div>`;
   return h + '</div>';
 }
 
