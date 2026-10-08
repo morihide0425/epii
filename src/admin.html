@@ -1483,7 +1483,7 @@ ACTIONS.today = async (a, b) => {
   }
   if (a === 'rcptForce') {
     if (!confirm('口座の明細を待たずに登録しますか？（あとで明細が届いたら、マネーフォワードで二重になっていないか確かめてください）')) return;
-    try { const r = await api('rcptForce', { id: b.dataset.id }); S.rcptInfo.list = r.list; refresh(); toast('登録しました'); } catch (e) { fail(e); }
+    try { const r = await api('rcptForce', { id: b.dataset.id }); S.rcptInfo.list = r.list; refresh(); toast(r.matched ? '口座の明細が見つかったので、結びつけました' : '登録しました'); } catch (e) { fail(e); }
     return;
   }
   if (a === 'txSave') { await txSave(b); return; }
@@ -3212,11 +3212,12 @@ function txHtml() {
     const sel = S.rcpt.txSel[t.id] || (S.rcpt.txSel[t.id] = { accountId: t.ai ? t.ai.accountId : '', rate: t.ai ? t.ai.rate : '10' });
     if (!sel.accountId && t.ai) { sel.accountId = t.ai.accountId; sel.rate = t.ai.rate; }
     return `<div class="txr" data-key="tx:${esc(t.id)}"><div class="top"><span class="sub">${jdShort(t.date)}</span><span class="nm">${esc(t.content || '（内容なし）')}</span><span class="am">${yen(t.amount)}</span></div>
+      ${t.dupe ? `<div class="warn" style="margin-top:6px">${phr(jdShort(t.dupe.date) + 'に「' + t.dupe.method + '」で登録したレシート（' + (t.dupe.payee || 'お店の名前なし') + '）と同じ金額です。同じ支払いなら、ここでは登録しないでください（二重になります）。')}</div>` : ''}
       ${t.receipt ? `<div class="sub"><span class="tag blue">レシートを預かっています</span> ${phr('明細と結びつけて登録します')}</div>` : `
       <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions(T.accounts || [], sel.accountId)}</select>
         <select data-tx="${esc(t.id)}" data-tf="rate" aria-label="消費税" style="width:96px;flex-shrink:0">${['8', '10', 'none'].map(k => `<option value="${k}" ${sel.rate === k ? 'selected' : ''}>${{ '8': '8%', '10': '10%', none: '税なし' }[k]}</option>`).join('')}</select></div>
       ${t.ai ? `<div class="sub aiby" data-appear="txai:${esc(t.id)}">${aiTag('Claudeの見立て')}${phr(t.ai.reason + (t.ai.unsure ? '（明細だけでは分かりにくいので、確かめてください）' : ''))}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
-      <div class="acts"><button class="btn small primary" data-act="txSave" data-id="${esc(t.id)}">この科目で登録</button></div>
+      <div class="acts"><button class="btn small ${t.dupe ? '' : 'primary'}" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : 'この科目で登録'}</button></div>
       ${askHtml('tx:' + t.id, 'この明細')}`}
     </div>`;
   }).join('');
@@ -3332,6 +3333,7 @@ async function rcptDone(ids) {
 function savedText(q) {
   const r = q.result || {};
   if (r.waiting) return yen(num(q.form.amount)) + 'を預かりました。口座の明細が届いたら登録します';
+  if (r.merged) return '口座の明細から登録済みの仕訳（' + r.matched + '）に、レシートの写真と内容をまとめました（仕訳は1つのままです）';
   if (r.matched) return '口座の明細（' + r.matched + '）と結びつけて登録しました';
   return yen(num(q.form.amount)) + 'を登録しました';
 }

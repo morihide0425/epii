@@ -733,6 +733,51 @@ async function mfFindTx(env, amount, date) {
   list.sort((a, b) => Math.abs(diffDays(date, a.date)) - Math.abs(diffDays(date, b.date)));
   return list[0] || null;
 }
+// 口座の明細から「もう登録してある」仕訳を探す（明細のボタンやマネーフォワードで先に登録したもの）。
+// 口座の側（貸方）の合計がレシートの金額と同じで、まだほかのレシートと結びついていないもの
+async function mfFindJournaled(env, amount, date) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const end = addDays(date, 7) > today ? today : addDays(date, 7);
+  const j = await mfApi(env, 'GET', '/journals', { start_date: addDays(date, -2), end_date: end, per_page: 200 });
+  const used = {};
+  (await env.DB.prepare("SELECT journal_id FROM receipts WHERE status = 'ok' AND journal_id != ''").all()).results.forEach(r => { used[r.journal_id] = 1; });
+  const total = jr => (jr.branches || []).reduce((a, br) => a + (br.creditor ? (Number(br.creditor.value) || 0) : 0), 0);
+  const list = (j.journals || []).filter(jr => jr.transaction_id && !used[jr.id] && total(jr) === amount);
+  list.sort((a, b) => Math.abs(diffDays(date, a.transaction_date)) - Math.abs(diffDays(date, b.transaction_date)));
+  return list[0] || null;
+}
+// 仕訳の中身を、レシートの内容（科目・税率・摘要・登録番号）に書き換える。口座の側はそのまま
+async function mfRewrite(env, m, jid, f) {
+  const g = await mfApi(env, 'GET', '/journals/' + encodeURIComponent(jid));
+  const jr = g.journal || {};
+  const cr = ((jr.branches || [])[0] || {}).creditor || {};
+  const parts = f.rate === 'mixed' ? [['8', f.amount8], ['10', f.amount - f.amount8]] : [[f.rate, f.amount]];
+  await mfApi(env, 'PUT', '/journals/' + encodeURIComponent(jid), null, { journal: {
+    transaction_date: jr.transaction_date || f.date, journal_type: jr.journal_type || 'journal_entry',
+    memo: [jr.memo || '', f.invoice ? '登録番号 ' + f.invoice : ''].filter(Boolean).join('・'),
+    branches: parts.map(p => {
+      const deb = { account_id: f.accountId, value: p[1] };
+      const t = pickTax(m.taxes, p[0]);
+      if (t) deb.tax_id = t;
+      if (f.invoice) deb.invoice_kind = 'INVOICE_KIND_QUALIFIED';
+      const c = { account_id: cr.account_id, value: p[1] };
+      if (cr.sub_account_id) c.sub_account_id = cr.sub_account_id;
+      return { debitor: deb, creditor: c, remark: f.remark };
+    })
+  } });
+}
+// 口座の明細とレシートを結びつける。まだ登録していない明細があればそこから仕訳を作り、
+// 先に登録してあればその仕訳をレシートの内容に直す（どちらでも仕訳は1つだけ）
+async function mfLinkReceipt(env, m, f) {
+  const tx = await mfFindTx(env, f.amount, f.date);
+  if (tx) { const res = await mfFromTx(env, m, tx, f); return Object.assign(res, { matched: clean(tx.content, 40) }); }
+  const jr = await mfFindJournaled(env, f.amount, f.date);
+  if (!jr) return null;
+  let check = '';
+  try { await mfRewrite(env, m, jr.id, f); } catch (e) { check = '登録済みの仕訳に写真は付けましたが、科目や税率は書き換えられませんでした。マネーフォワードで確かめてください。'; }
+  const remark = ((jr.branches || [])[0] || {}).remark || '';
+  return { jid: jr.id, check: check, matched: clean(remark || '登録済みの明細', 40), merged: true };
+}
 // 明細から仕訳を作る（口座の科目はマネーフォワードが決める）。8%と10%が混ざるときは、あとで2行に分ける
 async function mfFromTx(env, m, tx, f) {
   const body = { transaction_id: tx.id, account_id: f.accountId, remark: f.remark };
@@ -748,23 +793,8 @@ async function mfFromTx(env, m, tx, f) {
   }
   let check = '';
   if (jid && f.rate === 'mixed') {
-    try {
-      const g = await mfApi(env, 'GET', '/journals/' + encodeURIComponent(jid));
-      const jr = g.journal || {};
-      const cr = ((jr.branches || [])[0] || {}).creditor || {};
-      const parts = [['8', f.amount8], ['10', f.amount - f.amount8]];
-      await mfApi(env, 'PUT', '/journals/' + encodeURIComponent(jid), null, { journal: {
-        transaction_date: jr.transaction_date || tx.date, journal_type: jr.journal_type || 'journal_entry', memo: jr.memo || f.memo || '',
-        branches: parts.map(p => {
-          const deb = { account_id: f.accountId, value: p[1] };
-          const t = pickTax(m.taxes, p[0]);
-          if (t) deb.tax_id = t;
-          const c = { account_id: cr.account_id, value: p[1] };
-          if (cr.sub_account_id) c.sub_account_id = cr.sub_account_id;
-          return { debitor: deb, creditor: c, remark: f.remark };
-        })
-      } });
-    } catch (e) { check = '8%と10%の分け方は登録できませんでした。マネーフォワードで直してください。'; }
+    try { await mfRewrite(env, m, jid, Object.assign({}, f, { date: tx.date })); }
+    catch (e) { check = '8%と10%の分け方は登録できませんでした。マネーフォワードで直してください。'; }
   }
   return { jid: jid, check: check };
 }
@@ -941,9 +971,10 @@ async function adminRcptSave(env, b) {
   let res = { jid: '', check: '' };
   let waiting = false;
   let matched = '';
+  let merged = false;
   if (f.pay === 'debit') {
-    const tx = await mfFindTx(env, f.amount, f.date);
-    if (tx) { res = await mfFromTx(env, m, tx, f); matched = clean(tx.content, 40); }
+    const link = await mfLinkReceipt(env, m, f);
+    if (link) { res = link; matched = link.matched; merged = !!link.merged; }
     else waiting = true;
   } else {
     res = await rcptJournal(env, m, f);
@@ -958,7 +989,7 @@ async function adminRcptSave(env, b) {
     ]);
   } else {
     const attached = await mfAttach(env, res.jid, f.date, b.image);
-    const row = rcptRow(id, f, 'ok', res.jid, { matched: matched });
+    const row = rcptRow(id, f, 'ok', res.jid, { matched: matched, merged: merged });
     await env.DB.prepare(row[0]).bind(...row[1]).run();
     res.attached = attached;
   }
@@ -968,7 +999,7 @@ async function adminRcptSave(env, b) {
     await kvPut(env, 'rcptPay', remember);
   }
   await mfTouched(env, f.date);
-  return { check: res.check, attached: !!res.attached, waiting: waiting, matched: matched, list: await rcptList(env) };
+  return { check: res.check, attached: !!res.attached, waiting: waiting, matched: matched, merged: merged, list: await rcptList(env) };
 }
 
 // 明細を待っているレシートを、届いた明細と結びつけて登録する（画面を開いたとき・定期実行）
@@ -982,13 +1013,12 @@ async function rcptMatchWaiting(env) {
     const d = JSON.parse(r.data || '{}');
     const f = d.form;
     if (!f) continue;
-    const tx = await mfFindTx(env, f.amount, f.date);
-    if (!tx) continue;
-    const res = await mfFromTx(env, m, tx, f);
+    const res = await mfLinkReceipt(env, m, f);
+    if (!res) continue;
     const ph = await env.DB.prepare('SELECT img FROM receipt_photos WHERE id = ?').bind(r.id).first();
     await mfAttach(env, res.jid, f.date, ph ? ph.img : '');
     await env.DB.batch([
-      env.DB.prepare("UPDATE receipts SET status = 'ok', journal_id = ?, data = ? WHERE id = ?").bind(res.jid, JSON.stringify(Object.assign(d, { matched: clean(tx.content, 40) })), r.id),
+      env.DB.prepare("UPDATE receipts SET status = 'ok', journal_id = ?, data = ? WHERE id = ?").bind(res.jid, JSON.stringify(Object.assign(d, { matched: res.matched, merged: !!res.merged })), r.id),
       env.DB.prepare('DELETE FROM receipt_photos WHERE id = ?').bind(r.id)
     ]);
     await mfTouched(env, f.date);
@@ -1002,6 +1032,18 @@ async function adminRcptForce(env, b) {
   if (!r) fail('レシートが見つかりません。画面を更新してください。');
   const m = await mfMaster(env);
   const d = JSON.parse(r.data || '{}');
+  // 押す直前にもう一度、口座の明細（登録済みのものも）を探す。見つかれば新しい仕訳は作らない
+  const link = await mfLinkReceipt(env, m, d.form);
+  if (link) {
+    const ph0 = await env.DB.prepare('SELECT img FROM receipt_photos WHERE id = ?').bind(r.id).first();
+    await mfAttach(env, link.jid, d.form.date, ph0 ? ph0.img : '');
+    await env.DB.batch([
+      env.DB.prepare("UPDATE receipts SET status = 'ok', journal_id = ?, data = ? WHERE id = ?").bind(link.jid, JSON.stringify(Object.assign(d, { matched: link.matched, merged: !!link.merged })), r.id),
+      env.DB.prepare('DELETE FROM receipt_photos WHERE id = ?').bind(r.id)
+    ]);
+    await mfTouched(env, d.form.date);
+    return { matched: link.matched, list: await rcptList(env) };
+  }
   const bank = m.accounts.find(a => a.name === '普通預金');
   if (!bank) fail('マネーフォワードに「普通預金」の科目が見つかりませんでした。');
   const parts = d.form.rate === 'mixed' ? [['8', d.form.amount8], ['10', d.form.amount - d.form.amount8]] : [[d.form.rate, d.form.amount]];
@@ -1061,6 +1103,13 @@ async function adminMfTx(env, b) {
   const waits = (await env.DB.prepare("SELECT amount FROM receipts WHERE status = 'wait'").all()).results.map(r => r.amount);
   list = list.slice(0, 30);
   list.forEach(t => { t.receipt = waits.indexOf(t.amount) >= 0; });
+  // 現金・自分のお金で登録したレシートと同じ金額・近い日付の明細は、同じ支払いかもしれない（二重の登録に注意）
+  const oks = (await env.DB.prepare("SELECT date, amount, payee, method, data FROM receipts WHERE status = 'ok' AND date >= ?").bind(addDays(today, -70)).all()).results
+    .filter(r => { try { return JSON.parse(r.data || '{}').form.pay !== 'debit'; } catch (e) { return false; } });
+  list.forEach(t => {
+    const r = oks.find(x => x.amount === t.amount && diffDays(x.date, t.date) >= -2 && diffDays(x.date, t.date) <= 7);
+    if (r) t.dupe = { date: r.date, payee: r.payee || '', method: r.method || '' };
+  });
   const expense = await expenseOptions(env, m);
   // Claude の科目の提案（作ってあるものは使い回す）
   const keys = list.map(t => 'tx:' + t.id);

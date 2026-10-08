@@ -194,6 +194,29 @@ try {
   check(calls.ai.length === nAi, 'suggestions cached');
   res = await post('/admin/api/mfTxSave', { id: nt.id, date: nt.date, content: nt.content, accountId: nt.ai.accountId, rate: nt.ai.rate }, A);
   check(txs.find(t => t.id === 'TX%3D2').journalizing_status === 'registered', 'bank line registered');
+  // 先に口座の明細を登録してから、同じ支払いのレシートを撮った：新しい仕訳は作らず、登録済みの仕訳に写真と内容をまとめる
+  const txj = journals.find(x => x.transaction_id === 'TX%3D2');
+  const nJ3 = journals.length;
+  const vouchers0 = calls.mf.filter(c => c.startsWith('POST /vouchers')).length;
+  const tel = (await post('/admin/api/rcptRead', { image: img, type: 'image/jpeg' }, A)).body.accounts.find(a => a.name === '通信費');
+  res = await post('/admin/api/rcptSave', { date: nt.date, amount: 5500, payee: 'NTT西日本', memo: '電話代', accountId: tel.id, pay: 'debit', rate: '10', invoiceNo: 'T9999999999999', image: img }, A);
+  check(res.body.merged && !res.body.waiting && journals.length === nJ3 && calls.mf.filter(c => c.startsWith('POST /vouchers')).length === vouchers0 + 1, 'receipt after bank line: merged, no duplicate ' + JSON.stringify(res.body).slice(0, 160));
+  check(txj.branches[0].remark === 'NTT西日本 電話代' && txj.branches[0].debitor.invoice_kind === 'INVOICE_KIND_QUALIFIED' && txj.branches[0].creditor.account_id === 'A%3D9', 'merged journal rewritten ' + JSON.stringify(txj.branches));
+  // 同じ金額のレシートがもう1枚：その仕訳はもう使ったので、新しい明細を待つ
+  res = await post('/admin/api/rcptSave', { date: nt.date, amount: 5500, payee: 'NTT西日本', memo: '電話代', accountId: tel.id, pay: 'debit', rate: '10', image: img }, A);
+  check(res.body.waiting && journals.length === nJ3, 'same journal not used twice');
+  const wid2 = res.body.list.items.find(x => x.status === 'wait').id;
+  txs.push({ id: 'TX%3D8', date: nt.date, value: 5500, side: 'EXPENSE', content: 'NTTﾋｶﾞｼﾆﾎﾝ', journalizing_status: 'none' });
+  res = await post('/admin/api/mfTxSave', { id: 'TX%3D8', date: nt.date, content: 'NTT', accountId: tel.id, rate: '10' }, A);
+  const nJ4 = journals.length;
+  res = await post('/admin/api/rcptForce', { id: wid2 }, A);
+  check(res.body.matched && res.body.list.waiting === 0 && journals.length === nJ4, 'force finds the bank line registered meanwhile');
+  // 現金で登録したレシートと同じ金額の明細には注意を出す
+  txs.push({ id: 'TX%3D7', date: rd.date, value: 6480, side: 'EXPENSE', content: 'VISAデビット アベノセイカ', journalizing_status: 'none' });
+  res = await post('/admin/api/mfTx', { suggest: false }, A);
+  const dup = res.body.list.find(t => t.id === 'TX%3D7');
+  check(dup && dup.dupe && dup.dupe.payee === '阿倍野青果', 'possible duplicate warned ' + JSON.stringify(dup));
+  txs.splice(txs.findIndex(t => t.id === 'TX%3D7'), 1);
   // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
   res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);
   check(res.body.answer.includes('売上') && res.body.remember === '', 'chat ' + JSON.stringify(res.body));
