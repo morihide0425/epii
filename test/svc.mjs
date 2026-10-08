@@ -263,7 +263,7 @@ try {
   const dupB = res.body.issues.find(x => x.dupBank);
   check(dupB && (dupB.id === 'BK16' || dupB.id === 'BK17') && res.body.bankOk, 'bank reconciliation');
   const b4 = bkOf('BK4');
-  check(b4 && b4.kind === 'bank' && b4.title === '通帳にない出金' && b4.opts.map(o => o.v).join() === '現金,事業主借,del', 'bank-only item with choices ' + JSON.stringify(b4));
+  check(b4 && b4.kind === 'bank' && b4.title === '銀行の明細にない出金' && b4.opts.map(o => o.v).join() === '現金,事業主借,del', 'bank-only item with choices ' + JSON.stringify(b4));
   check(!res.body.issues.some(x => ['BK19', 'BK20', 'BK22', 'BK23'].includes(x.id)), 'split deposit, late payment and combined deposit are not flagged');
   const b21 = bkOf('BK21');
   check(b21 && b21.fee && b21.fee.v === 440 && b21.opts[0].v === 'fee' && b21.why.includes('5,560'), 'fee-deducted deposit ' + JSON.stringify(b21));
@@ -271,6 +271,10 @@ try {
   res = await post('/admin/api/bookAsk', { key: b21.key }, A);
   check(bkOf0(res, 'BK21').ask.to === 'fee' && bkOf0(res, 'BK21').ask.why, 'claude consult');
   check(String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('fee｜') && !String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('ｲﾙｾﾝﾄﾘﾉ'), 'consult input masked');
+  // ほかの直すところも相談できる（「このままでいい」も選べる）
+  res = await post('/admin/api/bookAsk', { key: bkOf0(res, 'BK1').key }, A);
+  const askT = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
+  check(bkOf0(res, 'BK1').ask && askT.includes('仕入高｜仕入高にする') && askT.includes('keep｜このままでいい') && !askT.includes('近い日の'), 'consult for any fix ' + askT.slice(-200));
   // 手数料を引かれた入金に直す：普通預金5,560＋支払手数料440／売上高6,000
   res = await post('/admin/api/bookFix', { id: 'BK21', kind: 'bank', to: 'fee', fee: 440, date: b21.date, key: b21.key }, A);
   const j21 = journals.find(j => j.id === 'BK21');

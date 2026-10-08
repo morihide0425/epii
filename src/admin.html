@@ -294,7 +294,7 @@
   .ramt { font-size: 20px; font-weight: 700; line-height: 1.2; }
   .rq { padding: 12px 0; border-top: 1px solid var(--line); }
   .rq:first-of-type { border-top: 0; padding-top: 4px; }
-  .rq .rphoto img { width: 64px; height: 88px; }
+  .rq .rphoto img { width: 64px; height: 88px; } .rph0 { width: 64px; height: 88px; border-radius: 10px; flex-shrink: 0; background: var(--bg); border: 1px solid var(--line); }
   .camera.small { flex-direction: row; justify-content: center; padding: 14px 12px; gap: 10px; flex-wrap: wrap; }
   .camera.small svg { width: 28px; height: 28px; }
   .camera.small .sub { flex-basis: 100%; }
@@ -3115,6 +3115,28 @@ async function toJpeg(file, max, quality) {
     URL.revokeObjectURL(url);
   }
 }
+// レシートの写真：1回だけ読み込んで、保存用（2000px）と読み取り用（1400px）を作る。使い終わった画像はすぐ手放す（iPhoneで何枚も選んでも落ちないように）
+async function receiptImages(file) {
+  const url = URL.createObjectURL(file);
+  let img = null;
+  try {
+    img = await new Promise((ok, ng) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ng(new Error('写真を読み込めませんでした。別の写真でお試しください。')); i.src = url; });
+    const draw = (src, w, h, max, q) => {
+      const k = Math.min(1, max / Math.max(w, h));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+      c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+      return { c: c, url: c.toDataURL('image/jpeg', q) };
+    };
+    const big = draw(img, img.naturalWidth, img.naturalHeight, 2000, 0.82);
+    const small = draw(big.c, big.c.width, big.c.height, 1400, 0.78);
+    big.c.width = big.c.height = 0; small.c.width = small.c.height = 0;
+    return { full: big.url, img: small.url };
+  } finally {
+    URL.revokeObjectURL(url);
+    if (img) img.src = '';
+  }
+}
 function renderSet() { if (S.tab === 'set') renderWhenIdle('set'); }
 // ファイルを保存する（スマホは共有メニュー＝LINEやファイルに保存、パソコンはダウンロード）
 async function saveFile(name, text) {
@@ -3443,13 +3465,13 @@ async function askSend(key, text) {
 function rcptOk(q) { return q.state === 'ready' && q.form.readable && num(q.form.amount) > 0 && !(q.form.unsure || []).length; }
 function rcptQueueItem(q, R) {
   const f = q.form;
-  const head = `<img src="${q.img}" alt="撮ったレシート">`;
-  if (q.state === 'wait' || q.state === 'reading') {
-    return `<div class="rq" data-key="rq:${q.id}"><div class="rphoto">${head}<div style="flex:1;min-width:0">${q.state === 'wait' ? '<div class="sub" style="margin-bottom:6px">順番を待っています</div>' : aiThink('Claudeが金額・日付・お店の名前を読んでいます')}${WAIT}</div></div></div>`;
+  const head = q.img ? `<img src="${q.img}" alt="撮ったレシート">` : '<div class="rph0"></div>';
+  if (q.state === 'prep' || q.state === 'wait' || q.state === 'reading') {
+    return `<div class="rq" data-key="rq:${q.id}"><div class="rphoto">${head}<div style="flex:1;min-width:0">${q.state === 'prep' ? '<div class="sub" style="margin-bottom:6px">写真を準備しています</div>' : q.state === 'wait' ? '<div class="sub" style="margin-bottom:6px">順番を待っています</div>' : aiThink('Claudeが金額・日付・お店の名前を読んでいます')}${WAIT}</div></div></div>`;
   }
   if (q.state === 'error') {
     return `<div class="rq" data-key="rq:${q.id}"><div class="rphoto">${head}<div style="flex:1;min-width:0"><div class="warn" style="margin-top:0">${phr(q.err)}</div>
-      <div class="acts"><button class="btn small" data-act="rqRetry" data-id="${q.id}">もう一度読む</button><button class="btn small ghost" data-act="rqDrop" data-id="${q.id}">消す</button></div></div></div></div>`;
+      <div class="acts">${q.noImg ? '' : `<button class="btn small" data-act="rqRetry" data-id="${q.id}">もう一度読む</button>`}<button class="btn small ghost" data-act="rqDrop" data-id="${q.id}">消す</button></div></div></div></div>`;
   }
   const acc = R.accounts.find(a => a.id === f.accountId);
   const pay = R.pays.find(p => p.kind === f.pay);
@@ -3516,7 +3538,7 @@ function txHtml() {
 }
 function rcptHtml() {
   const R = S.rcpt;
-  const reading = R.queue.filter(q => q.state === 'wait' || q.state === 'reading').length;
+  const reading = R.queue.filter(q => q.state === 'prep' || q.state === 'wait' || q.state === 'reading').length;
   const oks = R.queue.filter(rcptOk);
   let h = `<button class="backlink" data-act="rcptClose">${icon('i-left')}今日へ戻る</button>
     <div class="card" data-key="rcard"><h2>${icon('i-receipt')}レシートを撮る</h2>
@@ -3605,9 +3627,9 @@ function bookRow(x) {
   let acts = '';
   if (x.kind === 'same') {
     const list = bookAccounts();
-    acts = `<select data-bk="${k}" aria-label="科目">${x.to ? '' : '<option value="">科目を選ぶ</option>'}${list.map(a => `<option value="${esc(a.name)}" ${a.name === ((S.rcpt.bookSel || {})[x.key] || x.to) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select><button class="btn small primary" data-act="bookFix" data-k="${k}">直す</button>`;
+    acts = `<select data-bk="${k}" aria-label="科目">${x.to ? '' : '<option value="">科目を選ぶ</option>'}${list.map(a => `<option value="${esc(a.name)}" ${a.name === ((S.rcpt.bookSel || {})[x.key] || (ask && ask.to && ask.to !== 'keep' ? ask.to : '') || x.to) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select><button class="btn small primary" data-act="bookFix" data-k="${k}">直す</button>`;
   } else if (x.kind === 'bank') {
-    const sel = (S.rcpt.bookSel || {})[x.key] || (ask && ask.to) || '';
+    const sel = (S.rcpt.bookSel || {})[x.key] || (ask && ask.to !== 'keep' && ask.to) || '';
     acts = `<select class="wide" data-bk="${k}" aria-label="どうしたか">${sel ? '' : '<option value="">どうしたか選ぶ</option>'}${x.opts.map(o => `<option value="${esc(o.v)}" ${o.v === sel ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select><button class="btn small primary" data-act="bookFix" data-k="${k}">直す</button>`;
   } else if (x.kind === 'ap') {
     acts = x.opts.map(o => `<button class="btn small${ask && ask.to === o.v ? ' primary' : ''}" data-act="bookFix" data-k="${k}" data-to="${esc(o.v)}">${esc(o.label)}</button>`).join('');
@@ -3617,7 +3639,7 @@ function bookRow(x) {
     acts = `<button class="btn small primary" data-act="bookFix" data-k="${k}">${esc(x.to)}にする</button>`;
   }
   const wait = (S.rcpt.bookAsking || {})[x.key];
-  const consult = x.opts && S.features.ai ? (wait ? aiThink('Claudeが調べています') : ask ? `<div class="askans">${spark()}<span>${ask.to ? '<b>' + esc((x.opts.find(o => o.v === ask.to) || {}).label || '') + '</b>　' : ''}${phr(ask.why)}</span></div>` : `<button class="btn small ghost" data-act="bookAsk" data-k="${k}">${spark()}Claudeに相談</button>`) : '';
+  const consult = x.fix && S.features.ai ? (wait ? aiThink('Claudeが調べています') : ask ? `<div class="askans">${spark()}<span>${ask.label ? '<b>' + esc(ask.label) + '</b>　' : ''}${phr(ask.why)}</span></div>` : `<button class="btn small ghost" data-act="bookAsk" data-k="${k}">${spark()}Claudeに相談</button>`) : '';
   return `<div class="bk" data-key="bk:${k}">
     <div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.remark || '（摘要なし）')}</span><span class="am">${yen(x.amount)}</span></div>
     <div class="why">${x.ai ? spark() : ''}<b>${esc(x.title)}</b><span>${esc(x.detail)}</span></div>
@@ -3637,7 +3659,7 @@ function bookHtml() {
   else h += `<div class="sub" style="margin-bottom:4px">${phr('直すと、マネーフォワードの仕訳も直ります。迷ったらClaudeに相談できます。')}</div>` + show.map(bookRow).join('') + (issues.length > show.length ? `<button class="more2" data-act="bookMore">ほか ${issues.length - show.length}件を見る</button>` : '');
   if (B.hidden) h += `<button class="more2" data-act="bookUnhide">「このままでいい」にしたもの ${B.hidden}件を、もう一度出す</button>`;
   if (S.features.ai) h += `<div class="acts" style="margin-top:10px">${S.rcpt.bookWait ? aiThink('Claudeが科目を見ています', true) : `<button class="btn small" data-act="bookAi">${spark()}Claudeに科目も見てもらう</button>${B.aiAt ? `<span class="sub">${esc(B.aiAt.slice(5, 10).replace('-', '/'))}に確認</span>` : ''}`}</div>`;
-  h += `<button class="golink" data-act="goAcct"><span><b>締めの確認</b><small>月末・半年・12月31日の現金と口座の残高、売上の照らし合わせ</small></span><em>設定＞会計 ›</em></button>`;
+  h += `<button class="golink" data-act="goAcct"><span><b>締めの確認</b><small>月末・半年・12月31日の現金と銀行口座の残高、売上の照らし合わせ</small></span><em>設定＞会計 ›</em></button>`;
   return h + '</div>';
 }
 /* ---------- 設定＞会計：締めの確認・売上の照らし合わせ・気になるところ ---------- */
@@ -3668,13 +3690,13 @@ function closeHtml(B) {
   const ys = v => (v < 0 ? '−⁠' + yen(-v) : yen(v));   // 記号と金額のあいだで折り返さない
   const src = o => ({ mf: '前年からの繰り越し', books: '前年までの帳簿から', input: '入れた額' }[o.openSrc] || '');
   const dl = jdShort(C.date);
-  let h = `<div class="card" data-key="close"><h2>${icon('i-check-ink')}締めの確認</h2><div class="sub">${phr('1．いつの分かを選ぶ\n2．お店の現金と通帳の残高を入れて「比べる」')}</div>
+  let h = `<div class="card" data-key="close"><h2>${icon('i-check-ink')}締めの確認</h2><div class="sub">${phr('1．いつの分かを選ぶ\n2．お店の現金と銀行の残高を入れて「比べる」')}</div>
     <div class="chips" style="margin-top:10px">${C.presets.map(p => `<button class="chip${p.d === C.date ? ' on' : ''}" data-act="acctDate" data-v="${p.d}">${esc(p.label)}</button>`).join('')}</div>
     <label class="cdate">ほかの日<input type="date" id="acctDate" value="${esc(C.date)}" min="${esc(C.from)}" max="${today()}"></label>`;
   // 現金・口座：「帳簿ではいくらあるはず」→「実際の額」→ 結果と、次にすること
   const box = (X, acct) => {
     const cash = acct === 'cash';
-    const name = cash ? 'お店の現金' : '口座（通帳）';
+    const name = cash ? 'お店の現金' : '銀行口座';
     let b = `<div class="clbox" data-key="cl:${acct}"><div class="clh">${name}</div>`;
     if (!has(X.book)) b += `<div class="clsub">${phr('1月1日の額がわからないので、帳簿の額を出せません。下の「1月1日の残高を直す」から入れてください')}</div>`;
     else {
@@ -3682,15 +3704,15 @@ function closeHtml(B) {
       if (X.book < 0) b += `<div class="clsub">${phr(cash ? '現金がマイナスになることはないので、現金の売上の登録漏れかも' : '残高がマイナスになることはないので、入金の登録漏れかも')}</div>`;
       else if (cash && X.low) b += `<div class="clsub">${phr('帳簿の上で、' + jdShort(X.low.d) + 'に現金がマイナス（' + ys(X.low.v) + '）になっています。現金の売上の登録漏れかも')}</div>`;
     }
-    b += `<label class="clin">${cash ? '実際に数えた額' : '通帳の残高'}<input type="text" inputmode="numeric" id="${cash ? 'clCash' : 'clBank'}" value="${has(X.counted) ? esc(fmtNum(X.counted)) : ''}" placeholder="${cash ? '数えて入れる' : '通帳を見て入れる'}"></label>`;
+    b += `<label class="clin">${cash ? '実際に数えた額' : '銀行の残高（通帳かアプリで見る）'}<input type="text" inputmode="numeric" id="${cash ? 'clCash' : 'clBank'}" value="${has(X.counted) ? esc(fmtNum(X.counted)) : ''}" placeholder="${cash ? '数えて入れる' : '残高を入れる'}"></label>`;
     if (has(X.diff)) {
       if (!X.diff) b += `<div class="okbar" style="margin:8px 0 0">${icon('i-check-ink')}合っています</div>`;
       else {
         const less = X.diff < 0;
-        b += `<div class="clres"><b>${cash ? '数えた額' : '通帳'}のほうが ${yen(Math.abs(X.diff))} ${less ? '少ない' : '多い'}</b>`;
+        b += `<div class="clres"><b>${cash ? '数えた額' : '銀行'}のほうが ${yen(Math.abs(X.diff))} ${less ? '少ない' : '多い'}</b>`;
         if (cash) b += `<span>${phr(less ? '考えられること：現金で払った経費の登録漏れ、またはお店のお金を自分用に使った' : '考えられること：現金の売上の登録漏れ、または自分のお金をお店に足した')}</span>`;
         else if (X.cands.length) b += `<span>${phr(X.candSum === X.diff ? '下の' + X.cands.length + '件で、この差は説明できます。直すと合います' : '下の' + X.cands.length + '件が理由かも（' + ys(X.candSum) + '分）。残り ' + ys(X.diff - X.candSum) + 'は理由が見つかりません')}</span>`;
-        else b += `<span>${phr('理由になりそうな明細は見つかりません。通帳の日付をもう一度見てください')}</span>`;
+        else b += `<span>${phr('理由になりそうな明細は見つかりません。銀行の残高を見た日付が合っているか、もう一度見てください')}</span>`;
         b += '</div>';
         if (!cash && X.cands.length) b += `<ul class="causes">${X.cands.map(c => `<li><span>${jdShort(c.date)}</span>${esc(c.text)} ${yen(c.amount)}</li>`).join('')}</ul><button class="btn small" data-act="goBook" style="margin-top:6px">今日＞経費を登録で直す</button>`;
         b += adjHtml(C, acct);
@@ -3706,12 +3728,12 @@ function closeHtml(B) {
   if (B.total && B.balanced !== B.total) other.push(['借方と貸方が合わない仕訳', (B.total - B.balanced) + '件', '今日＞経費を登録で直せます']);
   if (other.length) h += `<div class="clnotes">${other.map(r => `<div><b>${esc(r[0])}　${esc(r[1])}</b><span>${phr(r[2])}</span></div>`).join('')}</div>`;
   if (!S.acctOpen) h += `<button class="more2" data-act="acctOpenEdit">1月1日の残高を直す（ちがうときだけ）</button>`;
-  else h += `<div class="cashin" style="margin-top:12px"><label>1月1日の現金<input type="text" inputmode="numeric" id="opCash" value="${C.cash.openSrc === 'input' ? esc(fmtNum(C.cash.open)) : ''}" placeholder="${has(C.cash.open) ? esc(fmtNum(C.cash.open)) : 'わかれば'}"></label><label>1月1日の口座<input type="text" inputmode="numeric" id="opBank" value="${C.bank.openSrc === 'input' ? esc(fmtNum(C.bank.open)) : ''}" placeholder="${has(C.bank.open) ? esc(fmtNum(C.bank.open)) : 'わかれば'}"></label></div><div class="sub" style="margin-top:4px">${phr('空にすると、前年からの繰り越しを使います')}</div><div class="acts" style="margin-top:8px"><button class="btn small" data-act="acctOpenSave">保存</button><button class="btn small ghost" data-act="acctOpenEdit">やめる</button></div>`;
+  else h += `<div class="cashin" style="margin-top:12px"><label>1月1日の現金<input type="text" inputmode="numeric" id="opCash" value="${C.cash.openSrc === 'input' ? esc(fmtNum(C.cash.open)) : ''}" placeholder="${has(C.cash.open) ? esc(fmtNum(C.cash.open)) : 'わかれば'}"></label><label>1月1日の銀行口座<input type="text" inputmode="numeric" id="opBank" value="${C.bank.openSrc === 'input' ? esc(fmtNum(C.bank.open)) : ''}" placeholder="${has(C.bank.open) ? esc(fmtNum(C.bank.open)) : 'わかれば'}"></label></div><div class="sub" style="margin-top:4px">${phr('空にすると、前年からの繰り越しを使います')}</div><div class="acts" style="margin-top:8px"><button class="btn small" data-act="acctOpenSave">保存</button><button class="btn small ghost" data-act="acctOpenEdit">やめる</button></div>`;
   return h + '</div>';
 }
 // 帳尻合わせ：月末の日だけ。開く→科目を選ぶ→差の金額を打つ→確認（まちがって押さないように）
 function adjHtml(C, acct) {
-  const X = C[acct], d = X.diff, lb = acct === 'bank' ? '口座' : '現金';
+  const X = C[acct], d = X.diff, lb = acct === 'bank' ? '銀行口座' : '現金';
   if (!d || C.adjusted[acct]) return C.adjusted[acct] && d === 0 ? '' : C.adjusted[acct] ? `<div class="cashadj"><small>${lb}の帳尻合わせは登録済みです</small></div>` : '';
   if (acct === 'bank' && X.cands.length) return '';
   if (!C.monthEnd) return `<div class="cashadj"><small>${lb}の帳尻合わせは、締めの日を月末にすると出ます</small></div>`;
@@ -3793,12 +3815,19 @@ async function rcptFiles(input) {
   if (!files.length) return;
   const R = S.rcpt;
   R.err = '';
-  for (const file of files) {
-    try { R.queue.push({ id: 'q' + (++R.seq), img: await toJpeg(file, 1400, 0.78), full: await toJpeg(file, 2000, 0.82), state: 'wait', form: null, err: '' }); }
-    catch (e) { R.err = e.message; }
-  }
+  // 選んだ枚数ぶん、すぐに枠を出す。写真の準備は1枚ずつ（終わったものから読み取りを始める）
+  const items = files.map(f => ({ id: 'q' + (++R.seq), file: f, img: '', full: '', state: 'prep', form: null, err: '' }));
+  R.queue.push(...items);
   refresh();
-  rcptPump();
+  for (const q of items) {
+    if (R !== S.rcpt) return;
+    try { const r = await receiptImages(q.file); q.img = r.img; q.full = r.full; q.state = 'wait'; }
+    catch (e) { q.state = 'error'; q.err = e.message; q.noImg = true; }
+    delete q.file;
+    rcptPump();
+    if (S.tab === 'today') renderWhenIdle('today');
+    await new Promise(ok => setTimeout(ok, 30));
+  }
 }
 // 読み取りは同時に2枚まで（たくさん撮っても、つながりが詰まらないように）
 function rcptPump() {

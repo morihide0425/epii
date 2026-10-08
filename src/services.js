@@ -2605,7 +2605,7 @@ async function adminBook(env, b) {
   if (good) {
     bank.bookOnly.forEach(x => { const k = 'bk:' + x.id + ':' + x.amount; if (!ign[k]) issues.push(x.twin
       ? { key: k, kind: 'pair', id: x.id, date: x.date, amount: x.amount, remark: x.remark, title: '二重に登録されているかも', detail: '同じ日・同じ金額の口座の仕訳が2つ', why: '銀行の明細には1回分しかありません', fix: true, dupBank: true }
-      : { key: k, kind: 'bank', id: x.id, date: x.date, amount: x.amount, remark: x.remark, in: x.in, title: '通帳にない' + (x.in ? '入金' : '出金'), detail: x.other.join('・'),
+      : { key: k, kind: 'bank', id: x.id, date: x.date, amount: x.amount, remark: x.remark, in: x.in, title: '銀行の明細にない' + (x.in ? '入金' : '出金'), detail: x.other.join('・'),
         why: x.fee ? jdShort(x.fee.d) + 'に' + x.fee.net.toLocaleString() + '円の入金があります（差' + x.fee.v.toLocaleString() + '円は振込手数料かも）' : '同じ金額の銀行の' + (x.in ? '入金' : '出金') + 'が前後1か月にありません。どうしたか選んでください',
         fix: true, opts: bankOpts(x), near: x.near, other: x.other, fee: x.fee }); });
   }
@@ -2654,7 +2654,7 @@ async function bookClose(env, r, bank, sales) {
   bk.cands = [];
   if (bank) {
     bank.notYetAll.filter(t => t.date <= date).forEach(t => bk.cands.push({ date: t.date, amount: t.amount, v: t.in ? t.amount : -t.amount, text: '口座の明細で、まだ登録していない' + (t.in ? '入金' : '出金'), kind: 'notyet' }));
-    bank.bookOnly.filter(x => x.date <= date && !x.twin).forEach(x => bk.cands.push({ date: x.date, amount: x.amount, v: x.in ? -x.amount : x.amount, text: '帳簿にあって通帳にない' + (x.in ? '入金' : '出金') + '（' + clean(x.remark || '摘要なし', 20) + '）', kind: 'bookonly' }));
+    bank.bookOnly.filter(x => x.date <= date && !x.twin).forEach(x => bk.cands.push({ date: x.date, amount: x.amount, v: x.in ? -x.amount : x.amount, text: '帳簿にあって銀行の明細にない' + (x.in ? '入金' : '出金') + '（' + clean(x.remark || '摘要なし', 20) + '）', kind: 'bookonly' }));
   }
   bk.candSum = bk.cands.reduce((a, x) => a + x.v, 0);
   // 未収金（Squareの入金待ち）
@@ -2737,7 +2737,7 @@ async function adminBookAdjust(env, b) {
   const acct = b.acct === 'bank' ? 'bank' : 'cash';
   const X = C[acct];
   const label = acct === 'bank' ? '口座' : '現金';
-  if (X.book === null || X.counted === null) fail(acct === 'bank' ? '通帳の残高を入れてから押してください。' : '数えた現金を入れてから押してください。');
+  if (X.book === null || X.counted === null) fail(acct === 'bank' ? '銀行の残高を入れてから押してください。' : '数えた現金を入れてから押してください。');
   if (!C.monthEnd) fail('帳尻合わせは、月末の日（6月30日・12月31日など）を締めの日にしたときだけできます。');
   const d = X.diff;
   if (!d) fail('差はありません。');
@@ -2756,7 +2756,7 @@ async function adminBookAdjust(env, b) {
   const cre = d < 0 ? { account_id: self.id, value: v } : { account_id: a.id, value: v };
   const t = pickTax(m.taxes, 'none');
   if (t) { deb.tax_id = t; cre.tax_id = t; }
-  await mfApi(env, 'POST', '/journals', null, { journal: { transaction_date: C.date, journal_type: 'journal_entry', memo: 'épiiの予約管理から登録', branches: [{ debitor: deb, creditor: cre, remark: label + 'の帳尻合わせ（' + (acct === 'bank' ? '通帳の残高' : '数えた現金') + 'との差）' }] } });
+  await mfApi(env, 'POST', '/journals', null, { journal: { transaction_date: C.date, journal_type: 'journal_entry', memo: 'épiiの予約管理から登録', branches: [{ debitor: deb, creditor: cre, remark: label + 'の帳尻合わせ（' + (acct === 'bank' ? '銀行の残高' : '数えた現金') + 'との差）' }] } });
   await mfTouched(env, C.date);
   return await adminBook(env, {});
 }
@@ -2838,14 +2838,20 @@ const BOOK_ASK_SYSTEM = [
   'あなたは、小さな飲食店（薬膳レストラン）の帳簿を手伝っています。店主は会計に詳しくありません。',
   '帳簿の気になる仕訳1件について、渡した「選べる直し方」から、いちばんありそうなものを1つ選びます。',
   '- 根拠にしてよいもの：近い日の銀行の明細の金額・日付／同じ摘要の前の仕訳／摘要の言葉。',
-  '- 根拠がはっきりしないときは choice を空にし、why に、店主が何を確かめればよいかを書く（例「6/10の通帳に10,480円の入金がないか見てください」）。',
+  '- 根拠がはっきりしないときは choice を空にし、why に、店主が何を確かめればよいかを書く（例「6/10の銀行の明細に10,480円の入金がないか見てください」）。',
   '- choice は、選べる直し方の記号（｜の左）をそのまま返す。',
   '- why：50文字以内。日付と金額を入れて具体的に。推測を事実のように書かない。'
 ].join('\n');
 async function adminBookAsk(env, b) {
   const r = await adminBook(env, {});
   const x = r.issues.find(i => i.key === b.key);
-  if (!x || !x.opts) fail('この知らせは、もうありません。画面を更新してください。');
+  if (!x) fail('この知らせは、もうありません。画面を更新してください。');
+  // 選べる直し方（直すところの種類ごと）。どれも「このままでいい」を選べる
+  let opts = x.opts;
+  if (!opts && x.kind === 'same') { const m = await mfMaster(env); opts = txOptions(m, await expenseOptions(env, m)).map(a => ({ v: a.name, label: a.name + 'にする' })); }
+  if (!opts && x.kind === 'pair') opts = [{ v: 'del', label: '消す' }];
+  if (!opts && x.to) opts = [{ v: x.to, label: x.to + 'にする' }];
+  opts = (opts || []).concat([{ v: 'keep', label: 'このままでいい' }]);
   const today = jstStamp(Date.now()).slice(0, 10);
   const js = await bookJournals(env, bookMonths(today), false);
   const k = txKey(x.remark || '');
@@ -2853,16 +2859,16 @@ async function adminBookAsk(env, b) {
   const lines = [
     '仕訳：' + x.date + '　' + (x.kind === 'bank' ? (x.in ? '口座への入金' : '口座からの出金') : x.title) + '　¥' + x.amount + '　摘要「' + maskRemark(x.remark || 'なし') + '」' + (x.other ? '　相手の科目：' + x.other.join('・') : ''),
     '気になる点：' + x.title + '。' + (x.why || ''),
-    '近い日の、まだ帳簿と結びついていない銀行の明細（同じ向き）：' + ((x.near || []).map(t => t.d + ' ¥' + t.v + ' ' + maskRemark(t.c)).join('／') || 'なし'),
+    x.kind === 'bank' ? '近い日の、まだ帳簿と結びついていない銀行の明細（同じ向き）：' + ((x.near || []).map(t => t.d + ' ¥' + t.v + ' ' + maskRemark(t.c)).join('／') || 'なし') : '',
     x.fee ? '手数料の候補：' + x.fee.d + 'に ¥' + x.fee.net + ' の入金（差 ¥' + x.fee.v + '）' : '',
     '同じ摘要の前の仕訳：' + (hist.join('／') || 'なし'),
-    '選べる直し方：\n' + x.opts.map(o => o.v + '｜' + o.label).join('\n')
+    '選べる直し方：\n' + opts.map(o => o.v + '｜' + o.label).join('\n')
   ].filter(Boolean);
   const out = await claude(env, { system: BOOK_ASK_SYSTEM, effort: 'medium', maxTokens: 4000, timeout: 90000, content: [{ type: 'text', text: lines.join('\n') }],
     schema: strSchema({ choice: { type: 'string' }, why: { type: 'string' } }) });
-  const to = x.opts.some(o => o.v === out.choice) ? out.choice : '';
+  const hit = opts.find(o => o.v === out.choice);
   const asked = (await kvGet(env, 'bookAsk')) || {};
-  asked[x.key] = { to: to, why: plain(clean(out.why || '', 80)), at: jstStamp(Date.now()) };
+  asked[x.key] = { to: hit ? hit.v : '', label: hit ? hit.label : '', why: plain(clean(out.why || '', 80)), at: jstStamp(Date.now()) };
   await kvPut(env, 'bookAsk', asked);
   return await adminBook(env, {});
 }
