@@ -184,6 +184,29 @@ try {
   const wid = res.body.list.items.find(x => x.status === 'wait').id;
   res = await post('/admin/api/rcptForce', { id: wid }, A);
   check(res.body.list.waiting === 0 && journals[journals.length - 1].branches[0].creditor.account_id === 'A%3D9', 'force with bank account');
+  const forcedJ = journals[journals.length - 1];
+  check((await db0.prepare('SELECT COUNT(*) AS n FROM receipt_photos WHERE id = ?').bind(wid).first()).n === 1, 'forced keeps the photo for later');
+  // そのあと明細が届いた：明細から仕訳を作り直し、先に作った仕訳は消す（二重にしない）
+  txs.push({ id: 'TX%3D5', date: rd.date, value: 777, side: 'EXPENSE', content: 'VISAデビット テスト', journalizing_status: 'none' });
+  res = await post('/admin/api/mfTx', { suggest: false }, A);
+  check(res.body.list.find(t => t.id === 'TX%3D5').receipt, 'late bank line marked as receipt');
+  const nJ5 = journals.length;
+  await db0.prepare("DELETE FROM kv WHERE k = 'rcptMatchAt'").run();
+  res = await post('/admin/api/rcptList', {}, A);
+  const fj = journals.find(x => x.transaction_id === 'TX%3D5');
+  check(journals.length === nJ5 && !journals.includes(forcedJ) && fj && txs.find(t => t.id === 'TX%3D5').journalizing_status === 'registered', 'late bank line replaces the forced journal');
+  check(!(await db0.prepare('SELECT COUNT(*) AS n FROM receipt_photos WHERE id = ?').bind(wid).first()).n && calls.mf.some(c => c.startsWith('POST /vouchers')), 'photo moved to the new journal');
+  // 現金を選んだのに同じ金額の口座の明細がある：デビットかどうか聞く
+  txs.push({ id: 'TX%3D6', date: rd.date, value: 3300, side: 'EXPENSE', content: 'VISAデビット カネモト', journalizing_status: 'none' });
+  const nJ6 = journals.length;
+  res = await post('/admin/api/rcptSave', { date: rd.date, amount: 3300, payee: '金本商店', accountId: acc.id, pay: 'cash', rate: '8', image: img }, A);
+  check(res.body.askDebit && res.body.askDebit.content.includes('カネモト') && journals.length === nJ6, 'ask if paid by debit ' + JSON.stringify(res.body).slice(0, 120));
+  res = await post('/admin/api/rcptSave', { date: rd.date, amount: 3300, payee: '金本商店', accountId: acc.id, pay: 'debit', rate: '8', image: img }, A);
+  check(res.body.matched && txs.find(t => t.id === 'TX%3D6').journalizing_status === 'registered' && journals.length === nJ6 + 1, 'answered debit -> linked');
+  txs.push({ id: 'TX%3D10', date: rd.date, value: 2200, side: 'EXPENSE', content: 'ATM', journalizing_status: 'none' });
+  res = await post('/admin/api/rcptSave', { date: rd.date, amount: 2200, payee: '雑貨店', accountId: acc.id, pay: 'cash', rate: '10', keepPay: true, image: img }, A);
+  check(!res.body.askDebit && journals[journals.length - 1].branches[0].creditor.account_id === 'A%3D5', 'answered cash -> cash journal');
+  txs.splice(txs.findIndex(t => t.id === 'TX%3D10'), 1);
   // まだ登録していない口座の明細：Claude が科目を提案 → そのまま登録
   res = await post('/admin/api/mfTx', {}, A);
   check(res.body.list.length >= 2 && res.body.list.every(t => t.amount > 0 && t.id.startsWith('TX')) && !res.body.list.some(t => t.content === 'ｽｸｴｱ'), 'unregistered bank lines ' + JSON.stringify(res.body.list.map(t => t.content)));

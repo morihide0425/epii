@@ -972,6 +972,11 @@ async function adminRcptSave(env, b) {
   let waiting = false;
   let matched = '';
   let merged = false;
+  if (f.pay !== 'debit' && !b.keepPay) {
+    // 現金・自分のお金を選んだのに、同じ金額の口座の明細がある：デビットで払ったものかもしれないので聞く
+    const tx = (await mfFindTx(env, f.amount, f.date)) || (await mfFindJournaled(env, f.amount, f.date));
+    if (tx) return { askDebit: { date: tx.date || tx.transaction_date, amount: f.amount, content: clean(tx.content || ((tx.branches || [])[0] || {}).remark || '口座の明細', 40) } };
+  }
   if (f.pay === 'debit') {
     const link = await mfLinkReceipt(env, m, f);
     if (link) { res = link; matched = link.matched; merged = !!link.merged; }
@@ -1005,11 +1010,11 @@ async function adminRcptSave(env, b) {
 // 明細を待っているレシートを、届いた明細と結びつけて登録する（画面を開いたとき・定期実行）
 async function rcptMatchWaiting(env) {
   if (!env.MF_API_KEY) return 0;
-  const rows = (await env.DB.prepare("SELECT * FROM receipts WHERE status = 'wait' ORDER BY created_at LIMIT 20").all()).results;
+  const rows = (await env.DB.prepare("SELECT * FROM receipts WHERE status = 'wait' OR (status = 'ok' AND data LIKE '%\"forced\":true%' AND created_at >= ?) ORDER BY created_at LIMIT 40").bind(addDays(jstStamp(Date.now()).slice(0, 10), -180)).all()).results;
   if (!rows.length) return 0;
   const m = await mfMaster(env);
   let n = 0;
-  for (const r of rows) {
+  for (const r of rows.filter(x => x.status === 'wait')) {
     const d = JSON.parse(r.data || '{}');
     const f = d.form;
     if (!f) continue;
@@ -1024,6 +1029,25 @@ async function rcptMatchWaiting(env) {
     await mfTouched(env, f.date);
     n++;
   }
+  // 明細を待たずに登録したレシートに、あとから明細が届いた：明細から仕訳を作り直して、先に作った仕訳は消す
+  for (const r of rows.filter(x => x.status === 'ok')) {
+    const d = JSON.parse(r.data || '{}');
+    const tx = d.form && await mfFindTx(env, d.form.amount, d.form.date);
+    if (!tx) continue;
+    const res = await mfFromTx(env, m, tx, d.form);
+    if (!res.jid) continue;
+    const ph = await env.DB.prepare('SELECT img FROM receipt_photos WHERE id = ?').bind(r.id).first();
+    await mfAttach(env, res.jid, d.form.date, ph ? ph.img : '');
+    if (r.journal_id) { try { await mfApi(env, 'DELETE', '/journals/' + encodeURIComponent(r.journal_id)); } catch (e) { console.error('先に作った仕訳を消せませんでした', e && e.message); } }
+    await env.DB.batch([
+      env.DB.prepare('UPDATE receipts SET journal_id = ?, data = ? WHERE id = ?').bind(res.jid, JSON.stringify(Object.assign(d, { forced: false, matched: clean(tx.content, 40) })), r.id),
+      env.DB.prepare('DELETE FROM receipt_photos WHERE id = ?').bind(r.id)
+    ]);
+    await mfTouched(env, d.form.date);
+    n++;
+  }
+  // 半年たっても明細が来ないものは、写真だけ片付ける（仕訳はそのまま）
+  await env.DB.prepare("DELETE FROM receipt_photos WHERE id IN (SELECT id FROM receipts WHERE status = 'ok' AND created_at < ?)").bind(addDays(jstStamp(Date.now()).slice(0, 10), -180)).run();
   return n;
 }
 // 明細を待たずに登録する（口座の明細が来ないとき。普通預金で登録）
@@ -1056,10 +1080,8 @@ async function adminRcptForce(env, b) {
   const jid = (rr.journal && rr.journal.id) || rr.id || '';
   const ph = await env.DB.prepare('SELECT img FROM receipt_photos WHERE id = ?').bind(r.id).first();
   await mfAttach(env, jid, d.form.date, ph ? ph.img : '');
-  await env.DB.batch([
-    env.DB.prepare("UPDATE receipts SET status = 'ok', journal_id = ? WHERE id = ?").bind(jid, r.id),
-    env.DB.prepare('DELETE FROM receipt_photos WHERE id = ?').bind(r.id)
-  ]);
+  // 写真は残しておく：あとから口座の明細が届いたら、明細から作った仕訳に付け替える（二重にしない）
+  await env.DB.prepare("UPDATE receipts SET status = 'ok', journal_id = ?, data = ? WHERE id = ?").bind(jid, JSON.stringify(Object.assign(d, { forced: true })), r.id).run();
   await mfTouched(env, d.form.date);
   return { list: await rcptList(env) };
 }
@@ -1094,15 +1116,25 @@ async function adminMfTx(env, b) {
   if (!env.MF_API_KEY) return { connected: false };
   const today = jstStamp(Date.now()).slice(0, 10);
   const m = await mfMaster(env);
-  const j = await mfApi(env, 'GET', '/transactions', { start_date: addDays(today, -60), end_date: today, side: 'EXPENSE', journalizing_statuses: 'none', order: 'desc', per_page: 200 });
-  let list = (j.transactions || []).filter(t => (!t.side || t.side === 'EXPENSE') && (!t.journalizing_status || t.journalizing_status === 'none'))
+  // 確定申告の年の分はすべて見る（1〜3月は前の年の1月から）
+  const y = Number(today.slice(0, 4)) - (Number(today.slice(5, 7)) <= 3 ? 1 : 0);
+  const all = [];
+  for (let page = 1; page <= 10; page++) {
+    const j = await mfApi(env, 'GET', '/transactions', { start_date: y + '-01-01', end_date: today, side: 'EXPENSE', journalizing_statuses: 'none', order: 'desc', per_page: 200, page: page });
+    all.push(...(j.transactions || []));
+    const pages = j.metadata && Number(j.metadata.total_pages);
+    if (!pages || page >= pages || !(j.transactions || []).length) break;
+  }
+  let list = all.filter(t => (!t.side || t.side === 'EXPENSE') && (!t.journalizing_status || t.journalizing_status === 'none'))
     .map(t => ({ id: String(t.id), date: t.date, amount: Number(t.value) || 0, content: clean(t.content, 60) }))
     .filter(t => t.amount > 0).sort((a, x) => x.date.localeCompare(a.date));
   await kvPut(env, 'mfTxCount', { n: list.length, at: Date.now() });
   // レシートを預かっている（明細を待っている）ものは、レシートの側で登録するので印を付ける
-  const waits = (await env.DB.prepare("SELECT amount FROM receipts WHERE status = 'wait'").all()).results.map(r => r.amount);
-  list = list.slice(0, 30);
-  list.forEach(t => { t.receipt = waits.indexOf(t.amount) >= 0; });
+  // 明細を待たずに登録したものも、レシートの側で付け替えるので同じ扱い
+  const waits = (await env.DB.prepare("SELECT date, amount FROM receipts WHERE status = 'wait' OR (status = 'ok' AND data LIKE '%\"forced\":true%')").all()).results;
+  const total = list.length;
+  list = list.slice(0, 50);
+  list.forEach(t => { t.receipt = waits.some(w => w.amount === t.amount && diffDays(w.date, t.date) >= -2 && diffDays(w.date, t.date) <= 7); });
   // 現金・自分のお金で登録したレシートと同じ金額・近い日付の明細は、同じ支払いかもしれない（二重の登録に注意）
   const oks = (await env.DB.prepare("SELECT date, amount, payee, method, data FROM receipts WHERE status = 'ok' AND date >= ?").bind(addDays(today, -70)).all()).results
     .filter(r => { try { return JSON.parse(r.data || '{}').form.pay !== 'debit'; } catch (e) { return false; } });
@@ -1135,7 +1167,7 @@ async function adminMfTx(env, b) {
     } catch (e) { if (!e.userFacing) throw e; }
   }
   list.forEach(t => { t.ai = hits[t.id] || null; });
-  return { connected: true, list: list, accounts: expense };
+  return { connected: true, list: list, total: total, accounts: expense };
 }
 async function adminMfTxSave(env, b) {
   const m = await mfMaster(env);

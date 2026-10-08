@@ -3205,8 +3205,9 @@ function txHtml() {
   const T = S.rcpt.tx;
   if (!T || !T.connected) return '';
   const list = T.list || [];
-  let h = `<div class="card" data-key="txcard"><h2>${icon('i-coin')}口座から出たお金 <span class="cnt">まだ登録していないもの ${list.length}件</span></h2>
-    <div class="sub" style="margin-bottom:6px">${phr('デビットカードの支払いや引き落としです。Claudeのおすすめの科目で、そのまま登録できます。レシートがあるものは、上で撮れば結びつけます。')}</div>`;
+  const total = Math.max(T.total || 0, list.length);
+  let h = `<div class="card" data-key="txcard"><h2>${icon('i-coin')}口座から出たお金 <span class="cnt">まだ登録していないもの ${total}件</span></h2>
+    <div class="sub" style="margin-bottom:6px">${phr('デビットカードの支払いや引き落としです。Claudeのおすすめの科目で、そのまま登録できます。レシートは先でもあとからでも、撮れば同じ支払いにまとめます（二重になりません）。')}</div>`;
   if (!list.length) return h + '<div class="sub">ありません。すべて登録済みです。</div></div>';
   h += list.map(t => {
     const sel = S.rcpt.txSel[t.id] || (S.rcpt.txSel[t.id] = { accountId: t.ai ? t.ai.accountId : '', rate: t.ai ? t.ai.rate : '10' });
@@ -3221,6 +3222,7 @@ function txHtml() {
       ${askHtml('tx:' + t.id, 'この明細')}`}
     </div>`;
   }).join('');
+  if (total > list.length) h += `<div class="sub" style="margin-top:8px">${phr('新しい順に' + list.length + '件を出しています。登録すると、続きが出ます。')}</div>`;
   return h + '</div>';
 }
 function rcptHtml() {
@@ -3312,7 +3314,15 @@ async function rcptSaveItem(q) {
   if (f.rate === 'mixed' && !(num(f.amount8) > 0 && num(f.amount8) < amount)) return '8%の金額を確かめてください。';
   q.state = 'saving';
   try {
-    const res = await api('rcptSave', { date: f.date, amount: amount, payee: f.payee, memo: f.memo, accountId: f.accountId, pay: f.pay, rate: f.rate, amount8: num(f.amount8), payment: f.payment, invoiceNo: f.invoiceNo, image: q.full || q.img });
+    const body = { date: f.date, amount: amount, payee: f.payee, memo: f.memo, accountId: f.accountId, pay: f.pay, rate: f.rate, amount8: num(f.amount8), payment: f.payment, invoiceNo: f.invoiceNo, image: q.full || q.img };
+    let res = await api('rcptSave', body);
+    if (res.askDebit) {
+      // 現金を選んだが、同じ金額の口座の明細がある：デビットで払ったものなら明細と結びつける（二重にしない）
+      const x = res.askDebit;
+      const debit = confirm(jdShort(x.date) + 'に口座から同じ金額（' + yen(x.amount) + '・' + x.content + '）が出ています。\nデビットカードで払ったものですか？\n\n「OK」…デビットカード（口座の明細と結びつけます）\n「キャンセル」…' + (f.pay === 'own' ? '自分のお金' : '現金') + 'のまま登録します');
+      if (debit) f.pay = 'debit';
+      res = await api('rcptSave', Object.assign(body, debit ? { pay: 'debit' } : { keepPay: true }));
+    }
     S.rcptInfo = { connected: true, list: res.list };
     q.result = res;
     if (res.check) alert(res.check);
@@ -3375,7 +3385,8 @@ async function txSave(b) {
     await mo.ok();
     await M.collapse(document.querySelector(`[data-key="tx:${CSS.escape(t.id)}"]`));
     R.tx.list = R.tx.list.filter(x => x !== t);
-    if (S.rcptInfo && S.rcptInfo.list) S.rcptInfo.list.txCount = R.tx.list.length;
+    R.tx.total = Math.max(R.tx.list.length, (R.tx.total || 0) - 1);
+    if (S.rcptInfo && S.rcptInfo.list) S.rcptInfo.list.txCount = R.tx.total;
     refresh();
     toast('登録しました');
   } catch (e) { mo.fail(); fail(e); }
