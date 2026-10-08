@@ -158,7 +158,7 @@ async def main():
         await a.locator('.rq').first.locator('[data-act=rqOpen]').click(); await a.wait_for_timeout(200)
         q1=await a.evaluate("document.querySelector('.rq.on').dataset.key.slice(3)")
         print('確かめる欄:', await a.evaluate("[...document.querySelectorAll('.rq.on .check')].map(e=>e.dataset.rf)"), '／払い方:', await a.locator(f'#rf-pay-{q1} option:checked').inner_text())
-        print('科目の説明:', await a.locator(f'#rf-acc-{q1} option:checked').inner_text(), '／Claudeの理由:', (await a.locator('.rq.on .aitag + span, .rq.on .sub:has(.aitag)').first.inner_text()).replace('\n',' '))
+        print('科目の説明:', await a.locator(f'#rf-acc-{q1} option:checked').inner_text(), '／Claudeの理由:', (await a.locator('.rq.on .txai').first.inner_text()).replace('\n',' '))
         print('登録番号:', await a.input_value(f'#rf-inv-{q1}'))
         # Claudeに聞く → おすすめの科目にする
         await a.locator('.rq.on [data-act=askOpen]').click(); await a.wait_for_timeout(200)

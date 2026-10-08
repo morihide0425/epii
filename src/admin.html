@@ -347,9 +347,13 @@
   .goalbar .gnum { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; } .goalbar .gnum b { font-size: 17px; } .goalbar .gnum small { font-size: 11px; color: var(--sub); }
   .goalbar .gnum span { margin-left: auto; font-weight: 700; font-size: 15px; color: var(--green); }
   .goalbar .gtrack { height: 8px; border-radius: 4px; background: #fff; overflow: hidden; margin: 6px 0 4px; } .goalbar .gtrack i { display: block; height: 100%; background: var(--green); border-radius: 4px; }
-  .bulkbox { background: var(--green-l); border-radius: 12px; padding: 10px; margin: 4px 0 8px; }
   .txr.picked { box-shadow: inset 3px 0 0 var(--green); padding-left: 10px; margin-left: -10px; }
-  .txacts { align-items: center; } .txacts .askbtn { margin: 0 0 0 auto; padding-right: 0; }
+  .txacts { align-items: center; margin-top: 6px; }
+  .askicon { margin-left: auto; width: 36px; height: 36px; border: 0; background: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+  .askicon svg.spark { width: 20px; height: 20px; }
+  .txai { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--sub); min-width: 0; }
+  .txai > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .txai .tag { flex-shrink: 0; }
   .txpick { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--green); cursor: pointer; margin-right: 4px; }
   .txpick input { width: 20px; height: 20px; accent-color: var(--green); flex-shrink: 0; }
   .txwhy { margin-top: 6px; }
@@ -3324,13 +3328,13 @@ function rcptButton() {
   }
   return `<button class="qbtn rcbtn" data-act="rcptOpen">${icon('i-receipt')}<div style="flex:1;min-width:0"><b>経費を登録</b><span>${phr('レシートを撮る・口座から出たお金を登録')}</span></div>${tag}</button>`;
 }
-function accOptions(list, sel) {
-  return list.map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}${a.help ? '（' + esc(a.help) + '）' : ''}</option>`).join('');
+function accOptions(list, sel, short) {
+  return list.map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}${a.help && !short ? '（' + esc(a.help) + '）' : ''}</option>`).join('');
 }
 // Claudeに相談（レシート・口座の明細ごとに、やりとりを覚えておく）
-function askHtml(key, ctxLabel) {
+function askHtml(key, ctxLabel, iconOnly) {
   const k = S.ask[key];
-  if (!k || !k.open) return `<button class="btn small ghost askbtn" data-act="askOpen" data-k="${esc(key)}">${spark()}Claudeに聞く</button>`;
+  if (!k || !k.open) return iconOnly ? `<button class="askicon" data-act="askOpen" data-k="${esc(key)}" aria-label="Claudeに聞く" title="Claudeに聞く">${spark()}</button>` : `<button class="btn small ghost askbtn" data-act="askOpen" data-k="${esc(key)}">${spark()}Claudeに聞く</button>`;
   return `<div class="askbox" data-key="ask:${esc(key)}" data-appear="ask:${esc(key)}">
     <div class="sub" style="margin-bottom:4px">${phr('分からないことを、ふだんの言葉で聞いてください。' + (ctxLabel ? '（' + ctxLabel + 'について聞きます）' : ''))}</div>
     ${k.thread.map((t, i) => `<div class="ask-q">${esc(t.q)}</div><div class="ask-a" data-appear="aa:${esc(key)}:${i}"><span class="who">${spark()}Claude</span>${phr(t.a)}${t.accountId ? `<div><button class="btn small" data-act="askUse" data-k="${esc(key)}" data-acc="${esc(t.accountId)}">「${esc(t.account)}」にする</button></div>` : ''}</div>`).join('')}
@@ -3405,7 +3409,7 @@ function rcptQueueItem(q, R) {
     ${pay ? `<div class="sub">${phr(pay.help)}</div>` : ''}
     <label class="f" for="rf-acc-${id}">何に使った？（勘定科目）</label>
     <select id="rf-acc-${id}" data-qid="${id}" data-rf="accountId" class="${uns('account')}">${accOptions(R.accounts, f.accountId)}</select>
-    ${f.reason ? `<div class="sub aiby">${aiTag('Claudeの見立て')}${phr(f.reason)}</div>` : ''}
+    ${f.reason ? `<div class="txai">${spark()}<span>${esc(plainJa(f.reason))}</span></div>` : ''}
     ${askHtml(id, 'このレシート')}
     <div class="grid2"><div><label class="f" for="rf-rate-${id}">消費税</label><select id="rf-rate-${id}" data-qid="${id}" data-rf="rate" class="${uns('rate')}">${['8', '10', 'mixed', 'none'].map(k => `<option value="${k}" ${f.rate === k ? 'selected' : ''}>${RATE_LABEL[k]}</option>`).join('')}</select></div>
       <div><label class="f" for="rf-inv-${id}">登録番号</label><input type="text" id="rf-inv-${id}" data-qid="${id}" data-rf="invoiceNo" value="${esc(f.invoiceNo || '')}" placeholder="T＋13桁（なければ空）"></div></div>
@@ -3421,24 +3425,23 @@ function txHtml() {
   const list = T.list || [];
   const total = Math.max(T.total || 0, list.length);
   let h = `<div class="card" data-key="txcard"><h2>${icon('i-coin')}口座から出たお金 <span class="cnt">まだ登録していないもの ${total}件</span></h2>
-    <div class="sub" style="margin-bottom:6px">${phr('デビットカード・引き落としで、まだ登録していないものです。')}</div>`;
+`;
   if (!list.length) return h + '<div class="sub">ありません。すべて登録済みです。</div></div>';
   const bulk = txBulkItems();
   const can = list.filter(txBulkOk).length;
-  if (can >= 2) h += `<div class="bulkbox" data-key="txbulk"><button class="btn primary wide" data-act="txSaveAll" ${bulk.length ? '' : 'disabled'}>${spark()}チェックした${bulk.length}件をまとめて登録</button></div>`;
+  if (can >= 2) h += `<button class="btn primary wide" data-key="txbulk" data-act="txSaveAll" ${bulk.length ? '' : 'disabled'} style="margin:2px 0 8px">チェックした${bulk.length}件をまとめて登録</button>`;
   h += list.map(t => {
     const sel = S.rcpt.txSel[t.id] || (S.rcpt.txSel[t.id] = { accountId: t.ai ? t.ai.accountId : '', rate: t.ai ? t.ai.rate : '10' });
     if (!sel.accountId && t.ai) { sel.accountId = t.ai.accountId; sel.rate = t.ai.rate; }
     const ok = can >= 2 && txBulkOk(t);
     const on = ok && !S.rcpt.txOff[t.id];
-    const why = can >= 2 && !ok && !t.receipt && (t.dupe || t.ai);
     return `<div class="txr ${on ? 'picked' : ''}" data-key="tx:${esc(t.id)}"><div class="top"><span class="sub">${jdShort(t.date)}</span><span class="nm">${esc(t.content || '（内容なし）')}</span><span class="am">${yen(t.amount)}</span></div>
       ${t.dupe ? `<div class="warn" style="margin-top:6px">${phr(jdShort(t.dupe.date) + 'に「' + t.dupe.method + '」で登録したレシート（' + (t.dupe.payee || 'お店の名前なし') + '）と同じ金額です。同じ支払いなら、ここでは登録しないでください（二重になります）。')}</div>` : ''}
       ${t.receipt ? `<div class="sub"><span class="tag blue">レシートを預かっています</span> ${phr('明細と結びつけて登録します')}</div>` : `
-      <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions((T.accounts || []).filter(a => !a.personal), sel.accountId)}${(T.accounts || []).filter(a => a.personal).map(a => `<optgroup label="経費ではないもの"><option value="${esc(a.id)}" ${a.id === sel.accountId ? 'selected' : ''}>${esc(a.name)}（自分のために使ったお金）</option></optgroup>`).join('')}</select>
+      <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions((T.accounts || []).filter(a => !a.personal), sel.accountId, true)}${(T.accounts || []).filter(a => a.personal).map(a => `<optgroup label="経費ではないもの（自分のために使ったお金）"><option value="${esc(a.id)}" ${a.id === sel.accountId ? 'selected' : ''}>${esc(a.name)}</option></optgroup>`).join('')}</select>
         <select data-tx="${esc(t.id)}" data-tf="rate" aria-label="消費税" style="width:96px;flex-shrink:0">${['8', '10', 'none'].map(k => `<option value="${k}" ${sel.rate === k ? 'selected' : ''}>${{ '8': '8%', '10': '10%', none: '税なし' }[k]}</option>`).join('')}</select></div>
-      ${t.ai ? `<div class="sub aiby" data-appear="txai:${esc(t.id)}">${aiTag('Claudeの見立て')}${phr(t.same ? '前と同じ科目' : t.ai.reason)}${t.ai.unsure ? ' <span class="tag amber">要確認</span>' : ''}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
-      <div class="acts txacts">${ok ? `<label class="txpick"><input type="checkbox" data-txpick="${esc(t.id)}" ${on ? 'checked' : ''}>まとめて</label>` : why ? '<span class="tag gray">1件ずつ確認</span>' : ''}<button class="btn small ${t.dupe || on ? '' : 'primary'}" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : on ? 'これだけ登録' : 'この科目で登録'}</button>${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? '' : askHtml('tx:' + t.id, 'この明細')}</div>
+      ${t.ai ? `<div class="txai" data-appear="txai:${esc(t.id)}">${spark()}<span>${esc(plainJa(t.same ? '前と同じ科目' : t.ai.reason).replace(/[（(].*$/, ''))}</span>${t.ai.unsure ? '<span class="tag amber">要確認</span>' : ''}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
+      <div class="acts txacts">${ok ? `<label class="txpick"><input type="checkbox" data-txpick="${esc(t.id)}" ${on ? 'checked' : ''}>まとめて</label>` : ''}<button class="btn small" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : '登録'}</button>${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? '' : askHtml('tx:' + t.id, 'この明細', true)}</div>
       ${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? askHtml('tx:' + t.id, 'この明細') : ''}`}
     </div>`;
   }).join('');
