@@ -78,6 +78,8 @@ function seedJournals() {
   jb('BK13', today, [['A%3D9', 500, 'A%3D13', 'Vｻｶﾞｸ999999']]);
   jb('BK14', addDays(today, -5), [['A%3D10', 1000, 'A%3D9', 'V777777 SOFTBANK']]);
   jb('BK15', today, [['A%3D9', 300, 'A%3D13', 'Vサガク777777']]);
+  // 本物の免税事業者の仕訳は、インボイス区分が「対象外」で返ってくる
+  journals.push({ id: 'BK18', transaction_date: today, journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 947, tax_value: 0, invoice_kind: 'INVOICE_KIND_NOT_TARGET' }, creditor: { account_id: 'A%3D9', value: 947, tax_value: 0, invoice_kind: 'INVOICE_KIND_NOT_TARGET' }, remark: 'V510367 イズミヤ仕入れ' }] });
   // 口座の仕訳が二重（銀行の明細は1回分）
   jb('BK16', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
   jb('BK17', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
@@ -205,6 +207,8 @@ export function startSvcMock(port) {
         calls.mf.push(req.method + ' ' + p + u.search);
         if (req.headers.authorization !== 'Bearer jwt-1') return send({ errors: [{ message: 'unauthorized' }] }, 401);
         if (u.searchParams.get('office_code') !== '1234-5678') return send({ errors: [{ message: 'missing office_code' }] }, 400);
+        // 本物と同じく、免税事業者にはインボイス区分を送るとエラーにする
+        if (opts.exempt && /invoice_kind/.test(raw)) return send({ errors: [{ code: 'invalid', message: '免税事業者にインボイス区分を登録できません Target: invoice_kind TargetValue: INVOICE_KIND_NOT_TARGET' }] }, 400);
         if (p === '/accounts') return send({ accounts: ACCOUNTS });
         if (p === '/taxes') return send({ taxes: TAXES });
         if (p === '/term_settings') return send({ term_settings: [{ fiscal_year: 2026, start_date: '2026-01-01', end_date: '2026-12-31', accounting_method: 'TAX_INCLUDED' }] });

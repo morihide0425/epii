@@ -291,6 +291,17 @@ try {
   res = await post('/admin/api/bookFix', { id: 'BK8', bi: 0, kind: 'acct', to: '仕入高', date: T }, A);
   check(jOf('BK8').branches[0].debitor.account_id === 'A%3D1' && !res.body.issues.some(x => x.id === 'BK8'), 'Claude suggestion applied');
 
+  // 免税事業者：インボイス区分を送るとマネーフォワードがエラーにする。直すときもレシートも通るように
+  opts.exempt = true;
+  res = await post('/admin/api/bookFix', { id: 'BK18', bi: 0, kind: 'same', to: '仕入高', date: T }, A);
+  check(res.status === 200 && jOf('BK18').branches[0].debitor.account_id === 'A%3D1' && !JSON.stringify(jOf('BK18')).includes('INVOICE_KIND'), 'fix works for tax-exempt office ' + JSON.stringify(res.body).slice(0, 200));
+  res = await post('/admin/api/rcptSave', { date: T, amount: 1650, payee: 'テスト商店', accountId: acc.id, pay: 'cash', rate: '8', payment: 'cash', invoiceNo: 'T1234567890123', image: img, keepPay: true }, A);
+  check(res.status === 200 && !res.body.waiting && !JSON.stringify(journals[journals.length - 1]).includes('INVOICE_KIND'), 'receipt with registration number works for tax-exempt office ' + JSON.stringify(res.body).slice(0, 200));
+  const nErr = calls.mf.length;
+  res = await post('/admin/api/rcptSave', { date: T, amount: 1760, payee: 'テスト商店', accountId: acc.id, pay: 'cash', rate: '8', payment: 'cash', invoiceNo: 'T1234567890123', image: img, keepPay: true }, A);
+  check(res.status === 200 && calls.mf.slice(nErr).filter(c => c.startsWith('POST /journals')).length === 1, 'remembered: no failing first try');
+  opts.exempt = false;
+
   // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
   res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);
   check(res.body.answer.includes('売上') && res.body.remember === '', 'chat ' + JSON.stringify(res.body));

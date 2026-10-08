@@ -581,7 +581,14 @@ async function mfOffice(env) {
 }
 // IDはURLエンコード済みで届くので、%を含む値はそのまま送る
 function mfQ(v) { v = String(v); return /%[0-9A-Fa-f]{2}/.test(v) ? v : encodeURIComponent(v); }
-async function mfApi(env, method, path, query, body) {
+// 免税事業者の事業所には、インボイス区分（invoice_kind）を送れない。一度エラーになったら覚えて、以後は外して送る
+function stripInvoice(v) {
+  if (Array.isArray(v)) return v.map(stripInvoice);
+  if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { if (k !== 'invoice_kind') o[k] = stripInvoice(v[k]); }); return o; }
+  return v;
+}
+async function mfApi(env, method, path, query, body, retried) {
+  if (body !== undefined && JSON.stringify(body).indexOf('invoice_kind') >= 0 && await kvGet(env, 'mfExempt')) body = stripInvoice(body);
   const qs = ['office_code=' + mfQ(await mfOffice(env))];
   Object.keys(query || {}).forEach(k => {
     const v = query[k];
@@ -608,6 +615,10 @@ async function mfApi(env, method, path, query, body) {
   if (!res.ok) {
     console.error('MF API', method, path, res.status, text.slice(0, 300));
     const detail = j.errors && j.errors[0] ? (j.errors[0].message || j.errors[0].code || '') : (j.message || '');
+    if (!retried && body !== undefined && /invoice_kind|インボイス区分/.test(text) && JSON.stringify(body).indexOf('invoice_kind') >= 0) {
+      await kvPut(env, 'mfExempt', { at: Date.now() });
+      return mfApi(env, method, path, query, stripInvoice(body), true);
+    }
     fail('マネーフォワードでエラーになりました（' + (res.status === 403 ? 'このAPIキーには権限がありません' : res.status === 429 ? '少し待ってからお試しください' : (detail ? clean(detail, 80) : 'エラーコード ' + res.status)) + '）。', 502, 'MF_ERROR');
   }
   return j;
@@ -2554,7 +2565,7 @@ async function adminBookFix(env, b) {
     const to = byName(String(b.to || ''));
     if (!to) fail('科目を選んでください。');
     const side = b.kind === 'ap' || b.kind === 'vs' ? 'creditor' : 'debitor';
-    const pick = sd => { if (!sd) return sd; const o = { account_id: sd.account_id, value: (Number(sd.value) || 0) + (Number(sd.tax_value) || 0) }; if (sd.sub_account_id) o.sub_account_id = sd.sub_account_id; if (sd.tax_id) o.tax_id = sd.tax_id; if (sd.invoice_kind) o.invoice_kind = sd.invoice_kind; return o; };
+    const pick = sd => { if (!sd) return sd; const o = { account_id: sd.account_id, value: (Number(sd.value) || 0) + (Number(sd.tax_value) || 0) }; if (sd.sub_account_id) o.sub_account_id = sd.sub_account_id; if (sd.tax_id) o.tax_id = sd.tax_id; if (sd.invoice_kind && sd.invoice_kind !== 'INVOICE_KIND_NOT_TARGET') o.invoice_kind = sd.invoice_kind; return o; };
     const branches = jr.branches.map((br, i) => {
       const nb = { debitor: pick(br.debitor), creditor: pick(br.creditor), remark: br.remark || '' };
       if (i === bi) {
