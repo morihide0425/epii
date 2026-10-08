@@ -347,6 +347,9 @@
   .goalbar .gnum { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; } .goalbar .gnum b { font-size: 17px; } .goalbar .gnum small { font-size: 11px; color: var(--sub); }
   .goalbar .gnum span { margin-left: auto; font-weight: 700; font-size: 15px; color: var(--green); }
   .goalbar .gtrack { height: 8px; border-radius: 4px; background: #fff; overflow: hidden; margin: 6px 0 4px; } .goalbar .gtrack i { display: block; height: 100%; background: var(--green); border-radius: 4px; }
+  .custlist { margin-top: 8px; } .custrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .custrow .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pvnote { font-size: 12px; color: var(--amber); margin-bottom: 6px; white-space: normal; }
   .prepview { margin-top: 10px; white-space: pre-wrap; background: var(--bg); border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 1.7; line-break: strict; }
   .igtext { border: 1px solid var(--line2); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.8; margin-top: 10px; background: #fff; }
   .igtext .hash { color: var(--blue); }
@@ -2347,12 +2350,13 @@ function otherHtml() {
     <label class="f" for="prepTime">送る時刻</label>
     <select id="prepTime" data-pf="time">${times.map(x => `<option value="${x}" ${F.time === x ? 'selected' : ''}>${x}ごろ</option>`).join('')}</select>
     <label class="f">入れること</label>
-    <div class="acts" style="margin-top:0">${P.parts.map(x => `<button class="chip ${F.parts[x[0]] ? 'on' : ''}" data-act="prepPart" data-v="${x[0]}">${x[0] === 'guests' || x[0] === 'prep' || x[0] === 'cheer' ? spark() : ''}${esc(x[1])}</button>`).join('')}</div>
+    <div class="acts" style="margin-top:0">${P.parts.map(x => `<button class="chip ${F.parts[x[0]] ? 'on' : ''}" data-act="prepPart" data-v="${x[0]}">${x[0] === 'guests' || x[0] === 'prep' || x[0] === 'cheer' ? spark() : ''}${esc(x[1])}</button>`).join('')}${(F.custom || []).map((x, i) => `<button class="chip ${x.on ? 'on' : ''}" data-act="prepCustOn" data-i="${i}">${x.kind === 'ai' ? spark() : ''}${esc(x.title)}</button>`).join('')}</div>
+    ${prepCustomHtml()}
     <label class="f" for="prepNote">毎回入れておくメモ（なくても大丈夫）</label>
     <textarea id="prepNote" data-pf="note" rows="2" placeholder="例）パンの発注を確認・お花の水を替える">${esc(F.note)}</textarea>
     <div class="acts"><button class="btn primary" data-act="prepSave">保存する</button><button class="btn" data-act="prepPreview">見本を見る</button><button class="btn ghost" data-act="prepSend">いまLINEに送ってみる</button></div>
     <div class="sub" style="margin-top:6px">${phr('LINEの送信数を1回につき1通使います。お客様の名前と電話番号は、Claudeには送りません。')}</div>`;
-  if (P.preview) h += `<div class="prepview" data-key="prepview" data-appear="pv:${hashStr(P.preview.text)}">${P.preview.date ? `<div class="sub" style="margin-bottom:4px">${esc(jd(P.preview.date))}の分${P.preview.sent ? '（LINEに送りました）' : ''}</div>` : ''}${esc(P.preview.text)}</div>`;
+  if (P.preview) h += `<div class="prepview" data-key="prepview" data-appear="pv:${hashStr(P.preview.text)}">${P.preview.note ? `<div class="pvnote">${phr(P.preview.note)}</div>` : ''}${P.preview.date && !P.preview.sample ? `<div class="sub" style="margin-bottom:4px">${esc(jd(P.preview.date))}の分${P.preview.sent ? '（LINEに送りました）' : ''}</div>` : P.preview.sent ? '<div class="sub" style="margin-bottom:4px">LINEに送りました</div>' : ''}${esc(P.preview.text)}</div>`;
   if (P.wait) h += `<div style="margin-top:8px">${aiThink('Claudeが予約を読んで、メモをまとめています')}</div>`;
   h += '</div>';
   // 月の目標
@@ -2374,6 +2378,30 @@ function otherHtml() {
   return h;
 }
 function pad2(n) { return String(n).padStart(2, '0'); }
+// 入れることを足す：Claude にまとめてもらう項目か、毎回同じ文を入れる項目
+function prepCustomHtml() {
+  const P = S.prep, F = P.form, E = P.edit;
+  let h = '';
+  if ((F.custom || []).length) h += `<div class="custlist">${F.custom.map((x, i) => `<div class="custrow"><div style="flex:1;min-width:0"><b>${esc(x.title)}</b><span class="sub">${x.kind === 'ai' ? 'Claudeにお願い：' : '毎回入れる文：'}${esc(x.body)}</span></div><button class="btn small ghost" data-act="prepCustEdit" data-i="${i}">直す</button><button class="btn small ghost danger" data-act="prepCustDel" data-i="${i}">消す</button></div>`).join('')}</div>`;
+  if (!E) return h + ((F.custom || []).length < 8 ? `<button class="btn small" data-act="prepCustNew" style="margin-top:6px">${icon('i-plus')}入れることを足す</button>` : '');
+  return h + `<div class="sheet" data-key="prepedit" style="margin-top:8px">
+    <label class="f" for="pcTitle">項目の名前（LINEの見出しになります）</label>
+    <input id="pcTitle" type="text" maxlength="20" value="${esc(E.title)}" placeholder="例）ドリンクの準備">
+    <label class="f">中身</label>
+    <div class="seg" data-mg="pckind" data-mgs="button.on">${[['ai', 'Claudeにまとめてもらう'], ['text', '毎回同じ文を入れる']].map(k => `<button class="${E.kind === k[0] ? 'on' : ''}" data-act="prepCustKind" data-v="${k[0]}">${k[1]}</button>`).join('')}</div>
+    <label class="f" for="pcBody">${E.kind === 'ai' ? 'Claudeへのお願い（予約を読んで、何をまとめてほしいか）' : '入れる文'}</label>
+    <textarea id="pcBody" rows="3" maxlength="300" placeholder="${E.kind === 'ai' ? '例）ご要望から、ノンアルコールのドリンクを頼みそうな方を書き出して' : '例）閉店後に冷蔵庫の温度を確認'}">${esc(E.body)}</textarea>
+    ${E.kind === 'ai' ? `<div class="sub">${phr('予約の時間・人数・コース・ご要望・来店の記録をもとに、Claudeが毎回まとめます。お客様の名前と電話番号は送りません。')}</div>` : ''}
+    <p class="err" id="pcErr" role="alert"></p>
+    <div class="acts"><button class="btn primary small" data-act="prepCustOk">${E.i >= 0 ? '直す' : '足す'}</button><button class="btn small" data-act="prepCustCancel">やめる</button></div>
+  </div>`;
+}
+function readPrepEdit() {
+  const E = S.prep.edit;
+  if (!E) return;
+  if ($('pcTitle')) E.title = $('pcTitle').value;
+  if ($('pcBody')) E.body = $('pcBody').value;
+}
 function readPrepForm() {
   const F = S.prep.form;
   if ($('prepTime')) F.time = $('prepTime').value;
@@ -2397,7 +2425,7 @@ async function prepPreview(send) {
   if (send && !confirm('次の営業日の仕込みメモを、いまお店のLINEに送ります（1通使います）。よろしいですか？')) return;
   S.prep.wait = true; S.prep.preview = null; renderSet();
   try {
-    const r = await api('prep', { preview: !send, send: !!send, parts: F.parts, note: F.note });
+    const r = await api('prep', { preview: !send, send: !!send, parts: F.parts, note: F.note, custom: F.custom || [] });
     S.prep.preview = r.preview;
     if (send && r.preview.sent) toast('LINEに送りました');
   } catch (e) { fail(e); }
@@ -2426,6 +2454,22 @@ async function goalAdvice() {
 const OTHER_ACTS = {
   prepOn: async b => { S.prep.form.on = !S.prep.form.on; refresh(); await prepSave(null, true); toast(S.prep.form.on ? '仕込みメモを送るようにしました' : '仕込みメモを止めました'); },
   prepPart: b => { readPrepForm(); const p = S.prep.form.parts; p[b.dataset.v] = !p[b.dataset.v]; refresh(); },
+  prepCustOn: b => { readPrepForm(); const x = S.prep.form.custom[Number(b.dataset.i)]; if (x) x.on = !x.on; refresh(); },
+  prepCustNew: () => { readPrepForm(); S.prep.edit = { i: -1, title: '', kind: S.features.ai ? 'ai' : 'text', body: '' }; refresh(); setTimeout(() => $('pcTitle') && $('pcTitle').focus(), 50); },
+  prepCustEdit: b => { readPrepForm(); const x = S.prep.form.custom[Number(b.dataset.i)]; if (x) { S.prep.edit = Object.assign({ i: Number(b.dataset.i) }, x); refresh(); } },
+  prepCustKind: b => { readPrepEdit(); S.prep.edit.kind = b.dataset.v; refresh(); },
+  prepCustCancel: () => { S.prep.edit = null; refresh(); },
+  prepCustDel: b => { readPrepForm(); const x = S.prep.form.custom[Number(b.dataset.i)]; if (x && confirm('「' + x.title + '」を消しますか？（「保存する」で反映されます）')) { S.prep.form.custom.splice(Number(b.dataset.i), 1); refresh(); } },
+  prepCustOk: () => {
+    readPrepForm(); readPrepEdit();
+    const E = S.prep.edit;
+    if (!E.title.trim() || !E.body.trim()) { $('pcErr').textContent = '項目の名前と中身を入れてください。'; return; }
+    const item = { id: E.id || 'c' + Date.now().toString(36), title: E.title.trim().slice(0, 20), kind: E.kind, body: E.body.trim().slice(0, 300), on: E.i >= 0 ? E.on !== false : true };
+    const list = S.prep.form.custom = S.prep.form.custom || [];
+    if (E.i >= 0) list[E.i] = item; else list.push(item);
+    S.prep.edit = null; refresh();
+    toast('「保存する」で反映されます');
+  },
   prepSave: b => prepSave(b),
   prepPreview: () => prepPreview(false),
   prepSend: () => prepPreview(true),

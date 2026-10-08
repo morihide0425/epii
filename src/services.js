@@ -1342,9 +1342,37 @@ async function factsHead(env) {
   return [
     '今日：' + jdLong(today),
     'お店：大阪・阿倍野の薬膳レストラン、' + s.seats + '席、店主ひとり。予約はLINEのリクエスト制（お店が承認して確定）。',
-    'いつもの営業：' + WD.split('').map((w, i) => w + '曜 ' + ((s.weekly[String(i)] || []).map(k => sessionLabel(s, k)).join('・') || '休み')).join('、'),
+    await factsSettings(env, today, addDays(today, 13)),
     note ? 'お店からのメモ（覚えておいてほしいこと）：' + note : ''
   ].filter(Boolean).join('\n');
+}
+// 設定タブの内容（受付のルール・時間帯・営業日・メニュー・予約タブで変えた日）を Claude に渡す形にする
+async function factsSettings(env, from, to) {
+  const s = await getSettings(env);
+  const [courses, rr, bl] = await Promise.all([
+    allCourses(env),
+    env.DB.prepare('SELECT date, kind, sessions FROM day_rules WHERE date BETWEEN ? AND ? ORDER BY date').bind(from, to).all(),
+    env.DB.prepare("SELECT date, start, end, memo FROM blocks WHERE type = 'off' AND date BETWEEN ? AND ? ORDER BY date, start").bind(from, to).all()
+  ]);
+  const keys = sessionKeys(s);
+  const lines = ['【お店の設定（管理画面の設定タブ）】'];
+  lines.push('受付：予約の締切はふだん' + ruleText(s.cutoff) + '（メニューごとに変えられる）、お客様が変更できるのは' + ruleText(s.changeCutoff) + '、ネットでのキャンセルは' + s.cancelDays + '日前まで。' +
+    'ネット予約は1組' + s.maxGuests + '名まで。受付は' + (s.openUntil ? jdLong(s.openUntil) + 'まで' : s.aheadDays + '日先まで') + '。');
+  lines.push('時間帯：' + keys.map(k => { const c = s.sessions[k]; return sessionLabel(s, k) + ' 営業' + c.open + '〜' + c.close + '・予約は' + c.first + '〜' + c.last + '（' + c.interval + '分ごと、1組' + c.stay + '分）'; }).join('、'));
+  lines.push('いつもの営業：' + WD.split('').map((w, i) => w + '曜 ' + ((s.weekly[String(i)] || []).map(k => sessionLabel(s, k)).join('・') || '定休日')).join('、'));
+  const rl = rr.results.map(r => jdShort(r.date) + '（' + WD[weekday(r.date)] + '）' + (r.kind === 'off' ? '休み' : r.kind === 'private' ? '貸切' : String(r.sessions || '').split(',').filter(Boolean).map(k => sessionLabel(s, k)).join('・') + 'だけ営業'));
+  if (rl.length) lines.push('予約タブで変えた日（' + jdShort(from) + '〜' + jdShort(to) + '）：' + rl.join('、'));
+  const bs = bl.results.map(b => jdShort(b.date) + ' ' + b.start + '〜' + b.end + (b.memo ? '（' + clean(b.memo, 20) + '）' : ''));
+  if (bs.length) lines.push('受付を止めている時間：' + bs.join('、'));
+  lines.push('メニュー（予約ページに出ているもの）：');
+  courses.filter(c => c.visible).forEach(c => {
+    const wd = c.weekdays.length === 7 ? '毎日' : c.weekdays.map(i => WD[i]).join('') + '曜';
+    lines.push('・' + c.name + '：¥' + Number(c.price).toLocaleString() + (c.price_type === 'from' ? '〜' : '') + '、' + wd + 'の' + c.sessions.map(k => sessionLabel(s, k)).join('・') +
+      '、予約の締切 ' + ruleText(cutoffRule(c, s)) + '、' + (Number(c.min_guests) > 1 ? c.min_guests + '名から、' : '') + (c.cap ? '同じ時間に' + c.cap + '名まで' : '席数まで'));
+  });
+  const hidden = courses.filter(c => !c.visible).map(c => c.name);
+  if (hidden.length) lines.push('予約ページに出していないメニュー：' + hidden.join('、'));
+  return lines.join('\n');
 }
 async function factsMoney(env) {
   const f = features(env);
@@ -1957,21 +1985,83 @@ async function adminGoalAdvice(env) {
 /* 仕込みメモ：次の営業日の予約を、前の晩にお店のLINEへまとめて送る（予約がなければ送らない） */
 const PREP_PARTS = [
   ['list', '時間ごとの予約'], ['course', 'コースごとの人数'], ['caution', '気をつけること（アレルギー・苦手・ご要望）'], ['celebrate', 'お祝い・記念日'],
-  ['guests', 'お客様のこと（Claude）'], ['prep', '仕込みのポイント（Claude）'], ['pending', '返事待ちのリクエスト'], ['cheer', 'ひとこと（Claude）']
+  ['forecast', 'これから入りそうな予約（見込み）'], ['guests', 'お客様のこと（Claude）'], ['prep', '仕込みのポイント（Claude）'], ['pending', '返事待ちのリクエスト'], ['cheer', 'ひとこと（Claude）']
 ];
+// これから入りそうな予約の見込み：メモを送ったあとも締切が来ていないメニュー（当日の朝まで受け付けるランチなど）は、
+// 過去の同じ曜日に「同じタイミングより後に入った予約」の人数から見込む。予約なしのお客様（Square）も同じ曜日の平均を出す
+async function prepForecast(env, s, date, sendAt, rows) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const back = [];
+  for (let i = 1; i <= 12; i++) { const d = addDays(date, -7 * i); if (d < today) back.push(d); }
+  const rules = rulesMap((await env.DB.prepare('SELECT date, kind, sessions FROM day_rules WHERE date BETWEEN ? AND ?').bind(back.length ? back[back.length - 1] : date, date).all()).results);
+  const plan = dayPlan(date, rules, s);
+  const courses = (await allCourses(env)).filter(c => c.visible && c.weekdays.indexOf(weekday(date)) >= 0 && c.sessions.some(k => plan.sessions.indexOf(k) >= 0));
+  const late = courses.map(c => ({ c: c, deadline: deadlineOf(date, cutoffRule(c, s)) })).filter(x => x.deadline > sendAt);
+  const past = back.filter(d => dayPlan(d, rules, s).kind === 'open');
+  const out = { date: date, days: past.length, weekday: WD[weekday(date)], items: [], walk: [] };
+  if (!late.length && !past.length) return out;
+  const hist = past.length ? (await env.DB.prepare("SELECT date, course_id, course_name, guests, created_at FROM reservations WHERE status = '確定' AND (arrived IS NULL OR arrived != 'no') AND date IN (" + past.map(() => '?').join(',') + ')').bind(...past).all()).results : [];
+  const lead = diffDays(sendAt.slice(0, 10), date);
+  const hm = sendAt.slice(11, 16);
+  late.forEach(x => {
+    const mine = r => r.course_id === x.c.id || (!r.course_id && r.course_name === x.c.name);
+    const per = past.map(d => hist.filter(r => r.date === d && mine(r) && String(r.created_at || '') > addDays(d, -lead) + ' ' + hm).reduce((a, r) => a + (Number(r.guests) || 0), 0));
+    const booked = rows.filter(r => r.course_id ? r.course_id === x.c.id : r.course_name === x.c.name).reduce((a, r) => a + (Number(r.guests) || 0), 0);
+    const avg = per.length ? per.reduce((a, v) => a + v, 0) / per.length : null;
+    const max = per.length ? Math.max(...per) : null;
+    const cap = Math.min(x.c.cap || s.seats, s.seats);
+    out.items.push({ name: x.c.name, deadline: x.deadline, booked: booked, avg: avg, max: max, cap: cap,
+      suggest: avg === null ? null : Math.min(cap, booked + Math.round(avg)), high: max === null ? null : Math.min(cap, booked + max) });
+  });
+  // 予約なしのお客様（Squareの会計で、予約に結びついていないもの）
+  if (past.length && features(env).square) {
+    const pays = (await env.DB.prepare("SELECT date, ts FROM sq_payments WHERE status = 'COMPLETED' AND amount > refunded AND link NOT IN ('auto','res') AND date IN (" + past.map(() => '?').join(',') + ')').bind(...past).all()).results;
+    plan.sessions.forEach(k => {
+      const c = s.sessions[k];
+      if (!c) return;
+      const n = pays.filter(p => { const m = toMin(p.ts.slice(11, 16)); return m >= toMin(c.open) - 30 && m < toMin(c.close) + 60; }).length;
+      out.walk.push({ session: sessionLabel(s, k), avg: n / past.length });
+    });
+  }
+  return out;
+}
+function forecastLines(fc) {
+  if (!fc) return [];
+  const f1 = v => (Math.round(v * 10) / 10).toString();
+  const lines = [];
+  fc.items.forEach(x => {
+    const dl = (x.deadline.slice(0, 10) === fc.date ? '当日' : jdShort(x.deadline.slice(0, 10))) + x.deadline.slice(11, 16) + 'まで受付';
+    if (x.avg === null) { lines.push('・' + x.name + '（' + dl + '）：いま' + x.booked + '名。まだ記録が少ないので見込みは出せません'); return; }
+    if (!x.max) { lines.push('・' + x.name + '（' + dl + '）：いま' + x.booked + '名。これまでの' + fc.weekday + '曜は、この時間よりあとに入った予約はありません'); return; }
+    lines.push('・' + x.name + '（' + dl + '）：いま' + x.booked + '名。これまでの' + fc.weekday + '曜は締切までに平均+' + f1(x.avg) + '名（多い日+' + x.max + '名）。' +
+      (x.suggest === x.booked ? '多めに見るなら' + x.high + '名分' : x.suggest + '名分' + (x.high > x.suggest ? '、多めなら' + x.high + '名分' : '')) + 'の用意が目安');
+  });
+  fc.walk.filter(w => w.avg >= 0.5).forEach(w => lines.push('・予約なしのお客様（' + w.session + '）：これまでの' + fc.weekday + '曜は平均' + f1(w.avg) + '件'));
+  if (lines.length) lines.push('（過去' + fc.days + '回の' + fc.weekday + '曜から計算）');
+  return lines;
+}
+// 店主が足した項目：kind 'ai' は Claude へのお願い（予約を読んでまとめてもらう）、'text' は毎回そのまま入れる文
+function prepCustom(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 8).map((x, i) => ({
+    id: /^c[a-z0-9]{1,12}$/.test(String(x && x.id)) ? x.id : 'c' + i,
+    title: clean(x && x.title, 20), kind: x && x.kind === 'text' ? 'text' : 'ai', body: clean(x && x.body, 300), on: !(x && x.on === false)
+  })).filter(x => x.title && x.body);
+}
 async function prepCfg(env) {
   const v = (await kvGet(env, 'prepCfg')) || {};
   const parts = {};
   PREP_PARTS.forEach(p => { parts[p[0]] = !v.parts || v.parts[p[0]] !== false; });
-  return { on: !!v.on, time: /^\d{2}:\d{2}$/.test(v.time || '') ? v.time : '21:00', parts: parts, note: String(v.note || '') };
+  return { on: !!v.on, time: /^\d{2}:\d{2}$/.test(v.time || '') ? v.time : '21:00', parts: parts, note: String(v.note || ''), custom: prepCustom(v.custom) };
 }
 const PREP_SYSTEM = [
   'あなたは、大阪・阿倍野の小さな薬膳レストラン「épii」の店主（ひとりで仕込みから接客まで切り盛りしています）のために、次の営業日の「仕込みメモ」を作ります。店主は前の晩にLINEで読みます。',
   '予約ごとに記号（A、B…）を付けて渡します。お客様の名前は渡しません。記号で答えてください。',
+  'お店の設定（時間帯・営業日・メニューごとの予約の締切）も渡します。メモを送ったあとでも締切が来ていないメニュー（当日の朝まで受け付けるランチなど）は、まだ予約が増えることを前提に考えてください。',
   '- cautions：アレルギー・苦手な食材・体調・食べ方の配慮など、料理で気をつけること。ref は記号、text は25文字以内。なければ空。',
   '- celebrations：誕生日・記念日・お祝い・プレートの希望など。ref と text（25文字以内）。なければ空。',
   '- guests：これまでの来店やお店のメモから、どんなお客様か（何回目・前回のこと・好み）。初めての方は書かない。ref と text（40文字以内）。',
-  '- prep：仕込みで前もって用意するとよいことを、具体的に短く（各25文字以内、3つまで）。例「くるみを使わない皿を1名分」。データから言えることだけ。',
+  '- prep：仕込みで前もって用意するとよいことを、具体的に短く（各25文字以内、3つまで）。例「くるみを使わない皿を1名分」「ランチは見込みで5名分」。「これから入りそうな予約の見込み」があれば、締切までに増えそうな人数も考えて、何名分用意するとよいかを入れる。データから言えることだけ。',
+  '- custom：「店主が足した項目」があるときだけ。項目ごとに id と lines（店主のお願いに沿って、予約から言えることを短い行で。各40文字以内、5行まで。お客様に触れるときは記号を「A：」のように行の頭に付ける。言えることがなければ空）。',
   '- cheer：店主へのひとこと。メモの日が明日でないときは「明日」と書かない（曜日で書く）。1〜2文、60文字以内。忙しさ（組数・人数）や翌日の様子に合わせて、がんばりをねぎらい、体を気づかう、あたたかい言葉にする。毎回同じ言い回しにしない。大げさにせず、絵文字は使わない。お客様のことは書かない。',
   '- データにないことは書かない。推測しない。'
 ].join('\n');
@@ -1980,20 +2070,43 @@ const PREP_SCHEMA = strSchema({
   celebrations: { type: 'array', items: strSchema({ ref: { type: 'string' }, text: { type: 'string' } }) },
   guests: { type: 'array', items: strSchema({ ref: { type: 'string' }, text: { type: 'string' } }) },
   prep: { type: 'array', items: { type: 'string' } },
+  custom: { type: 'array', items: strSchema({ id: { type: 'string' }, lines: { type: 'array', items: { type: 'string' } } }) },
   cheer: { type: 'string' }
 });
 const CHEER_PLAIN = ['明日もおつかれさまです。今夜はゆっくり休んでくださいね。', '仕込みは無理のない範囲で。いつもおつかれさまです。', '明日もいい一日になりますように。早めに休んでくださいね。'];
 function shortName(n) { return String(n || '').trim().split(/\s+/)[0] || 'お客'; }
-async function prepMemo(env, date, cfg) {
+// 見本用のお客様（予約がひとつもないとき）
+async function prepSampleRows(env, date) {
+  const s = await getSettings(env);
+  const courses = (await allCourses(env)).filter(c => c.visible);
+  const keys = sessionKeys(s);
+  const k1 = keys.indexOf('lunch') >= 0 ? 'lunch' : keys[0];
+  const k2 = keys.indexOf('dinner') >= 0 ? 'dinner' : keys[keys.length - 1];
+  const pick = k => { const c = courses.find(x => (x.sessions || []).indexOf(k) >= 0) || courses[0]; return c ? c.name : 'おまかせコース'; };
+  const at = k => (s.sessions[k] && s.sessions[k].first) || '12:00';
+  return [
+    { id: 'sample1', date: date, time: at(k1), session: k1, guests: 2, name: '見本花子', course_name: pick(k1), note: 'くるみのアレルギーがあります', memo: '' },
+    { id: 'sample2', date: date, time: at(k2), session: k2, guests: 3, name: '見本太郎', course_name: pick(k2), note: '母の誕生日のお祝いです。デザートにひとことお願いできますか', memo: '' }
+  ];
+}
+async function prepMemo(env, date, cfg, sample) {
   const s = await getSettings(env);
   const today = jstStamp(Date.now()).slice(0, 10);
-  const rows = (await env.DB.prepare("SELECT * FROM reservations WHERE date = ? AND status = '確定' ORDER BY time, created_at").bind(date).all()).results;
+  const rows = sample ? await prepSampleRows(env, date) : (await env.DB.prepare("SELECT * FROM reservations WHERE date = ? AND status = '確定' ORDER BY time, created_at").bind(date).all()).results;
   if (!rows.length) return null;
-  const pend = (await env.DB.prepare("SELECT COUNT(*) AS n FROM reservations WHERE date = ? AND status IN ('返事待ち','提案中')").bind(date).first()).n;
+  const pend = sample ? 0 : (await env.DB.prepare("SELECT COUNT(*) AS n FROM reservations WHERE date = ? AND status IN ('返事待ち','提案中')").bind(date).first()).n;
+  const custom = (cfg.custom || []).filter(x => x.on);
+  const aiCustom = custom.filter(x => x.kind === 'ai');
   const hash = await hashOf(JSON.stringify(rows.map(r => [r.id, r.time, r.guests, r.course_name, r.note, r.memo])));
   const [crows, info] = await Promise.all([allCustomerRows(env), customerInfo(env)]);
   const grouped = groupCustomers(crows, info);
   const P = cfg.parts;
+  // 送るとき（見本は、設定した時刻に送ったとして）より後に締切があるメニューの見込み
+  const nowStamp = jstStamp(Date.now());
+  const sendAt = nowStamp > addDays(date, -1) + ' ' + (cfg.time || '21:00') ? nowStamp : addDays(date, -1) + ' ' + (cfg.time || '21:00');
+  let fc = null;
+  if (P.forecast || P.prep) { try { fc = await prepForecast(env, s, date, sendAt, rows); } catch (e) { console.error('見込み', e && e.message); } }
+  const fcl = forecastLines(fc);
   const refs = rows.map((r, i) => ({ r: r, ref: String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : ''), f: guestFacts(r, grouped, info, today) }));
   const who = x => x.r.time + ' ' + shortName(x.r.name) + '様';
   const guests = rows.reduce((a, r) => a + (Number(r.guests) || 0), 0);
@@ -2011,25 +2124,30 @@ async function prepMemo(env, date, cfg) {
   }
   // Claude にまとめてもらう（名前・電話番号は送らない）
   let ai = null;
-  const wantAi = env.ANTHROPIC_API_KEY && (P.caution || P.celebrate || P.guests || P.prep || P.cheer);
+  const wantAi = env.ANTHROPIC_API_KEY && (P.caution || P.celebrate || P.guests || P.prep || P.cheer || aiCustom.length);
   if (wantAi) {
-    const input = '今日：' + jdLong(today) + '\nメモの日（次の営業日）：' + jdLong(date) + (addDays(today, 1) === date ? '（明日）' : '（' + diffDays(today, date) + '日後。明日ではありません）') + '、' + rows.length + '組 ' + guests + '名、' + s.seats + '席\n' + refs.map(x => [
+    const input = await factsSettings(env, today, date) + '\n\n今日：' + jdLong(today) + '\nメモを送る時刻：' + sendAt + '\nメモの日（次の営業日）：' + jdLong(date) + (addDays(today, 1) === date ? '（明日）' : '（' + diffDays(today, date) + '日後。明日ではありません）') + '、' + rows.length + '組 ' + guests + '名、' + s.seats + '席\n' + refs.map(x => [
       x.ref, x.r.time, x.r.guests + '名', x.r.course_name || 'コース未定',
       '来店：' + (x.f && x.f.visits ? (x.f.visits + 1) + '回目' : '初めて'),
       'ご要望：' + (noPrivate(x.r.note, 200) || 'なし'),
       x.r.memo ? 'この予約のメモ：' + noPrivate(x.r.memo, 200) : '',
       x.f && x.f.memo ? 'お客様メモ：' + x.f.memo : '',
       x.f && x.f.past.length ? 'これまで：' + x.f.past.slice(0, 3).map(p => p.date + ' ' + p.course + (p.note ? '（' + p.note + '）' : '')).join('／') : ''
-    ].filter(Boolean).join('｜')).join('\n');
+    ].filter(Boolean).join('｜')).join('\n') +
+      (fcl.length ? '\n\nこれから入りそうな予約の見込み（締切がまだのメニュー・予約なしのお客様）：\n' + fcl.join('\n') : '') +
+      (aiCustom.length ? '\n\n店主が足した項目（id｜項目の名前｜お願い）：\n' + aiCustom.map(x => x.id + '｜' + x.title + '｜' + x.body).join('\n') : '');
     const src = await hashOf(input);
-    const hit = await aiCacheGet(env, 'prep:' + date);
+    const ckey = 'prep:' + (sample ? 'sample' : date);
+    const hit = await aiCacheGet(env, ckey);
     if (hit && hit.src === src) ai = hit.v;
     else {
       try {
         const out = await claude(env, { system: PREP_SYSTEM, effort: 'low', maxTokens: 8000, content: [{ type: 'text', text: input }], schema: PREP_SCHEMA });
         const pick = list => (list || []).map(x => ({ ref: String(x.ref || '').trim(), text: plain(clean(x.text, 80)) })).filter(x => x.text);
-        ai = { cautions: pick(out.cautions), celebrations: pick(out.celebrations), guests: pick(out.guests), prep: (out.prep || []).map(x => plain(clean(x, 60))).filter(Boolean).slice(0, 3), cheer: plain(clean(out.cheer, 120)) };
-        await aiCachePut(env, 'prep:' + date, src, ai);
+        const cus = {};
+        (out.custom || []).forEach(x => { cus[String(x.id)] = (x.lines || []).map(l => plain(clean(l, 80))).filter(Boolean).slice(0, 5); });
+        ai = { cautions: pick(out.cautions), celebrations: pick(out.celebrations), guests: pick(out.guests), prep: (out.prep || []).map(x => plain(clean(x, 60))).filter(Boolean).slice(0, 3), custom: cus, cheer: plain(clean(out.cheer, 120)) };
+        await aiCachePut(env, ckey, src, ai);
       } catch (e) { console.error('仕込みメモ', e && e.message); }
     }
   }
@@ -2044,8 +2162,17 @@ async function prepMemo(env, date, cfg) {
     const l = ai ? refLines(ai.celebrations) : refs.filter(x => /誕生|記念|お祝|結婚|プレート|サプライズ/.test(x.r.note || '')).map(x => '・' + who(x) + '：' + noPrivate(x.r.note, 60));
     if (l.length) lines.push('', '■ お祝い・記念日', ...l);
   }
+  if (P.forecast && fcl.length) lines.push('', '■ これから入りそうな予約（見込み）', ...fcl);
   if (P.guests && ai && ai.guests.length) lines.push('', '■ お客様のこと（Claude）', ...refLines(ai.guests));
   if (P.prep && ai && ai.prep.length) lines.push('', '■ 仕込みのポイント（Claude）', ...ai.prep.map(x => '・' + x));
+  // 店主が足した項目（Claude にまとめてもらうもの・毎回同じ文）
+  custom.forEach(x => {
+    if (x.kind === 'text') { lines.push('', '■ ' + x.title, x.body); return; }
+    const got = ai && ai.custom ? ai.custom[x.id] || [] : null;
+    if (!got) return;
+    const l = got.map(t => { const m = t.match(/^([A-Z]\d*)[：:]\s*/); return '・' + (m && byRef[m[1]] ? who(byRef[m[1]]) + '：' + t.slice(m[0].length) : t); });
+    if (l.length) lines.push('', '■ ' + x.title + '（Claude）', ...l);
+  });
   if (P.pending && pend) lines.push('', '■ 返事待ちのリクエスト', 'この日にまだ返事をしていないリクエストが' + pend + '件あります');
   if (cfg.note && cfg.note.trim()) lines.push('', '■ いつものメモ', cfg.note.trim());
   if (P.cheer) lines.push('', (ai && ai.cheer) || CHEER_PLAIN[Number(date.slice(8)) % CHEER_PLAIN.length]);
@@ -2086,21 +2213,28 @@ async function adminPrep(env, b) {
   if (b.save) {
     const parts = {};
     PREP_PARTS.forEach(p => { parts[p[0]] = !(b.parts && b.parts[p[0]] === false); });
-    await kvPut(env, 'prepCfg', { on: !!b.on, time: /^\d{2}:\d{2}$/.test(b.time || '') ? b.time : '21:00', parts: parts, note: clean(b.note, 300) });
+    await kvPut(env, 'prepCfg', { on: !!b.on, time: /^\d{2}:\d{2}$/.test(b.time || '') ? b.time : '21:00', parts: parts, note: clean(b.note, 300), custom: prepCustom(b.custom) });
   }
   const cfg = await prepCfg(env);
   if (b.preview || b.send) {
     const s = await getSettings(env);
     const today = jstStamp(Date.now()).slice(0, 10);
+    const use = Object.assign({}, cfg, b.parts ? { parts: Object.assign({}, cfg.parts, b.parts), note: clean(b.note, 300), custom: prepCustom(b.custom) } : {});
     const next = (await openDaysBetween(env, s, addDays(today, 1), addDays(today, 45)))[0];
-    if (!next) return { cfg: cfg, preview: { empty: true, text: '45日先まで営業日がありません。' } };
-    const memo = await prepMemo(env, next.date, Object.assign({}, cfg, b.parts ? { parts: Object.assign({}, cfg.parts, b.parts), note: clean(b.note, 300) } : {}));
-    if (!memo) return { cfg: cfg, preview: { empty: true, date: next.date, text: jd(next.date) + 'はまだ予約がありません。予約がない日は送りません。' } };
+    let memo = next ? await prepMemo(env, next.date, use) : null;
+    let why = '';
+    if (!memo) {
+      // 次の営業日に予約がないときは、いちばん近い予約のある日。それもなければ見本のお客様で
+      const r = await env.DB.prepare("SELECT date FROM reservations WHERE status = '確定' AND date > ? ORDER BY date LIMIT 1").bind(today).first();
+      if (r) { memo = await prepMemo(env, r.date, use); why = (next ? jd(next.date) + '（次の営業日）はまだ予約がないので、いちばん近い予約のある日で作りました。' : '') + '予約がない日は送りません。'; }
+      else { memo = await prepMemo(env, next ? next.date : addDays(today, 1), use, true); memo.sample = true; why = 'これからの予約がないので、見本のお客様（実際にはいません）で作りました。予約がない日は送りません。'; }
+    }
+    const text = memo.sample ? memo.text.replace('【仕込みメモ ', '【仕込みメモ（見本） ') : memo.text;
     if (b.send) {
-      const res = await pushOwner(env, memo.text);
+      const res = await pushOwner(env, text);
       if (!res.ok) fail('LINEに送れませんでした（' + (res.message || 'エラー') + '）。');
     }
-    return { cfg: cfg, preview: { date: next.date, text: memo.text, sent: !!b.send } };
+    return { cfg: cfg, preview: { date: memo.date, next: next ? next.date : '', text: text, sent: !!b.send, sample: !!memo.sample, note: why } };
   }
   return { cfg: cfg, parts: PREP_PARTS };
 }

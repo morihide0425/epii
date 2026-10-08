@@ -76,6 +76,7 @@ function aiAnswer(body) {
       celebrations: rows.filter(l => l.includes('記念日')).map(l => ({ ref: ref(l), text: '結婚記念日' })),
       guests: rows.filter(l => /\d+回目/.test(l)).map(l => ({ ref: ref(l), text: '2回目。｜前回も｜ランチ' })),
       prep: rows.some(l => l.includes('アレルギー')) ? ['くるみを｜使わない皿を｜1名分'] : [],
+      custom: [...String(body.messages[0].content[0].text).matchAll(/^(c[a-z0-9]+)｜/gm)].map(m => ({ id: m[1], lines: [rows.length ? ref(rows[0]) + '：ノンアル｜1名' : 'なし'] })),
       cheer: '明日は｜ゆったりした日です。｜今夜は｜早めに｜休んでくださいね。'
     };
   }

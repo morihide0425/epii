@@ -344,12 +344,21 @@ try {
 
   // 仕込みメモ：次の営業日の予約を、前の晩にお店のLINEへ（予約がなければ送らない）
   const day0 = (await post('/admin/api/prep', { preview: true }, A)).body;
-  const nd = day0.preview.date;
+  const nd = day0.preview.next;
   check(nd > T && wd(nd) !== 1 && wd(nd) !== 2, 'next business day ' + nd);
   const db2 = await env.mf.getD1Database('DB');
   await db2.prepare("DELETE FROM reservations WHERE date = ?").bind(nd).run();
+  await db2.prepare("INSERT INTO reservations (id, created_at, updated_at, status, date, time, session, guests, name, phone, course_id, course_name, note, hold_date, hold_time, hold_session, source, memo) VALUES ('PP0', ?, ?, '確定', ?, '12:00', 'lunch', 2, '高橋 誠', '', '', '養生ランチ', '', ?, '12:00', 'lunch', '電話', '')").bind(T + ' 09:00', T + ' 09:00', add(nd, 7), add(nd, 7)).run();
   res = await post('/admin/api/prep', { preview: true }, A);
-  check(res.body.preview.empty && res.body.preview.text.includes('予約がない日は送りません'), 'empty day');
+  check(res.body.preview.date > nd && res.body.preview.note.includes('いちばん近い予約のある日') && res.body.preview.text.startsWith('【仕込みメモ '), 'no reservations on next day: nearest day ' + JSON.stringify(res.body.preview).slice(0, 200));
+  // これからの予約がひとつもない：見本のお客様で見せる（DBには入れない）
+  await db2.prepare("UPDATE reservations SET status = '確定待避' WHERE status = '確定' AND date > ?").bind(T).run();
+  res = await post('/admin/api/prep', { preview: true }, A);
+  const sp = res.body.preview;
+  check(sp.sample && sp.text.startsWith('【仕込みメモ（見本） ') && sp.text.includes('見本花子様 2名 養生ランチ') && sp.text.includes('見本太郎様 3名 季節の薬膳フレンチ') && sp.note.includes('見本のお客様') && sp.text.includes('くるみアレルギー'), 'sample preview\n' + sp.text);
+  check(!JSON.stringify(calls.ai[calls.ai.length - 1].body).includes('見本花子'), 'sample names not sent');
+  check(!(await db2.prepare("SELECT COUNT(*) AS n FROM reservations WHERE id LIKE 'sample%'").first()).n, 'sample not stored');
+  await db2.prepare("UPDATE reservations SET status = '確定' WHERE status = '確定待避'").run();
   await db2.prepare("INSERT INTO reservations (id, created_at, updated_at, status, date, time, session, guests, name, phone, course_id, course_name, note, hold_date, hold_time, hold_session, source, memo) VALUES ('PP1', ?, ?, '確定', ?, '18:00', 'dinner', 2, '佐藤 恵', '09011112222', '', '季節の薬膳フレンチ', '結婚記念日。くるみアレルギー。090-1234-9999', ?, '18:00', 'dinner', 'LINE', '')").bind(T + ' 09:00', T + ' 09:00', nd, nd).run();
   await db2.prepare("INSERT INTO reservations (id, created_at, updated_at, status, date, time, session, guests, name, phone, course_id, course_name, note, hold_date, hold_time, hold_session, source, memo) VALUES ('PP2', ?, ?, '確定', ?, '11:30', 'lunch', 3, '鈴木 一郎', '', '', '養生ランチ', '', ?, '11:30', 'lunch', '電話', '')").bind(T + ' 09:00', T + ' 09:00', nd, nd).run();
   res = await post('/admin/api/prep', { preview: true }, A);
@@ -361,6 +370,32 @@ try {
   const nAi2 = calls.ai.length;
   res = await post('/admin/api/prep', { preview: true, parts: { cheer: false, course: false }, note: 'パンの発注を確認' }, A);
   check(calls.ai.length === nAi2 && !res.body.preview.text.includes('■ コースごとの人数') && !res.body.preview.text.includes('休んでくださいね') && res.body.preview.text.includes('■ いつものメモ\nパンの発注を確認'), 'parts switch + cached');
+  // 当日の朝まで受け付けるメニュー：過去の同じ曜日に、前の晩より後に入った予約から見込みを出す（設定も Claude に渡す）
+  const lunch = await db2.prepare("SELECT id FROM courses WHERE name = '養生ランチ'").first();
+  await db2.prepare("UPDATE courses SET cutoff_mode = 'custom', cutoff_days = 0, cutoff_time = '09:00' WHERE id = ?").bind(lunch.id).run();
+  const sendDay = T > add(nd, -1) ? T : add(nd, -1);
+  const lead = Math.round((Date.parse(nd) - Date.parse(sendDay)) / 86400000);
+  for (const w of [7, 14]) {
+    const d = add(nd, -w);
+    await db2.prepare("INSERT INTO reservations (id, created_at, updated_at, status, date, time, session, guests, name, phone, course_id, course_name, note, hold_date, hold_time, hold_session, source, memo, arrived) VALUES (?, ?, ?, '確定', ?, '12:00', 'lunch', 3, '過去 客', '', ?, '養生ランチ', '', ?, '12:00', 'lunch', 'LINE', '', 'yes')")
+      .bind('PH' + w, add(d, -lead) + ' 23:58', add(d, -lead) + ' 23:58', d, lunch.id, d).run();
+  }
+  res = await post('/admin/api/prep', { preview: true, parts: {}, note: '' }, A);
+  const ft = res.body.preview.text;
+  check(ft.includes('■ これから入りそうな予約（見込み）') && /・養生ランチ（当日09:00まで受付）：いま3名。これまでの.曜は締切までに平均\+[\d.]+名（多い日\+3名）/.test(ft), 'forecast for same-day menu\n' + ft);
+  const fin = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
+  check(fin.includes('【お店の設定（管理画面の設定タブ）】') && fin.includes('養生ランチ：') && fin.includes('予約の締切 当日09:00まで') && fin.includes('これから入りそうな予約の見込み') && !fin.includes('過去 客'), 'settings and forecast sent to Claude');
+  res = await post('/admin/api/analysisAi', { section: 'booking' }, A);
+  check(String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('予約の締切 当日09:00まで'), 'settings in analysis');
+  // 入れることを足す：Claude にまとめてもらう項目と、毎回同じ文の項目
+  const pcust = [{ id: 'cdrink', title: 'ドリンクの準備', kind: 'ai', body: 'ノンアルコールを頼みそうな方を書き出して' }, { id: 'cclose', title: '閉店後', kind: 'text', body: '冷蔵庫の温度を確認' }, { id: 'coff', title: '止めた項目', kind: 'text', body: '出ない', on: false }];
+  res = await post('/admin/api/prep', { preview: true, parts: {}, note: '', custom: pcust }, A);
+  const ct = res.body.preview.text;
+  check(ct.includes('■ ドリンクの準備（Claude）\n・11:30 鈴木様：ノンアル1名') && ct.includes('■ 閉店後\n冷蔵庫の温度を確認') && !ct.includes('止めた項目'), 'custom items\n' + ct);
+  check(String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('cdrink｜ドリンクの準備｜ノンアルコールを頼みそうな方'), 'custom ask sent to Claude');
+  await post('/admin/api/prep', { save: true, on: false, time: '21:00', parts: {}, note: '', custom: pcust.concat([{ title: '', body: 'x' }]) }, A);
+  const saved = (await post('/admin/api/prep', {}, A)).body.cfg.custom;
+  check(saved.length === 3 && saved[2].on === false && saved[0].kind === 'ai', 'custom saved');
   // オンにして時刻を過ぎていれば、定期実行で1回だけ送る
   await post('/admin/api/prep', { save: true, on: true, time: '00:00', parts: {}, note: '' }, A);
   pushes.length = 0;
