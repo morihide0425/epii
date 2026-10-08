@@ -45,7 +45,8 @@ const ACCOUNTS = [
   { id: 'A%3D12', name: '買掛金', account_group: 'LIABILITY', available: true },
   { id: 'A%3D13', name: '雑収入', account_group: 'REVENUE', available: true },
   { id: 'A%3D14', name: '未収金', account_group: 'ASSET', available: true },
-  { id: 'A%3D15', name: '売上値引・返品', account_group: 'REVENUE', available: true }
+  { id: 'A%3D15', name: '売上値引・返品', account_group: 'REVENUE', available: true },
+  { id: 'A%3D16', name: '損害保険料', account_group: 'EXPENSE', available: true }
 ];
 const TAXES = [
   { id: 'T1', name: '課仕 10%', available: true }, { id: 'T2', name: '課税仕入 10%', available: true },
@@ -71,6 +72,19 @@ function seedJournals() {
   jb('BK8', today, [['A%3D2', 1200, 'A%3D5', 'アベノセイカ 野菜']]);
   jb('BK9', today, [['A%3D2', 120000, 'A%3D9', 'ノートパソコン']]);
   jb('BK10', today, [['A%3D11', 10000, 'A%3D9', '振込 タキグチ ナホ']]);
+  // au損害保険の引き落としと、その差額の返金（番号と金額が一致）。番号が合わない返金・金額が違う返金
+  jb('BK11', addDays(today, -6), [['A%3D16', 340, 'A%3D9', 'V312703 AUINSURANCECO,LTD']]);
+  jb('BK12', today, [['A%3D9', 340, 'A%3D13', 'Vサガク312703']]);
+  jb('BK13', today, [['A%3D9', 500, 'A%3D13', 'Vｻｶﾞｸ999999']]);
+  jb('BK14', addDays(today, -5), [['A%3D10', 1000, 'A%3D9', 'V777777 SOFTBANK']]);
+  jb('BK15', today, [['A%3D9', 300, 'A%3D13', 'Vサガク777777']]);
+  // 口座の仕訳が二重（銀行の明細は1回分）
+  jb('BK16', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
+  jb('BK17', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
+  txs.push({ id: 'TX%3D90', date: today, value: 2200, side: 'EXPENSE', content: 'ﾃｽﾄ ﾁｭｳﾌｸ', journalizing_status: 'registered' });
+  // 帳簿の口座の動きに合う銀行の明細（登録済み）。BK4 だけは銀行にない
+  [['BK5', 550, 'INCOME', today], ['BK9', 120000, 'EXPENSE', today], ['BK10', 10000, 'EXPENSE', today], ['BK11', 340, 'EXPENSE', addDays(today, -6)], ['BK12', 340, 'INCOME', today], ['BK13', 500, 'INCOME', today], ['BK14', 1000, 'EXPENSE', addDays(today, -5)], ['BK15', 300, 'INCOME', today]]
+    .forEach((x, i) => txs.push({ id: 'TXB' + i, date: x[3], value: x[1], side: x[2], content: x[0], journalizing_status: 'registered' }));
   journals.push({ id: 'S1', transaction_date: today, journal_type: 'journal_entry', branches: [{ debitor: { account_id: 'A%3D5', value: 1000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 1000, tax_value: 0 } }] });
   // 口座の明細（まだ登録していないもの）：デビットカードの支払い、引き落とし、入金
   txs.push({ id: 'TX%3D1', date: today, value: 6580, side: 'EXPENSE', content: 'VISAデビット アベノセイカ', journalizing_status: 'none', connected_account_id: 'CA1' });
@@ -86,7 +100,7 @@ function aiAnswer(body) {
   const text = JSON.stringify(body.messages);
   if (sys.includes('帳簿を確定申告の前に見直す')) {
     const lines = String(body.messages[0].content[0].text).split('\n').filter(l => l.includes('消耗品費') && l.includes('野菜'));
-    return { items: lines.map(l => { const p = l.split('｜'); return { id: p[0], bi: Number(p[1]), from: '消耗品費', to: '仕入高', why: '食材なので｜仕入高' }; }) };
+    return { items: lines.map(l => { const p = l.split('｜'); return { id: p[0], bi: Number(p[1]), from: '消耗品費', to: '仕入高', title: '食材なので仕入高', why: 'アベノセイカは青果店' }; }) };
   }
   if (text.includes('現金で払ったものの摘要')) {
     const ids = [...String(body.messages[0].content[0].text).matchAll(/^(\d+)｜/gm)].map(m => m[1]);

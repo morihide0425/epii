@@ -254,7 +254,21 @@ try {
   res = await post('/admin/api/book', {}, A);
   const bkOf = k => res.body.issues.find(x => x.id === k);
   check(res.body.connected && bkOf('BK1') && bkOf('BK1').kind === 'same' && bkOf('BK1').to === '仕入高' && bkOf('BK2').to === '事業主貸', 'same-account entries found ' + JSON.stringify(res.body.issues.map(x => [x.id, x.kind, x.to])));
-  check(bkOf('BK3').kind === 'pair' && bkOf('BK5').kind === 'vs' && bkOf('BK5').to === '通信費' && bkOf('BK6').kind === 'ap' && res.body.issues.some(x => x.kind === 'ar' && x.amount === 3410) && bkOf('BK9').kind === 'big', 'other checks');
+  check(bkOf('BK3').kind === 'pair' && bkOf('BK5').kind === 'vs' && bkOf('BK5').to === '通信費' && bkOf('BK6').kind === 'ap' && res.body.issues.some(x => x.key.startsWith('ar:') && x.amount === 3410) && bkOf('BK9').title === '10万円以上の消耗品', 'other checks');
+  // デビットの返金は、番号と金額が元の支払いと合うときだけ、その科目をすすめる（根拠も出す）
+  check(bkOf('BK12').kind === 'vs' && bkOf('BK12').to === '損害保険料' && bkOf('BK12').why.includes('番号と金額が同じ') && bkOf('BK12').why.includes('340円'), 'refund matched by number and amount ' + JSON.stringify(bkOf('BK12')));
+  check(!res.body.issues.some(x => x.id === 'BK13' && x.fix) && bkOf('BK15').kind === 'info' && bkOf('BK15').why.includes('一部の返金'), 'no guess without evidence');
+  check(bkOf('BK1').why.length > 0 && res.body.balanced === res.body.total && res.body.total > 10, 'evidence and debit=credit');
+  // 口座：帳簿の動きと銀行の明細を照らし合わせる（二重・通帳にない動き）
+  const dupB = res.body.issues.find(x => x.dupBank);
+  check(dupB && (dupB.id === 'BK16' || dupB.id === 'BK17') && res.body.issues.some(x => x.id === 'BK4' && x.title === '通帳にない口座の動き') && res.body.bank, 'bank reconciliation ' + JSON.stringify(res.body.bank));
+  // Square：会計ひとつずつ照らし合わせて、理由を出す
+  const sm = res.body.sales.find(m => m.diffN);
+  check(sm && sm.diff.some(d => d.text.includes('マネーフォワードにありません')), 'per-payment causes ' + JSON.stringify(sm && sm.diff.slice(0, 2)));
+  // 現金：1月1日の残高と、数えた現金を入れると比べられる
+  res = await post('/admin/api/bookCash', { open: '50,000', counted: '30,000' }, A);
+  check(res.body.cash.open === 50000 && res.body.cash.counted === 30000 && res.body.cash.book === 50000 + res.body.cash.net, 'cash balance');
+  res = await post('/admin/api/book', {}, A);
   check(res.body.sales.length >= 1 && res.body.sales.some(m => m.diffN > 0), 'sales comparison ' + JSON.stringify(res.body.sales.slice(-1)));
   check(!String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('タキグチ'), 'transfer names not sent');
   res = await post('/admin/api/rcptList', {}, A);
@@ -268,12 +282,12 @@ try {
   check(jOf('BK5').branches[0].creditor.account_id === 'A%3D10', 'refund to 通信費');
   res = await post('/admin/api/bookFix', { id: 'BK3', kind: 'pair', date: T }, A);
   check(!jOf('BK3') && !res.body.issues.some(x => x.id === 'BK3'), 'meaningless pair deleted');
-  res = await post('/admin/api/bookIgnore', { key: bkOf0(res, 'BK9').key }, A);
-  check(!res.body.issues.some(x => x.id === 'BK9'), 'ignore');
+  res = await post('/admin/api/bookIgnore', { key: res.body.issues.find(x => x.id === 'BK9' && x.title === '10万円以上の消耗品').key }, A);
+  check(!res.body.issues.some(x => x.id === 'BK9' && x.title === '10万円以上の消耗品'), 'ignore');
   res = await post('/admin/api/bookAi', {}, A);
   const ai1 = res.body.issues.find(x => x.kind === 'acct' && x.id === 'BK8');
   const bkText = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
-  check(ai1 && ai1.to === '仕入高' && ai1.ai && !bkText.includes('タキグチ') && bkText.includes('振込（相手）'), 'Claude review ' + JSON.stringify(ai1));
+  check(ai1 && ai1.to === '仕入高' && ai1.ai && ai1.why === 'アベノセイカは青果店' && !bkText.includes('タキグチ') && bkText.includes('振込（相手）') && /｜(消耗品費|仕入高)×\d/.test(bkText), 'Claude review with evidence ' + JSON.stringify(ai1));
   res = await post('/admin/api/bookFix', { id: 'BK8', bi: 0, kind: 'acct', to: '仕入高', date: T }, A);
   check(jOf('BK8').branches[0].debitor.account_id === 'A%3D1' && !res.body.issues.some(x => x.id === 'BK8'), 'Claude suggestion applied');
 

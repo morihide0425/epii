@@ -362,7 +362,10 @@
   .bk { padding: 10px 0; border-top: 1px solid var(--line); }
   .bk .top { display: flex; gap: 8px; align-items: baseline; font-size: 13px; } .bk .nm { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .bk .am { font-weight: 700; white-space: nowrap; }
   .bk .why { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; } .bk .why b { color: var(--amber); font-weight: 600; flex-shrink: 0; } .bk .why span { color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bk .acts { align-items: center; margin-top: 6px; } .bk select { width: auto; flex: 1; min-width: 0; font-size: 14px; padding: 6px 8px; }
+  .bk .acts { align-items: center; margin-top: 6px; }
+  .bk .basis { font-size: 11px; color: var(--sub); margin-top: 2px; line-height: 1.5; }
+  .causes { list-style: none; margin: 2px 0 6px; padding: 0; font-size: 12px; line-height: 1.6; } .causes li { display: flex; gap: 8px; padding: 2px 0; } .causes li span { color: var(--sub); flex-shrink: 0; width: 34px; }
+  .cashin { display: flex; gap: 8px; align-items: flex-end; margin-top: 6px; } .cashin label { flex: 1; min-width: 0; font-size: 11px; color: var(--sub); } .cashin input { font-size: 15px; padding: 7px 9px; margin-top: 2px; } .bk select { width: auto; flex: 1; min-width: 0; font-size: 14px; padding: 6px 8px; }
   .custlist { margin-top: 8px; } .custrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
   .custrow .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pvnote { font-size: 12px; color: var(--amber); margin-bottom: 6px; white-space: normal; }
@@ -1522,6 +1525,7 @@ ACTIONS.today = async (a, b) => {
   if (a === 'bookIgnore') { await bookCall(b, 'bookIgnore', { key: b.dataset.k }, 'このままにしました'); return; }
   if (a === 'bookAi') { await bookAi(); return; }
   if (a === 'bookMore') { S.rcpt.bookAll = true; refresh(); return; }
+  if (a === 'bookCash') { await bookCall(b, 'bookCash', { open: $('bkOpen').value, counted: $('bkCount').value }, '比べました'); return; }
   if (a === 'bookDays') { S.rcpt.bookDays = Object.assign({}, S.rcpt.bookDays, { [b.dataset.v]: true }); refresh(); return; }
   if (a === 'rcptForce') {
     if (!confirm('口座の明細を待たずに登録しますか？（あとで明細が届いたら、マネーフォワードで二重になっていないか確かめてください）')) return;
@@ -3520,6 +3524,7 @@ function bookRow(x) {
   return `<div class="bk" data-key="bk:${k}">
     <div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.remark || '（摘要なし）')}</span><span class="am">${yen(x.amount)}</span></div>
     <div class="why">${x.ai ? spark() : ''}<b>${esc(x.title)}</b><span>${esc(x.detail)}</span></div>
+    ${x.why ? `<div class="basis">${esc(x.why)}</div>` : ''}
     <div class="acts">${acts}<button class="btn small ghost" data-act="bookIgnore" data-k="${k}">${x.fix ? 'このまま' : 'わかった'}</button></div>
   </div>`;
 }
@@ -3532,14 +3537,33 @@ function bookHtml() {
   if (B.err) h += `<div class="warn">${phr(B.err)}</div>`;
   if (!issues.length) h += '<div class="okbar">' + icon('i-check-ink') + 'おかしいところはありません</div>';
   else h += `<div class="sub" style="margin-bottom:4px">${phr('直すと、マネーフォワードの仕訳も直ります。')}</div>` + show.map(bookRow).join('') + (issues.length > show.length ? `<button class="more2" data-act="bookMore">ほか ${issues.length - show.length}件を見る</button>` : '');
+  h += bookSumHtml(B);
   if (S.features.ai) h += `<div class="acts" style="margin-top:10px">${S.rcpt.bookWait ? aiThink('Claudeが科目を見ています', true) : `<button class="btn small" data-act="bookAi">${spark()}Claudeに科目も見てもらう</button>${B.aiAt ? `<span class="sub">${esc(B.aiAt.slice(5, 10).replace('-', '/'))}に確認</span>` : ''}`}</div>`;
   const sales = B.sales || [];
   if (sales.length) {
     const open = S.rcpt.bookDays || {};
-    h += `<h3>売上の照らし合わせ</h3><div class="sub">Square ／ マネーフォワード（おとといまで）</div><div class="gcalc">${sales.map(m => `<div><span>${Number(m.ym.slice(5))}月</span><b>${m.diffN ? `<span class="neg">差 ${yen(Math.abs(m.sq - m.mf))}</span>` : '一致'}<small>${yen(m.sq)} ／ ${yen(m.mf)}${m.other ? '（ほかに振込などの売上 ' + yen(m.other) + '）' : ''}</small>${m.diffN ? (open[m.ym] ? `<small>${m.diff.map(d => jdShort(d.date) + ' ' + yen(d.sq) + '／' + yen(d.mf)).join('<br>')}</small>` : `<button class="more2" data-act="bookDays" data-v="${m.ym}" style="padding:2px 0 0">合わない${m.diffN}日を見る</button>`) : ''}</b></div>`).join('')}</div>`;
-    if (sales.some(m => m.diffN)) h += `<div class="sub" style="margin-top:4px">${phr('合わない日は、マネーフォワードでSquareの明細の登録漏れや二重登録がないか見てください。')}</div>`;
+    h += `<h3>売上の照らし合わせ</h3><div class="sub">Square ／ マネーフォワード（おとといまで、会計ひとつずつ）</div>${sales.map(m => `<div class="gcalc"><div><span>${Number(m.ym.slice(5))}月</span><b>${m.diffN ? `<span class="neg">差 ${yen(Math.abs(m.sq - m.mf))}</span>` : '一致'}<small>${yen(m.sq)} ／ ${yen(m.mf)}${m.other ? '（ほかに振込などの売上 ' + yen(m.other) + '）' : ''}</small>${m.diffN && !open[m.ym] ? `<button class="more2" data-act="bookDays" data-v="${m.ym}" style="padding:2px 0 0">合わない${m.diffN}件の理由を見る</button>` : ''}</b></div></div>${m.diffN && open[m.ym] ? `<ul class="causes">${m.diff.map(d => `<li><span>${jdShort(d.date)}</span>${esc(d.text)}</li>`).join('')}</ul>` : ''}`).join('')}`;
   }
   return h + '</div>';
+}
+// 合っているか：貸借・口座・Squareの売上・現金
+function bookSumHtml(B) {
+  const rows = [];
+  if (B.total) rows.push(['貸借', B.balanced === B.total ? '合っています' : (B.total - B.balanced) + '件 合わない', B.total + '件の仕訳を確認', B.balanced !== B.total]);
+  if (B.bank) {
+    const ok = !B.bank.bookOnly;
+    rows.push(['口座', ok ? '通帳と合っています' : B.bank.bookOnly + '件 通帳にない', '帳簿の口座の動きを、銀行の明細と1件ずつ照らし合わせ', !ok]);
+    if (B.bank.notYet && B.bank.notYet.length) rows.push(['口座の入金', 'まだ登録していない ' + B.bank.notYet.length + '件', B.bank.notYet.slice(0, 3).map(t => jdShort(t.date) + ' ' + yen(t.amount)).join('、'), true]);
+  }
+  const C = B.cash || {};
+  let cash = '';
+  if (C.book !== null && C.book !== undefined) {
+    const d = C.counted !== null && C.counted !== undefined ? C.counted - C.book : null;
+    const ys = v => (v < 0 ? '−' + yen(-v) : yen(v));
+    rows.push(['現金', '帳簿 ' + ys(C.book), d === null ? '手元の現金を数えて入れると比べます' : d === 0 ? '数えた現金と合っています' : '数えた現金 ' + yen(C.counted) + '（差 ' + (d > 0 ? '+' : '') + ys(d) + '）' + (d < 0 ? '：現金で払ったものの登録漏れかも' : '：現金売上や、お店にお金を足した記録の漏れかも'), d !== null && d !== 0]);
+  }
+  cash = `<div class="cashin"><label>1月1日の現金<input type="text" inputmode="numeric" id="bkOpen" value="${C.open === null || C.open === undefined ? '' : esc(fmtNum(C.open))}" placeholder="例）30,000"></label><label>いま手元の現金<input type="text" inputmode="numeric" id="bkCount" value="${C.counted === null || C.counted === undefined ? '' : esc(fmtNum(C.counted))}" placeholder="数えて入れる"></label><button class="btn small" data-act="bookCash">比べる</button></div>`;
+  return `<h3>合っているか</h3><div class="gcalc">${rows.map(r => `<div><span>${r[0]}</span><b>${r[3] ? `<span class="neg">${esc(r[1])}</span>` : esc(r[1])}<small>${esc(r[2])}</small></b></div>`).join('')}</div>${cash}`;
 }
 async function bookCall(b, name, body, msg) {
   const mo = M.busy(b);
