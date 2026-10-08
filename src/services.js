@@ -2050,14 +2050,14 @@ function forecastLines(fc) {
   if (!fc) return [];
   const lines = [];
   fc.items.forEach(x => {
-    const dl = (x.deadline.slice(0, 10) === fc.date ? '当日' : jdShort(x.deadline.slice(0, 10))) + Number(x.deadline.slice(11, 13)) + ':' + x.deadline.slice(14, 16) + 'まで';
+    const dl = (x.deadline.slice(0, 10) === fc.date ? '当日' : jdShort(x.deadline.slice(0, 10))) + Number(x.deadline.slice(11, 13)) + ':' + x.deadline.slice(14, 16) + 'まで受付';
     const head = '・' + x.name + '（' + dl + '）いま' + x.booked + '名';
-    if (x.avg === null) lines.push(head + '（記録が少なく見込みなし）');
-    else if (!x.max) lines.push(head + '（あとから増えたことはなし）');
-    else lines.push(head + ' → ' + (x.suggest === x.high ? x.suggest : (x.suggest === x.booked ? x.booked + '〜' + x.high : x.suggest + '〜' + x.high)) + '名分');
+    if (x.avg === null) lines.push(head + '。記録が少なく、見込みは出せません');
+    else if (!x.max) lines.push(head + '。これまで、この時間からは増えていません');
+    else lines.push(head + '。まだ増えそうなので ' + (x.suggest === x.high ? x.suggest : (x.suggest === x.booked ? x.booked + '〜' + x.high : x.suggest + '〜' + x.high)) + '名分の用意を');
   });
-  fc.walk.filter(w => w.avg >= 0.5).forEach(w => lines.push('・予約なし（' + w.session + '）いつも約' + Math.round(w.avg) + '件'));
-  if (lines.length) lines.push('（過去' + fc.days + '回の' + fc.weekday + '曜から）');
+  fc.walk.filter(w => w.avg >= 0.5).forEach(w => lines.push('・予約なしのお客様（' + w.session + '）：いつも約' + Math.round(w.avg) + '組'));
+  if (lines.length) lines.push('（過去' + fc.days + '回の' + fc.weekday + '曜の予約の入り方から）');
   return lines;
 }
 // 店主が足した項目：kind 'ai' は Claude へのお願い（予約を読んでまとめてもらう）、'text' は毎回そのまま入れる文

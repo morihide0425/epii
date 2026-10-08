@@ -383,7 +383,7 @@ try {
   }
   res = await post('/admin/api/prep', { preview: true, parts: {}, note: '' }, A);
   const ft = res.body.preview.text;
-  check(ft.includes('■ これから入りそうな予約（見込み）') && /・養生ランチ（当日9:00まで）いま3名 → [\d〜]+名分/.test(ft) && ft.includes('（過去'), 'forecast for same-day menu\n' + ft);
+  check(ft.includes('■ これから入りそうな予約（見込み）') && /・養生ランチ（当日9:00まで受付）いま3名。まだ増えそうなので [\d〜]+名分の用意を/.test(ft) && ft.includes('（過去'), 'forecast for same-day menu\n' + ft);
   const fin = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
   check(fin.includes('【お店の設定（管理画面の設定タブ）】') && fin.includes('養生ランチ：') && fin.includes('予約の締切 当日09:00まで') && fin.includes('これから入りそうな予約の見込み') && !fin.includes('過去 客'), 'settings and forecast sent to Claude');
   res = await post('/admin/api/analysisAi', { section: 'booking' }, A);

@@ -348,7 +348,7 @@
   .goalbar .gnum span { margin-left: auto; font-weight: 700; font-size: 15px; color: var(--green); }
   .goalbar .gtrack { height: 8px; border-radius: 4px; background: #fff; overflow: hidden; margin: 6px 0 4px; } .goalbar .gtrack i { display: block; height: 100%; background: var(--green); border-radius: 4px; }
   .txr.picked { box-shadow: inset 3px 0 0 var(--green); padding-left: 10px; margin-left: -10px; }
-  .txacts { align-items: center; margin-top: 6px; }
+  .txacts { align-items: center; margin-top: 6px; } .txacts .askbtn { margin: 0 0 0 auto; padding-right: 0; }
   .askicon { margin-left: auto; width: 36px; height: 36px; border: 0; background: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
   .askicon svg.spark { width: 20px; height: 20px; }
   .txai { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--sub); min-width: 0; }
@@ -357,7 +357,8 @@
   .txpick { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--green); cursor: pointer; margin-right: 4px; }
   .txpick input { width: 20px; height: 20px; accent-color: var(--green); flex-shrink: 0; }
   .txwhy { margin-top: 6px; }
-  .gcalc > div { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 13px; } .gcalc span { color: var(--sub); font-size: 12px; } .gcalc b { margin-left: auto; text-align: right; }
+  .gcalc > div { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 13px; } .gcalc span { color: var(--sub); font-size: 12px; flex-shrink: 0; } .gcalc b { margin-left: auto; text-align: right; }
+  .gcalc b small { display: block; font-size: 10px; font-weight: 400; color: var(--sub); }
   .custlist { margin-top: 8px; } .custrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
   .custrow .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pvnote { font-size: 12px; color: var(--amber); margin-bottom: 6px; white-space: normal; }
@@ -2335,20 +2336,21 @@ function salesForProfit(profit, t) {
   const r = Math.min(0.9, (t && t.ratio) || 0);
   return Math.ceil((profit + ((t && t.fixed) || 0)) / (1 - r) / 1000) * 1000;
 }
+function gRow(r) { return `<div><span>${r[0]}</span><b>${r[1]}${r[2] ? `<small>${esc(r[2])}</small>` : ''}</b></div>`; }
 function goalCalcHtml() {
   const G = S.goal, st = G.status, t = st.trend || {};
   const amt = num(G.form.amount);
   const rows = [];
-  if (t.months) rows.push(['これまで（月）', '売上 ' + yen(t.sales) + (t.hasExpense ? '・利益 ' + yen(t.sales - t.expense) : '')]);
+  if (t.months) rows.push(['これまで（月）', '売上 ' + yen(t.sales) + (t.hasExpense ? '・利益 ' + yen(t.sales - t.expense) : ''), '直近' + t.months + 'か月の平均']);
   if (amt) {
     const need = G.form.kind === 'profit' ? salesForProfit(amt, t) : amt;
     const perDay = st.openDays ? Math.ceil(need / st.openDays / 100) * 100 : 0;
     const guests = t.perGuest ? Math.ceil(need / t.perGuest / Math.max(1, st.openDays)) : 0;
-    if (G.form.kind === 'profit') rows.push(['必要な売上', yen(need)]);
-    rows.push(['1日あたり', yen(perDay) + (guests ? '（約' + guests + '名）' : '')]);
+    if (G.form.kind === 'profit') rows.push(['必要な売上', yen(need), t.hasExpense ? 'これまでの経費から計算' : '経費の記録がないので、利益＝売上で計算']);
+    rows.push(['1日あたり', yen(perDay) + (guests ? '（約' + guests + '名）' : ''), '今月の営業日' + st.openDays + '日で割った額' + (guests ? '。名は予約の人数' : '')]);
   }
   if (!rows.length) return '<div data-key="goalcalc"></div>';
-  return `<div class="stylebox gcalc" data-key="goalcalc" style="margin-top:8px">${rows.map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join('')}</div>`;
+  return `<div class="stylebox gcalc" data-key="goalcalc" style="margin-top:8px">${rows.map(gRow).join('')}</div>`;
 }
 function otherHtml() {
   if (!S.prep || !S.goal) return '<div class="card"><div class="loading">読み込み中…</div></div>';
@@ -2493,10 +2495,10 @@ function goalBarHtml(g, compact) {
   if (!g || !g.on || !g.need) return '';
   const rate = Math.min(100, g.rate);
   const head = g.kind === 'profit' ? '今月の目標　利益 ' + yen(g.amount) : '今月の目標';
-  const rest = g.remain <= 0 ? '目標に届きました' : g.leftDays ? 'あと' + g.leftDays + '日　1日 ' + yen(g.perDay) + (g.perDayGuests ? '（約' + g.perDayGuests + '名）' : '') : '今月の営業は終わりました';
+  const rest = g.remain <= 0 ? '目標に届きました' : g.leftDays ? '残り' + g.leftDays + '営業日で、1日あたり ' + yen(g.perDay) + (g.perDayGuests ? '（予約なら約' + g.perDayGuests + '名）' : '') : '今月の営業は終わりました';
   return `<div class="goalbar" data-key="goalbar" data-grow="goal:${g.month}:${g.sales}">
     <div class="gtop">${phr(head)}</div>
-    <div class="gnum"><b>${yen(g.sales)}</b> <small>/ ${yen(g.need)}</small><span>${rate}%</span></div>
+    <div class="gnum"><small>今の売上</small><b>${yen(g.sales)}</b> <small>/ 目標 ${yen(g.need)}</small><span>${rate}%</span></div>
     <div class="gtrack" data-g="x"><i style="width:${rate}%"></i></div>
     <div class="sub">${phr(rest)}${!compact && g.bookedGuests ? `<span class="hl">${phr('予約済み ' + g.bookedGuests + '名（約' + yen(g.bookedSales) + '）')}</span>` : ''}</div>
   </div>`;
@@ -3441,7 +3443,7 @@ function txHtml() {
       <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions((T.accounts || []).filter(a => !a.personal), sel.accountId, true)}${(T.accounts || []).filter(a => a.personal).map(a => `<optgroup label="経費ではないもの（自分のために使ったお金）"><option value="${esc(a.id)}" ${a.id === sel.accountId ? 'selected' : ''}>${esc(a.name)}</option></optgroup>`).join('')}</select>
         <select data-tx="${esc(t.id)}" data-tf="rate" aria-label="消費税" style="width:96px;flex-shrink:0">${['8', '10', 'none'].map(k => `<option value="${k}" ${sel.rate === k ? 'selected' : ''}>${{ '8': '8%', '10': '10%', none: '税なし' }[k]}</option>`).join('')}</select></div>
       ${t.ai ? `<div class="txai" data-appear="txai:${esc(t.id)}">${spark()}<span>${esc(plainJa(t.same ? '前と同じ科目' : t.ai.reason).replace(/[（(].*$/, ''))}</span>${t.ai.unsure ? '<span class="tag amber">要確認</span>' : ''}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
-      <div class="acts txacts">${ok ? `<label class="txpick"><input type="checkbox" data-txpick="${esc(t.id)}" ${on ? 'checked' : ''}>まとめて</label>` : ''}<button class="btn small" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : '登録'}</button>${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? '' : askHtml('tx:' + t.id, 'この明細', true)}</div>
+      <div class="acts txacts">${ok ? `<label class="txpick"><input type="checkbox" data-txpick="${esc(t.id)}" ${on ? 'checked' : ''}>まとめて</label>` : ''}<button class="btn small" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : '登録'}</button>${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? '' : askHtml('tx:' + t.id, 'この明細')}</div>
       ${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? askHtml('tx:' + t.id, 'この明細') : ''}`}
     </div>`;
   }).join('');
@@ -3804,11 +3806,11 @@ function outlookHtml(m) {
   if (!g || m.period.key !== 'month' || !m.hasSales) return '';
   const t = g.trend || {};
   const lines = [];
-  if (g.pace) lines.push(['このペースだと', '売上 約' + yen(g.pace) + (g.paceProfit !== undefined ? '・利益 約' + yen(g.paceProfit) : '')]);
-  if (g.breakEven) lines.push(['利益が出る売上', '月 ' + yen(g.breakEven) + ' 以上']);
-  if (g.bookedGuests && !(g.on && g.need)) lines.push(['予約済み', g.bookedGuests + '名（約' + yen(g.bookedSales) + '）']);
+  if (g.pace) lines.push(['このペースだと', '売上 約' + yen(g.pace) + (g.paceProfit !== undefined ? '・利益 約' + yen(g.paceProfit) : ''), '今月の見込み（営業した' + g.doneDays + '日の平均から）']);
+  if (g.breakEven) lines.push(['利益が出る売上', '月 ' + yen(g.breakEven) + ' 以上', 'これより少ないと赤字']);
+  if (g.bookedGuests && !(g.on && g.need)) lines.push(['予約済み', g.bookedGuests + '名（約' + yen(g.bookedSales) + '）', '今月これからの予約']);
   if (!lines.length && !(g.on && g.need)) return '';
-  return `<div class="card" data-key="outlook"><h2>${icon('i-coin')}今月の見通し</h2>${goalBarHtml(g, false)}${lines.length ? `<div class="gcalc" style="margin-top:8px">${lines.map(l => `<div><span>${l[0]}</span><b>${l[1]}</b></div>`).join('')}</div>` : ''}
+  return `<div class="card" data-key="outlook"><h2>${icon('i-coin')}今月の見通し</h2>${goalBarHtml(g, false)}${lines.length ? `<div class="gcalc" style="margin-top:8px">${lines.map(gRow).join('')}</div>` : ''}
     ${g.on ? '' : `<button class="btn ghost small" data-act="setPart" data-v="other" style="padding-left:0;margin-top:4px">月の目標を決める ›</button>`}</div>`;
 }
 function moneyKpi(v, k, c) { return `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div>${c || '<div class="c">&nbsp;</div>'}</div>`; }
