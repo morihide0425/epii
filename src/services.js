@@ -1726,8 +1726,8 @@ async function weeklyReport(env, force) {
   if (f.ai) {
     try {
       const out = await claude(env, {
-        system: '小さな飲食店をひとりで切り盛りしている店主に、週のはじめに送るLINEの最後に添える「ひとこと」を書きます。先週のがんばりをねぎらい、体を気づかう、あたたかい言葉を1〜2文（60文字以内）で。数字の説明はしない。大げさにせず、絵文字は使わない。毎回同じ言い回しにしない。',
-        effort: 'low', maxTokens: 2000, content: [{ type: 'text', text: '先週：' + lines.slice(1, 4).join('、') }], schema: strSchema({ cheer: { type: 'string' } })
+        system: '小さな飲食店をひとりで切り盛りしている店主に、週のはじめに送るLINEの最後に添える「ひとこと」を書きます。先週のがんばりをねぎらう言葉にします。' + CHEER_RULE,
+        effort: 'low', maxTokens: 2000, content: [{ type: 'text', text: '先週のまとめ：' + lines.slice(1, 4).join('、') + '\n\n' + await cheerFacts(env, null) }], schema: strSchema({ cheer: { type: 'string' } })
       });
       if (out.cheer) lines.push('', plain(clean(out.cheer, 120)));
     } catch (e) { console.error('週のまとめ：ひとこと', e && e.message); }
@@ -2073,6 +2073,20 @@ async function prepCfg(env) {
   PREP_PARTS.forEach(p => { parts[p[0]] = !v.parts || v.parts[p[0]] !== false; });
   return { on: !!v.on, time: /^\d{2}:\d{2}$/.test(v.time || '') ? v.time : '21:00', parts: parts, note: String(v.note || ''), custom: prepCustom(v.custom), empty: !!v.empty };
 }
+const CHEER_RULE = 'ひとことの書き方：お店の数字（下の「ひとことのための数字」）から、前向きになれる事実を1つ選んで、具体的な数字を入れてねぎらう（例「先週は予約0組でしたが、明日は1組。最初のお客様を楽しみに」「今月はもう目標の76%。あと少しです」）。少ない時期は責めずに、次につながる見方をする。体も気づかう。1〜2文、70文字以内。数字はデータにあるものだけ。大げさにせず、絵文字は使わない。毎回同じ言い回しにしない。';
+// ひとことのための数字：先週と今週の来店、これからの予約、今月の売上と目標
+async function cheerFacts(env, next) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const q = (a, b) => env.DB.prepare("SELECT COUNT(*) AS g, COALESCE(SUM(guests), 0) AS n FROM reservations WHERE status = '確定' AND (arrived IS NULL OR arrived != 'no') AND date BETWEEN ? AND ?").bind(a, b).first();
+  const [w1, w0, ahead] = await Promise.all([q(addDays(today, -7), addDays(today, -1)), q(addDays(today, -14), addDays(today, -8)), q(today, addDays(today, 6))]);
+  const lines = ['直近7日の予約の来店 ' + w1.g + '組' + w1.n + '名（その前の7日は ' + w0.g + '組' + w0.n + '名）', '今日から7日間の予約 ' + ahead.g + '組' + ahead.n + '名'];
+  if (next) { const n = await q(next, next); lines.push(jdShort(next) + '（' + WD[weekday(next)] + '）の予約 ' + n.g + '組' + n.n + '名'); }
+  try {
+    const g = await goalStatus(env);
+    if (features(env).square) lines.push('今月の売上 ¥' + g.sales.toLocaleString() + (g.on && g.need ? '（目標の' + g.rate + '%、残り' + g.leftDays + '営業日）' : ''));
+  } catch (e) { /* 売上がなくても書ける */ }
+  return '【ひとことのための数字】\n' + lines.join('\n');
+}
 const PREP_SYSTEM = [
   'あなたは、大阪・阿倍野の小さな薬膳レストラン「épii」の店主（ひとりで仕込みから接客まで切り盛りしています）のために、次の営業日の「仕込みメモ」を作ります。店主は前の晩にLINEで読みます。',
   '予約ごとに記号（A、B…）を付けて渡します。お客様の名前は渡しません。記号で答えてください。',
@@ -2082,7 +2096,7 @@ const PREP_SYSTEM = [
   '- guests：これまでの来店やお店のメモから、どんなお客様か（何回目・前回のこと・好み）。初めての方は書かない。ref と text（40文字以内）。',
   '- prep：仕込みで前もって用意するとよいことを、具体的に短く（各25文字以内、3つまで）。例「くるみを使わない皿を1名分」「ランチは見込みで5名分」。「これから入りそうな予約の見込み」があれば、締切までに増えそうな人数も考えて、何名分用意するとよいかを入れる。データから言えることだけ。',
   '- custom：「店主が足した項目」があるときだけ。項目ごとに id と lines（店主のお願いに沿って、予約から言えることを短い行で。各40文字以内、5行まで。お客様に触れるときは記号を「A：」のように行の頭に付ける。言えることがなければ空）。',
-  '- cheer：店主へのひとこと。メモの日が明日でないときは「明日」と書かない（曜日で書く）。1〜2文、60文字以内。忙しさ（組数・人数）や翌日の様子に合わせて、がんばりをねぎらい、体を気づかう、あたたかい言葉にする。毎回同じ言い回しにしない。大げさにせず、絵文字は使わない。お客様のことは書かない。',
+  '- cheer：店主へのひとこと。メモの日が明日でないときは「明日」と書かない（曜日で書く）。お客様のことは書かない。' + CHEER_RULE,
   '- データにないことは書かない。推測しない。'
 ].join('\n');
 const PREP_SCHEMA = strSchema({
@@ -2162,6 +2176,7 @@ async function prepMemo(env, date, cfg, sample) {
       x.f && x.f.past.length ? 'これまで：' + x.f.past.slice(0, 3).map(p => p.date + ' ' + p.course + (p.note ? '（' + p.note + '）' : '')).join('／') : ''
     ].filter(Boolean).join('｜')).join('\n') +
       (fcl.length ? '\n\nこれから入りそうな予約の見込み（締切がまだのメニュー・予約なしのお客様）：\n' + fcl.join('\n') : '') +
+      (P.cheer ? '\n\n' + await cheerFacts(env, date) : '') +
       (aiCustom.length ? '\n\n店主が足した項目（id｜項目の名前｜お願い）：\n' + aiCustom.map(x => x.id + '｜' + x.title + '｜' + x.body).join('\n') : '');
     const src = await hashOf(input);
     const ckey = 'prep:' + (sample ? 'sample' : date);

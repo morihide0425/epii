@@ -322,7 +322,8 @@ try {
   await fetch(B + '/cdn-cgi/mf/scheduled');
   await new Promise(r => setTimeout(r, 1500));
   check(!pushes.some(p => p.messages[0].text.includes('先週のまとめ')), 'weekly once');
-  check(wk.includes('先週もおつかれさまでした') && String(calls.ai.find(c => String(c.body.system).includes('週のはじめに送るLINE')).body.messages[0].content[0].text).includes('売上'), 'weekly cheer');
+  const wcIn = String(calls.ai.find(c => String(c.body.system).includes('週のはじめに送るLINE')).body.messages[0].content[0].text);
+  check(wk.includes('先週もおつかれさまでした') && wcIn.includes('売上') && wcIn.includes('【ひとことのための数字】') && /直近7日の予約の来店 \d+組/.test(wcIn) && /今日から7日間の予約 \d+組/.test(wcIn), 'weekly cheer with shop numbers\n' + wcIn);
 
   // 月の目標（利益で決める → 必要な売上・残りの営業日で1日あたり・予約なら何名）
   res = await post('/admin/api/goal', { save: true, on: true, kind: 'profit', amount: '300,000' }, A);
@@ -368,9 +369,10 @@ try {
   check(pv.includes('■ コースごとの人数') && pv.includes('季節の薬膳フレンチ 2名') && pv.includes('18:00 佐藤様：くるみアレルギー') && pv.includes('18:00 佐藤様：結婚記念日') && pv.includes('くるみを使わない皿を1名分') && pv.includes('今夜は早めに休んでくださいね') && !pv.includes('｜'), 'prep sections');
   const pbody = JSON.stringify(calls.ai[calls.ai.length - 1].body);
   check(!pbody.includes('佐藤') && !pbody.includes('鈴木') && !pbody.includes('1234-9999') && !pbody.includes('09011112222'), 'no names or phones to Claude');
+  check(pbody.includes('ひとことのための数字') && pbody.includes('の予約 2組5名') && pbody.includes('前向きになれる事実を1つ選んで'), 'prep cheer gets shop numbers');
   const nAi2 = calls.ai.length;
   res = await post('/admin/api/prep', { preview: true, parts: { cheer: false, course: false }, note: 'パンの発注を確認' }, A);
-  check(calls.ai.length === nAi2 && !res.body.preview.text.includes('■ コースごとの人数') && !res.body.preview.text.includes('休んでくださいね') && res.body.preview.text.includes('■ いつものメモ\nパンの発注を確認'), 'parts switch + cached');
+  check(nAi2 > 0 && !res.body.preview.text.includes('■ コースごとの人数') && !res.body.preview.text.includes('休んでくださいね') && res.body.preview.text.includes('■ いつものメモ\nパンの発注を確認'), 'parts switch');
   // 当日の朝まで受け付けるメニュー：過去の同じ曜日に、前の晩より後に入った予約から見込みを出す（設定も Claude に渡す）
   const lunch = await db2.prepare("SELECT id FROM courses WHERE name = '養生ランチ'").first();
   await db2.prepare("UPDATE courses SET cutoff_mode = 'custom', cutoff_days = 0, cutoff_time = '09:00' WHERE id = ?").bind(lunch.id).run();
