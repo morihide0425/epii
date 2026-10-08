@@ -65,7 +65,9 @@ function aiAnswer(body) {
   }
   if (sys.includes('来店前メモ')) return { memo: '2回目。｜前回も｜ランチ。｜辛いものが｜苦手。' };
   if (sys.includes('レシート')) {
-    return { readable: true, date: jst(), total: 6480, payee: '阿倍野青果', items: 'にんじん・れんこん他', rate: '8', amount8: 0, amount10: 0, payment: 'cash', account: '仕入高', unsure: ['date'], note: '日付の数字がかすれています' };
+    // 1枚目は日付に自信がない、2枚目からは自信あり（金額も少しずつ変える）
+    const n = calls.ai.filter(c => (c.body.system || '').includes('レシート')).length;
+    return { readable: true, date: jst(), total: 6480 + (n - 1) * 100, payee: '阿倍野青果', items: 'にんじん・れんこん他', rate: '8', amount8: 0, amount10: 0, payment: 'cash', account: '仕入高', unsure: n === 1 ? ['date'] : [], note: n === 1 ? '日付の数字がかすれています' : '' };
   }
   if (sys.includes('相談役')) {
     return { items: [

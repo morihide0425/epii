@@ -257,7 +257,13 @@
   label.btn { cursor: pointer; }
   .rphoto { display: flex; gap: 12px; margin-bottom: 6px; }
   .rphoto img { width: 84px; height: 116px; object-fit: cover; border-radius: 10px; flex-shrink: 0; background: var(--bg); border: 1px solid var(--line); }
-  .ramt { font-size: 22px; font-weight: 700; line-height: 1.2; }
+  .ramt { font-size: 20px; font-weight: 700; line-height: 1.2; }
+  .rq { padding: 12px 0; border-top: 1px solid var(--line); }
+  .rq:first-of-type { border-top: 0; padding-top: 4px; }
+  .rq .rphoto img { width: 64px; height: 88px; }
+  .camera.small { flex-direction: row; justify-content: center; padding: 14px 12px; gap: 10px; flex-wrap: wrap; }
+  .camera.small svg { width: 28px; height: 28px; }
+  .camera.small .sub { flex-basis: 100%; }
   input.check, select.check { border-color: var(--amber); background: #FFFBF0; }
   .okbar { display: flex; gap: 8px; align-items: center; background: var(--green-l); color: var(--green); border-radius: 12px; padding: 8px 10px; font-size: 13px; margin-bottom: 10px; }
   .okbar svg { width: 18px; height: 18px; stroke: var(--green); flex-shrink: 0; }
@@ -1402,9 +1408,17 @@ ACTIONS.today = async (a, b) => {
     if (!S.rcptInfo || !S.rcptInfo.list) loadRcpt();
     return;
   }
-  if (a === 'rcptClose') { S.rcpt = newRcpt(); refresh(); window.scrollTo(0, S.scroll.todayMain || 0); return; }
-  if (a === 'rcptRetake') { S.rcpt.step = 'pick'; S.rcpt.img = ''; S.rcpt.form = null; S.rcpt.seq++; refresh(); return; }
-  if (a === 'rcptSave') { await rcptSave(b); return; }
+  if (a === 'rcptClose') {
+    const left = S.rcpt.queue.filter(q => q.state !== 'saving').length;
+    if (left && !confirm('まだ登録していないレシートが' + left + '枚あります。今日の画面に戻りますか？（読み取った内容は消えます）')) return;
+    S.rcpt = newRcpt(); refresh(); window.scrollTo(0, S.scroll.todayMain || 0); return;
+  }
+  if (a === 'rqOpen') { S.rcpt.openId = b.dataset.id; refresh(); return; }
+  if (a === 'rqClose') { S.rcpt.openId = null; refresh(); return; }
+  if (a === 'rqDrop') { await rcptDone([b.dataset.id]); return; }
+  if (a === 'rqRetry') { const q = rcptItem(b.dataset.id); if (q) { q.state = 'wait'; refresh(); rcptPump(); } return; }
+  if (a === 'rqSave') { await rcptSaveOne(b); return; }
+  if (a === 'rqSaveAll') { await rcptSaveAll(b); return; }
   if (a === 'rcptUndo') {
     const it = S.rcptInfo.list.items.find(x => x.id === b.dataset.id);
     if (!it || !confirm(yen(it.amount) + '（' + (it.payee || '支払先なし') + '）の登録を取り消して、マネーフォワードの仕訳も消しますか？')) return;
@@ -2844,52 +2858,71 @@ function payQuery() {
   }, 250);
 }
 
-/* ---------- レシートの登録（今日の画面から） ---------- */
+/* ---------- レシートの登録（今日の画面から） ----------
+ * 撮った写真は順番待ちに入れて、裏で2枚ずつ読み取る。読み取りを待たずに、続けて何枚でも撮れる
+ */
 const RATE_LABEL = { '8': '8%（軽減税率）', '10': '10%', mixed: '8%と10%が混在', none: '対象外（税なし）' };
 const UNSURE_OF = { date: 'date', amount: 'total', payee: 'payee', accountId: 'account', rate: 'rate' };
-function newRcpt() { return { open: false, step: 'pick', img: '', form: null, accounts: [], pays: [], err: '', saved: 0, savedText: '', seq: 0 }; }
+function newRcpt() { return { open: false, queue: [], openId: null, accounts: [], pays: [], err: '', seq: 0 }; }
 function rcptButton() {
   const L = S.rcptInfo && S.rcptInfo.list;
   return `<button class="qbtn rcbtn" data-act="rcptOpen">${icon('i-receipt')}<div style="flex:1;min-width:0"><b>レシートを登録</b><span>${phr('写真を撮ると、マネーフォワードに登録します')}</span></div>${L ? `<span class="tag blue">今月 ${L.count}件</span>` : ''}</button>`;
 }
+// 確かめなくても登録してよいもの（読めていて、自信のない欄がない）
+function rcptOk(q) { return q.state === 'ready' && q.form.readable && num(q.form.amount) > 0 && !(q.form.unsure || []).length; }
+function rcptQueueItem(q, R) {
+  const f = q.form;
+  const head = `<img src="${q.img}" alt="撮ったレシート">`;
+  if (q.state === 'wait' || q.state === 'reading') {
+    return `<div class="rq" data-key="rq:${q.id}"><div class="rphoto">${head}<div style="flex:1;min-width:0">${WAIT}<div class="sub" style="margin-top:6px">${q.state === 'wait' ? '順番を待っています' : phr('金額・日付・お店の名前を読んでいます')}</div></div></div></div>`;
+  }
+  if (q.state === 'error') {
+    return `<div class="rq" data-key="rq:${q.id}"><div class="rphoto">${head}<div style="flex:1;min-width:0"><div class="warn" style="margin-top:0">${phr(q.err)}</div>
+      <div class="acts"><button class="btn small" data-act="rqRetry" data-id="${q.id}">もう一度読む</button><button class="btn small ghost" data-act="rqDrop" data-id="${q.id}">消す</button></div></div></div></div>`;
+  }
+  const acc = R.accounts.find(a => a.id === f.accountId);
+  const pay = R.pays.find(p => p.id === f.payId);
+  const ok = rcptOk(q);
+  let h = `<div class="rq${R.openId === q.id ? ' on' : ''}" data-key="rq:${q.id}"><div class="rphoto" data-appear="rq:${q.id}:${q.readAt}">${head}<div style="flex:1;min-width:0">
+      <div class="row"><span class="ramt">${yen(num(f.amount))}</span><span class="tag ${ok ? 'green' : 'amber'}" style="margin-left:auto">${ok ? 'このまま登録できます' : '確かめてください'}</span></div>
+      <div class="sub">${esc(f.payee || '（支払先なし）')}${f.date ? '　' + jd(f.date) : ''}</div>
+      <div class="sub">${esc(acc ? acc.name : '')}・${esc(RATE_LABEL[f.rate] || '')}・${esc(pay ? pay.label.replace(/（.*）/, '') : '')}</div></div></div>`;
+  if (R.openId !== q.id) {
+    return h + `<div class="acts"><button class="btn small" data-act="rqOpen" data-id="${q.id}">${ok ? '中身を見る' : '確かめる'}</button><button class="btn small primary" data-act="rqSave" data-id="${q.id}">登録</button><button class="btn small ghost" data-act="rqDrop" data-id="${q.id}">消す</button></div></div>`;
+  }
+  const uns = k => ((f.unsure || []).indexOf(k) >= 0 ? 'check' : '');
+  const id = q.id;
+  const warn = !f.readable ? 'うまく読み取れませんでした。手で直すか、撮り直してください。'
+    : (f.unsure || []).length ? (f.note ? f.note + '。' : '') + '色の付いた欄が合っているか、確かめてください。' : '';
+  h += `${warn ? `<div class="warn">${phr(warn)}</div>` : ''}
+    <div class="grid2"><div><label class="f" for="rf-date-${id}">日付</label><input type="date" id="rf-date-${id}" data-qid="${id}" data-rf="date" class="${uns('date')}" value="${esc(f.date)}"></div>
+      <div><label class="f" for="rf-amount-${id}">金額（税込）</label><input type="text" inputmode="numeric" id="rf-amount-${id}" data-qid="${id}" data-rf="amount" class="${uns('total')}" value="${esc(fmtNum(f.amount))}"></div></div>
+    <label class="f" for="rf-payee-${id}">支払先</label><input type="text" id="rf-payee-${id}" data-qid="${id}" data-rf="payee" class="${uns('payee')}" value="${esc(f.payee)}">
+    <div class="grid2"><div><label class="f" for="rf-acc-${id}">勘定科目</label><select id="rf-acc-${id}" data-qid="${id}" data-rf="accountId" class="${uns('account')}">${R.accounts.map(a => `<option value="${esc(a.id)}" ${a.id === f.accountId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
+      <div><label class="f" for="rf-rate-${id}">消費税</label><select id="rf-rate-${id}" data-qid="${id}" data-rf="rate" class="${uns('rate')}">${['8', '10', 'mixed', 'none'].map(k => `<option value="${k}" ${f.rate === k ? 'selected' : ''}>${RATE_LABEL[k]}</option>`).join('')}</select></div></div>
+    ${f.rate === 'mixed' ? `<label class="f" for="rf-a8-${id}">そのうち8%（軽減税率）の金額</label><input type="text" inputmode="numeric" id="rf-a8-${id}" data-qid="${id}" data-rf="amount8" value="${esc(fmtNum(f.amount8))}"><div class="sub">${phr('残りの ' + yen(Math.max(0, num(f.amount) - num(f.amount8))) + ' を10%で登録します。')}</div>` : ''}
+    <div class="grid2"><div><label class="f" for="rf-pay-${id}">支払い方法</label><select id="rf-pay-${id}" data-qid="${id}" data-rf="payId">${R.pays.map(p => `<option value="${esc(p.id)}" ${p.id === f.payId ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
+      <div><label class="f" for="rf-memo-${id}">メモ</label><input type="text" id="rf-memo-${id}" data-qid="${id}" data-rf="memo" value="${esc(f.memo)}"></div></div>
+    <p class="err" id="rErr-${id}" role="alert"></p>
+    <div class="acts"><button class="btn primary" data-act="rqSave" data-id="${id}">これで登録</button><button class="btn" data-act="rqClose">閉じる</button><button class="btn ghost" data-act="rqDrop" data-id="${id}">消す</button></div></div>`;
+  return h;
+}
 function rcptHtml() {
   const R = S.rcpt;
-  let h = `<button class="backlink" data-act="rcptClose">${icon('i-left')}今日へ戻る</button><div class="card" data-key="rcard">`;
-  if (R.step === 'pick') {
-    h += `<h2>${icon('i-receipt')}レシートを撮る</h2>
-      ${R.saved ? `<div class="okbar" data-appear="saved:${R.saved}">${icon('i-check-ink')}<span>${phr(R.savedText)}</span></div>` : ''}
+  const reading = R.queue.filter(q => q.state === 'wait' || q.state === 'reading').length;
+  const oks = R.queue.filter(rcptOk);
+  let h = `<button class="backlink" data-act="rcptClose">${icon('i-left')}今日へ戻る</button>
+    <div class="card" data-key="rcard"><h2>${icon('i-receipt')}レシートを撮る</h2>
       ${R.err ? `<div class="warn" style="margin-bottom:10px">${phr(R.err)}</div>` : ''}
-      <label class="camera" for="rcptCam">${icon('i-camera')}<b>${R.saved ? '続けてもう1枚撮る' : 'カメラで撮る'}</b><span class="sub">${phr('レシート全体が入るように撮ってください')}</span></label>
-      <label class="btn wide" for="rcptLib" style="margin-top:8px">写真から選ぶ</label>`;
-  } else if (R.step === 'reading') {
-    h += `<h2>読み取っています <span class="aitag">Claude</span></h2>
-      <div class="rphoto"><img src="${R.img}" alt="撮ったレシート"><div style="flex:1;min-width:0">${WAIT}${WAIT}<div class="sub" style="margin-top:6px">${phr('金額・日付・お店の名前を読んでいます')}</div></div></div>`;
-  } else {
-    const f = R.form;
-    const uns = k => ((f.unsure || []).indexOf(k) >= 0 ? 'check' : '');
-    const acc = R.accounts.find(a => a.id === f.accountId);
-    const pay = R.pays.find(p => p.id === f.payId);
-    const warn = !f.readable ? 'うまく読み取れませんでした。手で直すか、撮り直してください。'
-      : (f.unsure || []).length ? (f.note ? f.note + '。' : '') + '色の付いた欄が合っているか、確かめてください。' : '';
-    h += `<h2>読み取った内容 <span class="aitag">Claudeの読み取り</span></h2>
-      <div class="rphoto" data-appear="rform:${R.seq}"><img src="${R.img}" alt="撮ったレシート"><div style="flex:1;min-width:0">
-        <div class="ramt">${yen(num(f.amount))}</div><div class="sub">${esc(f.payee || '（支払先なし）')}${f.date ? '　' + jd(f.date) : ''}</div>
-        <div class="sub" style="margin-top:4px">${esc(acc ? acc.name : '')}・${esc(RATE_LABEL[f.rate] || '')}<br>${esc(pay ? pay.label : '')}</div></div></div>
-      ${warn ? `<div class="warn">${phr(warn)}</div>` : ''}
-      <div class="grid2"><div><label class="f" for="rf-date">日付</label><input type="date" id="rf-date" data-rf="date" class="${uns('date')}" value="${esc(f.date)}"></div>
-        <div><label class="f" for="rf-amount">金額（税込）</label><input type="text" inputmode="numeric" id="rf-amount" data-rf="amount" class="${uns('total')}" value="${esc(fmtNum(f.amount))}"></div></div>
-      <label class="f" for="rf-payee">支払先</label><input type="text" id="rf-payee" data-rf="payee" class="${uns('payee')}" value="${esc(f.payee)}">
-      <div class="grid2"><div><label class="f" for="rf-acc">勘定科目</label><select id="rf-acc" data-rf="accountId" class="${uns('account')}">${R.accounts.map(a => `<option value="${esc(a.id)}" ${a.id === f.accountId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
-        <div><label class="f" for="rf-rate">消費税</label><select id="rf-rate" data-rf="rate" class="${uns('rate')}">${['8', '10', 'mixed', 'none'].map(k => `<option value="${k}" ${f.rate === k ? 'selected' : ''}>${RATE_LABEL[k]}</option>`).join('')}</select></div></div>
-      ${f.rate === 'mixed' ? `<label class="f" for="rf-a8">そのうち8%（軽減税率）の金額</label><input type="text" inputmode="numeric" id="rf-a8" data-rf="amount8" value="${esc(fmtNum(f.amount8))}"><div class="sub">${phr('残りの ' + yen(Math.max(0, num(f.amount) - num(f.amount8))) + ' を10%で登録します。')}</div>` : ''}
-      <div class="grid2"><div><label class="f" for="rf-pay">支払い方法</label><select id="rf-pay" data-rf="payId">${R.pays.map(p => `<option value="${esc(p.id)}" ${p.id === f.payId ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
-        <div><label class="f" for="rf-memo">メモ</label><input type="text" id="rf-memo" data-rf="memo" value="${esc(f.memo)}"></div></div>
-      <div class="sub" style="margin-top:8px">${phr('勘定科目は、これまでに登録したお店に合わせて選んでいます。')}</div>
-      <p class="err" id="rErr" role="alert"></p>
-      <button class="btn primary wide" data-act="rcptSave">マネーフォワードに登録</button>
-      <button class="btn wide ghost" data-act="rcptRetake" style="margin-top:6px">撮り直す</button>`;
+      <label class="camera${R.queue.length ? ' small' : ''}" for="rcptCam">${icon('i-camera')}<b>${R.queue.length ? '続けて撮る' : 'カメラで撮る'}</b><span class="sub">${phr(R.queue.length ? '読み取りを待たずに、続けて撮れます' : 'レシート全体が入るように撮ってください。続けて何枚でも撮れます')}</span></label>
+      <label class="btn wide" for="rcptLib" style="margin-top:8px">写真から選ぶ（まとめて選べます）</label>
+      <input type="file" id="rcptCam" accept="image/*" capture="environment" class="vh" tabindex="-1"><input type="file" id="rcptLib" accept="image/*" multiple class="vh" tabindex="-1"></div>`;
+  if (R.queue.length) {
+    h += `<div class="card" data-key="rqueue"><h2>読み取ったレシート <span class="aitag">Claudeの読み取り</span><span class="cnt" style="margin-left:auto">${R.queue.length}枚${reading ? '（読み取り中 ' + reading + '）' : ''}</span></h2>
+      ${R.queue.map(q => rcptQueueItem(q, R)).join('')}
+      ${oks.length >= 2 ? `<button class="btn primary wide" data-act="rqSaveAll" style="margin-top:12px">「このまま登録できます」の${oks.length}枚をまとめて登録</button>` : ''}
+      <div class="sub" style="margin-top:8px">${phr('勘定科目は、これまでに登録したお店に合わせて選んでいます。')}</div></div>`;
   }
-  h += '<input type="file" id="rcptCam" accept="image/*" capture="environment" class="vh" tabindex="-1"><input type="file" id="rcptLib" accept="image/*" class="vh" tabindex="-1"></div>';
   const L = S.rcptInfo && S.rcptInfo.list;
   if (L) {
     h += `<div class="card rlist" data-key="rlist"><h2>登録したレシート <span class="cnt">今月 ${L.count}件 ${yen(L.total)}</span></h2>
@@ -2899,50 +2932,90 @@ function rcptHtml() {
   h += `<div class="sub" style="text-align:center;margin-bottom:12px"><span class="hl">${phr('登録した仕訳は、マネーフォワードの画面にもそのまま出ます。')}</span><span class="hl">${phr('レシートの写真はマネーフォワードに添付し、予約システムには残しません。')}</span></div>`;
   return h;
 }
-async function rcptFile(input) {
-  const file = input.files && input.files[0];
+function rcptItem(id) { return S.rcpt ? S.rcpt.queue.find(q => q.id === id) : null; }
+// 選んだ・撮った写真を順番待ちに入れる
+async function rcptFiles(input) {
+  const files = Array.prototype.slice.call(input.files || []);
   input.value = '';
-  if (!file) return;
+  if (!files.length) return;
   const R = S.rcpt;
-  R.err = ''; R.saved = 0;
-  try { R.img = await toJpeg(file, 1400); } catch (e) { R.err = e.message; refresh(); return; }
-  R.step = 'reading';
-  const seq = ++R.seq;
+  R.err = '';
+  for (const file of files) {
+    try { R.queue.push({ id: 'q' + (++R.seq), img: await toJpeg(file, 1400), state: 'wait', form: null, err: '' }); }
+    catch (e) { R.err = e.message; }
+  }
   refresh();
-  window.scrollTo({ top: 0, behavior: M.reduce() ? 'auto' : 'smooth' });
-  try {
-    const res = await api('rcptRead', { image: R.img, type: 'image/jpeg' });
-    if (R !== S.rcpt || seq !== R.seq) return;
-    R.accounts = res.accounts; R.pays = res.pays;
-    R.form = Object.assign({}, res.read);
-    R.step = 'form';
-  } catch (e) {
-    if (R !== S.rcpt || seq !== R.seq) return;
-    R.step = 'pick'; R.img = ''; R.err = e.message;
-  }
-  if (S.tab === 'today') refresh();
+  rcptPump();
 }
-async function rcptSave(btn) {
-  const R = S.rcpt, f = R.form;
-  const er = $('rErr');
-  if (er) er.textContent = '';
-  const amount = num(f.amount);
-  if (!f.date) { er.textContent = '日付を入れてください。'; return; }
-  if (!(amount > 0)) { er.textContent = '金額を入れてください。'; return; }
-  if (f.rate === 'mixed' && !(num(f.amount8) > 0 && num(f.amount8) < amount)) { er.textContent = '8%の金額を確かめてください。'; return; }
-  const mo = M.busy(btn);
-  try {
-    const res = await api('rcptSave', { date: f.date, amount: amount, payee: f.payee, memo: f.memo, accountId: f.accountId, payId: f.payId, rate: f.rate, amount8: num(f.amount8), payment: f.payment, image: R.img });
-    S.rcptInfo = { connected: true, list: res.list };
-    await mo.ok();
-    R.step = 'pick'; R.img = ''; R.form = null; R.saved = Date.now();
-    R.savedText = yen(amount) + '（' + (f.payee || '支払先なし') + '）を登録しました' + (res.attached ? '。写真も添付しました' : '');
-    refresh();
-    if (res.check) alert(res.check);
-  } catch (e) {
-    mo.fail();
-    if ($('rErr')) $('rErr').textContent = e.message;
+// 読み取りは同時に2枚まで（たくさん撮っても、つながりが詰まらないように）
+function rcptPump() {
+  const R = S.rcpt;
+  if (!R) return;
+  while (R.queue.filter(q => q.state === 'reading').length < 2) {
+    const q = R.queue.find(x => x.state === 'wait');
+    if (!q) return;
+    q.state = 'reading';
+    api('rcptRead', { image: q.img, type: 'image/jpeg' }).then(res => {
+      R.accounts = res.accounts; R.pays = res.pays;
+      q.form = Object.assign({}, res.read);
+      q.readAt = Date.now();
+      q.state = 'ready';
+    }).catch(e => { q.state = 'error'; q.err = e.message; }).finally(() => {
+      if (R !== S.rcpt) return;
+      if (S.tab === 'today') renderWhenIdle('today');
+      rcptPump();
+    });
   }
+}
+async function rcptSaveItem(q) {
+  const f = q.form;
+  const amount = num(f.amount);
+  if (!f.date) return '日付を入れてください。';
+  if (!(amount > 0)) return '金額を入れてください。';
+  if (f.rate === 'mixed' && !(num(f.amount8) > 0 && num(f.amount8) < amount)) return '8%の金額を確かめてください。';
+  q.state = 'saving';
+  try {
+    const res = await api('rcptSave', { date: f.date, amount: amount, payee: f.payee, memo: f.memo, accountId: f.accountId, payId: f.payId, rate: f.rate, amount8: num(f.amount8), payment: f.payment, image: q.img });
+    S.rcptInfo = { connected: true, list: res.list };
+    if (res.check) alert(res.check);
+    return '';
+  } catch (e) {
+    q.state = 'ready';
+    return e.message;
+  }
+}
+// 登録できたものは縮めて消し、登録したレシートの一覧に移す
+async function rcptDone(ids) {
+  const R = S.rcpt;
+  await Promise.all(ids.map(id => M.collapse(document.querySelector(`[data-key="rq:${CSS.escape(id)}"]`))));
+  R.queue = R.queue.filter(q => ids.indexOf(q.id) < 0);
+  if (ids.indexOf(R.openId) >= 0) R.openId = null;
+  refresh();
+}
+async function rcptSaveOne(b) {
+  const q = rcptItem(b.dataset.id);
+  if (!q || q.state !== 'ready') return;
+  const mo = M.busy(b);
+  const err = await rcptSaveItem(q);
+  if (err) {
+    mo.fail();
+    S.rcpt.openId = q.id; refresh();
+    const el = $('rErr-' + q.id); if (el) el.textContent = err;
+    return;
+  }
+  await mo.ok();
+  await rcptDone([q.id]);
+  toast(yen(num(q.form.amount)) + 'を登録しました');
+}
+async function rcptSaveAll(b) {
+  const list = S.rcpt.queue.filter(rcptOk);
+  const mo = M.busy(b);
+  const done = [];
+  let fails = 0;
+  for (const q of list) { if (await rcptSaveItem(q)) fails++; else done.push(q.id); }
+  if (done.length) await mo.ok(); else mo.fail();
+  await rcptDone(done);
+  toast(done.length + '枚を登録しました' + (fails ? '（' + fails + '枚は登録できませんでした）' : ''));
 }
 
 /* ---------- 売上・経費の分析（設定＞分析） ---------- */
@@ -3144,11 +3217,11 @@ $('view').addEventListener('input', e => {
   }
   if (S.tab !== 'today') return;
   if (e.target.id === 'payQ') { S.salesQ = e.target.value; payQuery(); return; }
-  if (e.target.dataset.rf && S.rcpt && S.rcpt.form) {
-    const k = e.target.dataset.rf;
-    S.rcpt.form[k] = e.target.value;
-    S.rcpt.form.unsure = (S.rcpt.form.unsure || []).filter(x => x !== UNSURE_OF[k]);
-    if ($('rErr')) $('rErr').textContent = '';
+  if (e.target.dataset.rf && rcptItem(e.target.dataset.qid)) {
+    const q = rcptItem(e.target.dataset.qid), k = e.target.dataset.rf;
+    q.form[k] = e.target.value;
+    q.form.unsure = (q.form.unsure || []).filter(x => x !== UNSURE_OF[k]);
+    const er = $('rErr-' + q.id); if (er) er.textContent = '';
     refresh();
     return;
   }
@@ -3171,12 +3244,13 @@ $('view').addEventListener('input', e => {
 });
 
 $('view').addEventListener('change', e => {
-  if (e.target.id === 'rcptCam' || e.target.id === 'rcptLib') { rcptFile(e.target); return; }
+  if (e.target.id === 'rcptCam' || e.target.id === 'rcptLib') { rcptFiles(e.target); return; }
   if (e.target.id === 'igPhoto') { igPhoto(e.target); return; }
   if (S.tab === 'today') {
-    if (e.target.dataset.rf && S.rcpt && S.rcpt.form) {
-      S.rcpt.form[e.target.dataset.rf] = e.target.value;
-      S.rcpt.form.unsure = (S.rcpt.form.unsure || []).filter(x => x !== UNSURE_OF[e.target.dataset.rf]);
+    if (e.target.dataset.rf && rcptItem(e.target.dataset.qid)) {
+      const q = rcptItem(e.target.dataset.qid);
+      q.form[e.target.dataset.rf] = e.target.value;
+      q.form.unsure = (q.form.unsure || []).filter(x => x !== UNSURE_OF[e.target.dataset.rf]);
       refresh();
       return;
     }
