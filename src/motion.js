@@ -25,7 +25,10 @@
   .m-tipping > [data-tip].m-tip-on { opacity: 1; }
   .toast { transition: none !important; }
   .toast .m-tt { display: inline-block; }
-  @media (prefers-reduced-motion: reduce) { .m-busy .m-spin circle { animation: none; } }`;
+  .waitbar { display: block; height: 11px; margin: 7px 0; border-radius: 6px; background: linear-gradient(90deg, #E6EFF2 0%, #F6F9FA 45%, #E6EFF2 90%); background-size: 220% 100%; animation: m-shine 1.5s ease-in-out infinite; }
+  .waitbar.short { width: 58%; }
+  @keyframes m-shine { from { background-position: 110% 0; } to { background-position: -110% 0; } }
+  @media (prefers-reduced-motion: reduce) { .m-busy .m-spin circle, .waitbar { animation: none; } }`;
   const st = document.createElement('style');
   st.textContent = css;
   document.head.appendChild(st);
@@ -160,6 +163,8 @@ const M = (() => {
     });
     // 伸びて出るバー
     scope.querySelectorAll('[data-grow]').forEach(c => grow(c));
+    // 新しく届いた文（Claudeの下書きなど）
+    scope.querySelectorAll('[data-appear]').forEach(appear);
     before = {};
   }
 
@@ -286,6 +291,34 @@ const M = (() => {
       const from = dir === 'up' ? 'inset(100% 0 0 0)' : 'inset(0 100% 0 0)';
       run(el, [{ clipPath: from }, { clipPath: 'inset(0 0 0 0)' }], { duration: sp.ms, easing: sp.easing, delay: Math.min(i * 16, 320), fill: 'backwards' });
     });
+  }
+
+  /* ---------- 新しく届いたもの：ぼかしから、ふわっと浮かび上がる（同じ内容は一度だけ） ---------- */
+  const appeared = {};
+  function appear(el) {
+    const key = el.dataset.appear;
+    if (!key || appeared[key]) return;
+    appeared[key] = true;
+    if (reduce()) return;
+    const sp = SNAP();
+    const block = getComputedStyle(el).display !== 'inline';
+    run(el, [
+      { opacity: 0, filter: 'blur(6px)', transform: block ? 'translateY(6px)' : 'none' },
+      { opacity: 1, filter: 'blur(0)', transform: 'none' }
+    ], { duration: sp.ms + 120, easing: sp.easing, fill: 'backwards' });
+  }
+
+  /* ---------- 片付いたもの：高さを縮めながら、ぼけて消える ---------- */
+  function collapse(el) {
+    if (!el || !el.isConnected || reduce() || !el.animate) return Promise.resolve();
+    const cs = getComputedStyle(el);
+    const sp = SNAP();
+    el.style.overflow = 'hidden';
+    const a = run(el, [
+      { height: el.offsetHeight + 'px', opacity: 1, filter: 'blur(0)', paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, marginTop: cs.marginTop, marginBottom: cs.marginBottom },
+      { height: '0px', opacity: 0, filter: 'blur(3px)', paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px' }
+    ], { duration: sp.ms, easing: sp.easing, fill: 'forwards' });
+    return a ? a.finished.then(() => {}, () => {}) : Promise.resolve();
   }
 
   /* ---------- ボタン：押すと丸く縮んで読み込み中 → チェック ---------- */
@@ -559,5 +592,5 @@ const M = (() => {
     if (tag === 'SELECT' && nowSel !== before && a.value !== nowSel) a.value = nowSel;
   }
 
-  return { capture: capture, play: play, patch: patch, busy: busy, toast: toast, indicator: indicator, reduce: reduce };
+  return { capture: capture, play: play, patch: patch, busy: busy, toast: toast, indicator: indicator, reduce: reduce, collapse: collapse };
 })();

@@ -4,6 +4,7 @@ src = lambda f: open('src/' + f, encoding='utf-8').read()
 shared = src('shared.js')
 server = src('server.js')
 motion = src('motion.js')
+services = src('services.js')
 im = Image.open('src/logo_source.webp').convert('RGBA')
 bb = im.getchannel('A').point(lambda v: 255 if v > 20 else 0).getbbox()
 c = im.crop((bb[0]-8, bb[1]-8, bb[2]+8, bb[3]+8)); c.thumbnail((300, 460), Image.LANCZOS)
@@ -27,7 +28,7 @@ assets = '\n'.join([
   'const ICONS = ' + json.dumps(icons) + ';',
   ''
 ])
-out = server.replace('/*__SHARED_CODE__*/', shared).replace('/*__ASSETS__*/', assets)
+out = server.replace('/*__SHARED_CODE__*/', shared).replace('/*__SERVICES__*/', services).replace('/*__ASSETS__*/', assets)
 import os; os.makedirs('dist', exist_ok=True)
 open('dist/worker.js', 'w', encoding='utf-8').write(out)
 print('worker.js', len(out.encode()), 'bytes; logo', c.size, len(logo))

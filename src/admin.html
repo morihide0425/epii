@@ -73,7 +73,7 @@
   .err { color: var(--red); font-size: 13px; min-height: 1em; margin: 6px 0 0; }
   .warn { background: var(--amber-l); color: var(--amber); border-radius: 10px; padding: 8px 10px; font-size: 13px; margin-top: 8px; }
   .panel { background: var(--bg); border-radius: 12px; padding: 12px; margin-top: 10px; }
-  .toast { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 20px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; max-width: 90vw; }
+  .toast { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 20px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; width: max-content; max-width: 90vw; }
   .toast.show { opacity: 1; }
   .loading { text-align: center; color: var(--sub); padding: 30px 0; }
   .hidden { display: none !important; }
@@ -234,6 +234,70 @@
   .iconbtn { padding: 5px 8px; }
   .chart .col { cursor: default; }
   nav.tabs .badge { position: absolute; top: -2px; right: calc(50% - 22px); background: var(--red); color: #fff; font-size: 10px; border-radius: 9px; min-width: 16px; line-height: 16px; text-align: center; padding: 0 4px; }
+  /* Claude・Square・マネーフォワード */
+  .ph { display: inline-block; }
+  .hl { display: block; }
+  .aitag { display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 11px; line-height: 20px; background: var(--blue-l); color: var(--blue); font-weight: 400; white-space: nowrap; }
+  .dlabel { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub); margin: 12px 0 6px; flex-wrap: wrap; }
+  .dlabel .tools { margin-left: auto; display: flex; gap: 6px; }
+  .draft { display: block; width: 100%; border: 1px solid var(--line2); border-radius: 10px; background: #fff; padding: 10px 11px; font-size: 14px; line-height: 1.75; color: var(--ink); line-break: strict; cursor: text; text-align: left; }
+  textarea.draft { resize: none; overflow: hidden; min-height: 200px; }
+  .draft mark.add { background: none; color: inherit; }
+  .draft mark.add .ph { background: #FAF0D7; }
+  .addwait { display: inline-block; width: 100%; vertical-align: top; }
+  .aimemo { margin-top: 6px; background: #F1F6F7; border-radius: 10px; padding: 7px 10px 8px; font-size: 12px; line-height: 1.65; color: var(--ink); }
+  .aimemo .mlbl { display: block; font-size: 10px; color: var(--blue); font-weight: 700; }
+  .vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+  .rcbtn { width: 100%; margin-bottom: 12px; }
+  .backlink { border: 0; background: none; color: var(--blue); font-size: 13px; padding: 2px 0 8px; display: inline-flex; align-items: center; gap: 2px; }
+  .backlink svg { width: 16px; height: 16px; stroke: var(--blue); }
+  .camera { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1.5px dashed var(--line2); border-radius: 16px; padding: 22px 12px; background: var(--bg); text-align: center; cursor: pointer; }
+  .camera svg { width: 40px; height: 40px; }
+  .camera b { font-size: 15px; }
+  label.btn { cursor: pointer; }
+  .rphoto { display: flex; gap: 12px; margin-bottom: 6px; }
+  .rphoto img { width: 84px; height: 116px; object-fit: cover; border-radius: 10px; flex-shrink: 0; background: var(--bg); border: 1px solid var(--line); }
+  .ramt { font-size: 22px; font-weight: 700; line-height: 1.2; }
+  input.check, select.check { border-color: var(--amber); background: #FFFBF0; }
+  .okbar { display: flex; gap: 8px; align-items: center; background: var(--green-l); color: var(--green); border-radius: 12px; padding: 8px 10px; font-size: 13px; margin-bottom: 10px; }
+  .okbar svg { width: 18px; height: 18px; stroke: var(--green); flex-shrink: 0; }
+  .rlist .it { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .rlist .dt { width: 40px; color: var(--sub); flex-shrink: 0; }
+  .rlist .nm { flex: 1; min-width: 0; } .rlist .nm span { display: block; font-size: 11px; color: var(--sub); }
+  .rlist .am { font-weight: 600; white-space: nowrap; }
+  .sum3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .sum3 > div { background: var(--bg); border-radius: 12px; padding: 8px 4px; text-align: center; }
+  .sum3 b { display: block; font-size: 17px; line-height: 1.3; } .sum3 span { font-size: 11px; color: var(--sub); }
+  .split { height: 10px; border-radius: 5px; background: var(--bg); overflow: hidden; margin-top: 10px; }
+  .split > div { display: flex; height: 100%; } .split i { display: block; height: 100%; } .split .a { background: var(--green); } .split .b { background: var(--amber); }
+  .pay { padding: 10px 0; border-top: 1px solid var(--line); }
+  .pay .top { display: flex; align-items: center; gap: 8px; } .pay .tm { font-weight: 700; font-size: 15px; width: 46px; } .pay .am { margin-left: auto; font-weight: 700; }
+  .pay .acts { margin-top: 6px; }
+  .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .picker { margin-top: 8px; }
+  .picker .search { background: var(--bg); margin-bottom: 4px; }
+  .picker .cust { padding: 8px 0; }
+  .picker .av { width: 32px; height: 32px; font-size: 14px; }
+  .kpis.money .v { font-size: 17px; } .kpi .c { font-size: 10px; margin-top: 2px; color: var(--sub); } .kpi .c.up { color: var(--green); } .kpi .c.down { color: var(--red); }
+  .pchart { display: flex; align-items: flex-end; gap: 10px; height: 150px; padding-top: 8px; }
+  .pchart .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
+  .pchart .pair { display: flex; align-items: flex-end; gap: 3px; height: 120px; width: 100%; justify-content: center; }
+  .pchart .b1, .pchart .b2 { width: 13px; border-radius: 3px 3px 0 0; min-height: 1px; } .pchart .b1 { background: var(--green); } .pchart .b2 { background: var(--amber); }
+  .pchart .cl { font-size: 10px; color: var(--sub); }
+  .erow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 84px; gap: 8px; align-items: center; font-size: 13px; padding: 4px 0; }
+  .erow .ft { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; } .erow .fb { height: 100%; background: var(--amber); }
+  .erow .fn { text-align: right; font-weight: 600; } .erow .fl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .aiwaitbox { padding: 4px 0 8px; }
+  .igtext { border: 1px solid var(--line2); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.8; margin-top: 10px; background: #fff; }
+  .igtext .hash { color: var(--blue); }
+  .igph { display: flex; gap: 10px; align-items: center; margin-top: 10px; font-size: 13px; }
+  .igph img { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; }
+  .addph { display: flex; gap: 10px; align-items: center; border: 1px dashed var(--line2); border-radius: 12px; padding: 10px; font-size: 13px; margin-top: 10px; cursor: pointer; }
+  .addph svg { width: 24px; height: 24px; flex-shrink: 0; }
+  .ins.warn { background: none; color: inherit; padding: 10px 0; margin-top: 0; border-radius: 0; }
+  .draftacts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .more2 { border: 0; background: none; color: var(--blue); font-size: 13px; padding: 10px 0 0; }
+  .stylebox { background: var(--bg); border-radius: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.7; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -258,6 +322,9 @@
     <symbol id="i-right" viewBox="0 0 32 32"><path d="M12.5 8.5l7.2 7.4-7.3 7.6"/></symbol>
     <symbol id="i-up" viewBox="0 0 32 32"><path d="M8.5 19.4l7.4-7.2 7.6 7.3"/></symbol>
     <symbol id="i-down" viewBox="0 0 32 32"><path d="M8.5 12.6l7.4 7.2 7.6-7.3"/></symbol>
+    <symbol id="i-receipt" viewBox="0 0 32 32"><path d="M8.4 4.6c5.1-.3 10.2-.3 15.3 0 .3 7.6.3 15.2-.1 22.8l-2.6-1.7-2.6 1.8-2.7-1.8-2.6 1.8-2.6-1.7-2.7 1.7c-.4-7.6-.4-15.3 0-22.9z"/><path d="M12 11.2c2.7-.2 5.4-.2 8 0M12 15.6c2.6-.1 5.3-.1 7.9.1M12 20c1.7-.1 3.3-.1 5 0"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 32 32"><path d="M5.2 10.4c1.7-.2 3.3-.2 5-.1l1.8-2.8c2.7-.2 5.3-.2 8 0l1.8 2.8c1.7-.1 3.3-.1 5 .1.4 4.9.4 9.8 0 14.7-6.9.4-13.8.4-20.6 0-.4-4.9-.4-9.8 0-14.7z"/><path d="M16 13c2.6-.1 4.6 2 4.5 4.5-.1 2.5-2.1 4.4-4.6 4.3-2.4-.1-4.3-2.1-4.2-4.5.1-2.4 2-4.2 4.3-4.3z"/></symbol>
+    <symbol id="i-coin" viewBox="0 0 32 32"><path d="M16 4.8c6.2-.2 11.3 4.8 11.2 11.1-.1 6.2-5.1 11.2-11.3 11.1-6.1-.1-11-5.1-10.9-11.2.1-6 5-10.8 11-11z"/><path d="M11.9 10.3l4.1 5.5 4.2-5.6M16 15.8v6.4M12.6 16.7c2.3-.1 4.5-.1 6.8 0M12.6 19.5c2.3-.1 4.5-.1 6.8 0"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 32 32"><path d="M24.8 13.2c-1.2-4.1-4.9-6.9-9.2-6.7-5.2.3-9.1 4.6-8.8 9.8.3 5.1 4.7 9 9.8 8.7 3.6-.2 6.6-2.4 8-5.5"/><path d="M25.4 6.9l-.4 6.5-6.4-.6"/></symbol>
   </defs>
 </svg>
@@ -311,6 +378,9 @@ const S = {
   custQ: '', custList: null, custSel: null, memoEdit: false,
   custFilter: 'all', custAdd: null, mergeOpen: false, mergeQ: '', dupes: [],
   editCourse: null, quota: null, setPart: 'rules', an: null, anDays: 30, anView: 'site', ig: null,
+  // Claude・Square・マネーフォワード（つながっているものだけ画面に出す）
+  features: {}, memoWait: {}, sales: null, salesAt: 0, salesPick: null, salesQ: '', salesHits: null,
+  rcpt: null, rcptInfo: null, money: null, moneyPeriod: 'month', moneyAiWait: false, moneyAiErr: '', igd: null,
   // 一度読み込んだものは手元に置いておき、すぐ表示してから裏で最新にする
   dayCache: {}, monthCache: {}, monthFresh: {}, custCache: {}, scroll: {}
 };
@@ -421,6 +491,8 @@ async function boot() {
     S.settings = d.settings;
     S.courses = d.courses;
     S.liffUrl = d.liffUrl;
+    S.features = d.features || {};
+    S.rcpt = S.rcpt || newRcpt();
     S.req = d.requests;
     S.day = S.day || today();
     S.month = S.month || today().slice(0, 7);
@@ -501,58 +573,71 @@ function refresh() { VIEWS[S.tab].render(); }
 function icon(name) { return `<svg class="ink"><use href="#${name}"/></svg>`; }
 
 /* ---------- 返事の下書き ---------- */
-function chgTemplate(c, mode) {
+// 文面は「前半＋（Claudeの一言）＋後半」。一言がなければ、いつもの文面と同じになる
+function joinDraft(p, add) { return p.head + (add ? '\n\n' + add : '') + p.tail; }
+function chgParts(c, mode) {
   const sign = '\n\n' + SHOP.name + '\nTEL ' + SHOP.tel;
   if (mode === 'ok') {
-    return c.name + ' 様\n\nご予約の変更を承りました。\n\n【変更前】\n日時：' + jdLong(c.oldDate) + ' ' + c.oldTime +
-      '\n人数：' + c.oldGuests + '名\nメニュー：' + c.oldCourse +
-      '\n\n【変更後】\n日時：' + jdLong(c.date) + ' ' + c.time + '\n人数：' + c.guests + '名\nメニュー：' + c.course +
-      '\n\nご来店を心よりお待ちしております。' + sign;
+    return {
+      head: c.name + ' 様\n\nご予約の変更を承りました。\n\n【変更前】\n日時：' + jdLong(c.oldDate) + ' ' + c.oldTime +
+        '\n人数：' + c.oldGuests + '名\nメニュー：' + c.oldCourse +
+        '\n\n【変更後】\n日時：' + jdLong(c.date) + ' ' + c.time + '\n人数：' + c.guests + '名\nメニュー：' + c.course,
+      tail: '\n\nご来店を心よりお待ちしております。' + sign
+    };
   }
-  return c.name + ' 様\n\nご予約の変更をご希望いただき、ありがとうございます。\n誠に申し訳ございませんが、ご希望の日時はお席をご用意できませんでした。\n\n' +
-    'つきましては、下記のご予約はそのままとさせていただきます。\n日時：' + jdLong(c.oldDate) + ' ' + c.oldTime +
-    '\n人数：' + c.oldGuests + '名\nメニュー：' + c.oldCourse +
-    '\n\nご都合が合わない場合は、お手数ですがお電話にてご相談ください。' + sign;
+  return {
+    head: c.name + ' 様\n\nご予約の変更をご希望いただき、ありがとうございます。\n誠に申し訳ございませんが、ご希望の日時はお席をご用意できませんでした。\n\n' +
+      'つきましては、下記のご予約はそのままとさせていただきます。\n日時：' + jdLong(c.oldDate) + ' ' + c.oldTime +
+      '\n人数：' + c.oldGuests + '名\nメニュー：' + c.oldCourse,
+    tail: '\n\nご都合が合わない場合は、お手数ですがお電話にてご相談ください。' + sign
+  };
 }
+function chgTemplate(c, mode, add) { return joinDraft(chgParts(c, mode), add); }
 
 function prepareDrafts() {
   (S.req.changes || []).forEach(c => {
     const key = 'g' + c.id;
-    if (!S.drafts[key]) S.drafts[key] = { mode: c.left >= c.guests ? 'ok' : 'ng', text: '', edited: false };
+    if (!S.drafts[key]) S.drafts[key] = newDraft(c.left >= c.guests ? 'ok' : 'ng');
     const d = S.drafts[key];
-    if (!d.edited) d.text = chgTemplate(c, d.mode);
+    if (!d.edited && !d.editing) d.text = draftText('g', c, d);
+    wantAdd('g', c, d);
   });
   S.req.waiting.forEach(r => {
-    if (!S.drafts[r.id]) {
-      S.drafts[r.id] = {
-        mode: r.left >= r.guests ? 'ok' : (r.altDate && r.altLeft >= r.guests ? 'ok2' : 'offer'),
-        offer: 0, text: '', edited: false
-      };
-    }
+    if (!S.drafts[r.id]) S.drafts[r.id] = newDraft(r.left >= r.guests ? 'ok' : (r.altDate && r.altLeft >= r.guests ? 'ok2' : 'offer'));
     const d = S.drafts[r.id];
-    if (!d.edited) d.text = template(r, d);
+    if (!d.edited && !d.editing) d.text = draftText('r', r, d);
+    wantAdd('r', r, d);
   });
   setBadge();
 }
 
-function template(r, d) {
+function parts(r, d) {
   const sign = '\n\n' + SHOP.name + '\nTEL ' + SHOP.tel + '\n' + SHOP.access[0][0] + ' ' + SHOP.access[0][1];
   if (d.mode === 'ok' || d.mode === 'ok2') {
     const date = d.mode === 'ok2' ? r.altDate : r.date;
     const time = d.mode === 'ok2' ? r.altTime : r.time;
-    return r.name + ' 様\n\nこの度はご予約のリクエストをありがとうございます。\n' +
-      (d.mode === 'ok2' ? '第1希望の日時は満席のため、第2希望の日時で' : '下記の内容で') + 'ご予約を承りました。\n\n' +
-      '日時：' + jdLong(date) + ' ' + time + '\n人数：' + r.guests + '名\nメニュー：' + r.course +
-      '\n\nご来店を心よりお待ちしております。' + sign;
+    return {
+      head: r.name + ' 様\n\nこの度はご予約のリクエストをありがとうございます。\n' +
+        (d.mode === 'ok2' ? '第1希望の日時は満席のため、第2希望の日時で' : '下記の内容で') + 'ご予約を承りました。\n\n' +
+        '日時：' + jdLong(date) + ' ' + time + '\n人数：' + r.guests + '名\nメニュー：' + r.course,
+      tail: '\n\nご来店を心よりお待ちしております。' + sign
+    };
   }
   if (d.mode === 'offer') {
     const o = r.suggestions[d.offer];
-    return r.name + ' 様\n\nこの度はご予約のリクエストをありがとうございます。\nあいにく ' + jd(r.date) + ' ' + r.time +
-      ' はお席のご用意が難しい状況です。\n\n' + (o ? jdLong(o.date) + ' ' + o.time : '（日時を選んでください）') +
-      ' でしたらご案内できます。\nよろしければ、下のボタンからご返事をお願いいたします。' + sign;
+    return {
+      head: r.name + ' 様\n\nこの度はご予約のリクエストをありがとうございます。\nあいにく ' + jd(r.date) + ' ' + r.time +
+        ' はお席のご用意が難しい状況です。\n\n' + (o ? jdLong(o.date) + ' ' + o.time : '（日時を選んでください）') +
+        ' でしたらご案内できます。\nよろしければ、下のボタンからご返事をお願いいたします。',
+      tail: sign
+    };
   }
-  return r.name + ' 様\n\nこの度はご予約のリクエストをありがとうございます。\n誠に申し訳ございませんが、ご希望の日時はお席をご用意することができませんでした。\n\nまたのご来店を心よりお待ちしております。' + sign;
+  return {
+    head: r.name + ' 様\n\nこの度はご予約のリクエストをありがとうございます。\n誠に申し訳ございませんが、ご希望の日時はお席をご用意することができませんでした。',
+    tail: '\n\nまたのご来店を心よりお待ちしております。' + sign
+  };
 }
+function template(r, d, add) { return joinDraft(parts(r, d), add); }
 
 function leftTag(left, guests) {
   if (left === null || left === undefined) return '';
@@ -659,14 +744,14 @@ function requestCards() {
         <div class="act"><span class="tag red">未返信</span></div>
       </div>
       <div class="panel">
-        <div>${modes.map(m => `<button class="chip ${d.mode === m[0] ? 'on' : ''}" data-act="mode" data-mode="${m[0]}">${m[1]}</button>`).join('')}</div>
+        <div data-mg="rm:${esc(r.id)}" data-mgs=".chip.on">${modes.map(m => `<button class="chip ${d.mode === m[0] ? 'on' : ''}" data-act="mode" data-mode="${m[0]}">${m[1]}</button>`).join('')}</div>
         ${d.mode === 'offer' ? (r.suggestions.length
           ? `<label class="f">提案する日時（空いている日時だけ表示）</label><select data-act="offer">${r.suggestions.map((s, i) => `<option value="${i}" ${d.offer === i ? 'selected' : ''}>${jd(s.date)} ${s.time}</option>`).join('')}</select>`
           : '<div class="warn">前後30日に空いている日時がありません。</div>') : ''}
-        <label class="f">送る文面（自由に直せます）</label>
-        <textarea rows="9" data-act="text">${esc(d.text)}</textarea>
-        ${d.edited ? '<button class="btn small" data-act="resetText" style="margin-top:6px">文面を元に戻す</button>' : ''}
-        <div class="sub" style="margin-top:6px">${d.mode === 'offer' ? 'お客様には「確認して返事をする」ボタンが一緒に届きます。' : d.mode === 'ng' ? '' : 'お客様には「予約を確認する」ボタンが一緒に届きます。'}</div>
+        ${draftTools('r', r, d)}
+        ${draftBox('r', r, d)}
+        ${draftActs('r', d)}
+        <div class="sub" style="margin-top:6px">${draftHint('r', d)}</div>
         <p class="err" data-err="${esc(r.id)}" role="alert"></p>
         <button class="btn ${d.mode === 'ng' ? 'dark' : 'primary'} wide" data-act="send">LINEで送る</button>
       </div>
@@ -684,11 +769,11 @@ function requestCards() {
         <div class="act"><span class="tag red">変更の申し込み</span></div>
       </div>
       <div class="panel">
-        <div><button class="chip ${d.mode === 'ok' ? 'on' : ''}" data-act="cmode" data-mode="ok">変更を承認する</button><button class="chip ${d.mode === 'ng' ? 'on' : ''}" data-act="cmode" data-mode="ng">お断りする（今の予約のまま）</button></div>
-        <label class="f">送る文面（自由に直せます）</label>
-        <textarea rows="9" data-act="ctext">${esc(d.text)}</textarea>
-        ${d.edited ? '<button class="btn small" data-act="cresetText" style="margin-top:6px">文面を元に戻す</button>' : ''}
-        <div class="sub" style="margin-top:6px">${d.mode === 'ok' ? '承認すると、元の予約がこの日時に移ります。' : 'お断りすると、元の予約はそのまま残ります。'}</div>
+        <div data-mg="cm:${esc(c.id)}" data-mgs=".chip.on"><button class="chip ${d.mode === 'ok' ? 'on' : ''}" data-act="cmode" data-mode="ok">変更を承認する</button><button class="chip ${d.mode === 'ng' ? 'on' : ''}" data-act="cmode" data-mode="ng">お断りする（今の予約のまま）</button></div>
+        ${draftTools('g', c, d)}
+        ${draftBox('g', c, d)}
+        ${draftActs('g', d)}
+        <div class="sub" style="margin-top:6px">${draftHint('g', d)}</div>
         <p class="err" data-cerr="${esc(c.id)}" role="alert"></p>
         <button class="btn ${d.mode === 'ng' ? 'dark' : 'primary'} wide" data-act="csend">LINEで送る</button>
       </div>
@@ -708,7 +793,7 @@ function requestCards() {
  * ========================================================= */
 const VIEWS = {};
 VIEWS.today = {
-  ready: () => !!(S.req && S.dayCache[today()]),
+  ready: () => !!(S.rcpt && S.rcpt.open) || !!(S.req && S.dayCache[today()]),
   load: async () => {
     const t = today();
     const [req, day, month] = await Promise.all([api('requests'), api('day', { date: t }), api('month', { ym: t.slice(0, 7) })]);
@@ -716,9 +801,12 @@ VIEWS.today = {
       S.req = req.requests; prepareDrafts();
       putDay(day);
       putMonth(t.slice(0, 7), month);
+      todayExtras();
     };
   },
   render: () => {
+    $('ttl').textContent = S.rcpt && S.rcpt.open ? 'レシートを登録' : '今日';
+    if (S.rcpt && S.rcpt.open) { setView(rcptHtml()); return; }
     const d = S.dayCache[today()];
     if (!d) { setView('<div class="loading">読み込み中…</div>'); return; }
     const active = d.reservations.filter(r => r.status !== 'キャンセル');
@@ -732,11 +820,16 @@ VIEWS.today = {
       <button class="kpi" data-act="goDay" data-date="${addDays(today(), 1)}"><div class="v">${tmr ? tmr.guests : '–'}<small>名</small></div><div class="k">明日</div></button>
     </div>`;
     h += openStatusHtml();
+    if (S.features.ai && S.features.mf) h += rcptButton();
     h += requestCards();
     if (!pending) h += `<div class="card" style="text-align:center"><div class="sub">未返信のリクエストはありません。新しいリクエストはお店のLINEに届きます。</div></div>`;
     h += `<div class="card bars"><h2>${icon('i-clock')}今日の混み具合 <span class="cnt">${d.seats}席</span><button class="more" data-act="goDay" data-date="${today()}">押さえる・営業を変える ›</button></h2>${barsHtml(d)}</div>`;
-    h += `<div class="card"><h2>${icon('i-cal')}今日の予約 <span class="cnt">${active.length}組 ${total}名</span></h2>${todayList(d)}</div>`;
+    const memos = Object.keys(d.aiMemos || {}).length;
+    h += `<div class="card"><h2>${icon('i-cal')}今日の予約 <span class="cnt">${active.length}組 ${total}名</span></h2>${todayList(d)}
+      ${memos ? `<div class="sub" style="margin-top:6px">${phr('来店前メモは、これまでの予約・ご要望・お客様メモからClaudeがまとめています（お名前・電話番号は送りません）。')}</div>` : ''}</div>`;
+    if (S.features.square) h += salesHtml();
     setView(h);
+    fitAreas();
   }
 };
 
@@ -814,7 +907,7 @@ function todayList(d) {
       <div class="t">${esc(t)}${r.until ? `<small>〜${esc(r.until)}</small>` : ''}</div>
       <div><div class="n">${custLink(r)} <span class="g">${r.guests}名</span> ${visitTag(r)}</div>
         <div class="d">${esc(r.course)}${r.source && r.source !== 'LINE' ? '・' + esc(r.source) : ''} ${r.status !== '確定' ? statusTag(r.status) : ''}${no ? '<span class="tag gray">来店なし</span>' : ''}</div>
-        ${noteTags(r)}</div>
+        ${noteTags(r)}${memoHtml(d, r)}</div>
       <div class="act">${r.status === '確定'
         ? `<button class="chk ${done ? 'on' : no ? 'no' : ''}" data-act="arrive" data-id="${esc(r.id)}" data-state="${done ? '' : 'yes'}" aria-label="来店"><svg ${done ? '' : 'class="ink"'}><use href="${done ? '#i-check' : '#i-check-ink'}"/></svg></button>
            <button class="btn ghost small" data-act="arrive" data-id="${esc(r.id)}" data-state="${no ? '' : 'no'}">${no ? '取り消す' : '来なかった'}</button>`
@@ -1301,6 +1394,33 @@ async function afterSave(mo) {
 
 ACTIONS.today = async (a, b) => {
   if (a === 'openCustFrom') { openCustFrom(b.dataset.key); return; }
+  // レシート
+  if (a === 'rcptOpen') {
+    S.scroll.todayMain = window.scrollY;
+    S.rcpt = newRcpt(); S.rcpt.open = true;
+    refresh(); window.scrollTo(0, 0);
+    if (!S.rcptInfo || !S.rcptInfo.list) loadRcpt();
+    return;
+  }
+  if (a === 'rcptClose') { S.rcpt = newRcpt(); refresh(); window.scrollTo(0, S.scroll.todayMain || 0); return; }
+  if (a === 'rcptRetake') { S.rcpt.step = 'pick'; S.rcpt.img = ''; S.rcpt.form = null; S.rcpt.seq++; refresh(); return; }
+  if (a === 'rcptSave') { await rcptSave(b); return; }
+  if (a === 'rcptUndo') {
+    const it = S.rcptInfo.list.items.find(x => x.id === b.dataset.id);
+    if (!it || !confirm(yen(it.amount) + '（' + (it.payee || '支払先なし') + '）の登録を取り消して、マネーフォワードの仕訳も消しますか？')) return;
+    const el = b.closest('.it');
+    const anim = M.collapse(el);
+    try { const res = await api('rcptUndo', { id: it.id }); await anim; S.rcptInfo.list = res.list; refresh(); toast('取り消しました'); }
+    catch (e) { await anim; refresh(); fail(e); }
+    return;
+  }
+  // 予約のない会計
+  if (a === 'payPick') { S.salesPick = b.dataset.id; S.salesQ = ''; S.salesHits = null; refresh(); const q = $('payQ'); if (q) q.focus(); return; }
+  if (a === 'payAll') { S.salesAll = true; refresh(); return; }
+  if (a === 'payCancel') { S.salesPick = null; S.salesQ = ''; S.salesHits = null; refresh(); return; }
+  if (a === 'payCust') { await linkPay(b.dataset.id, 'cust', { key: b.dataset.ck }); return; }
+  if (a === 'payNew') { await linkPay(b.dataset.id, 'new', { name: (S.salesQ || '').trim() }); return; }
+  if (a === 'payRes' || a === 'paySkip') { await linkPay(b.dataset.id, a === 'payRes' ? 'res' : 'skip'); return; }
   if (a === 'goOpen') { S.setPart = 'rules'; showTab('set'); setTimeout(() => { const el = $('openBox'); if (el) el.scrollIntoView({ block: 'start' }); }, 300); return; }
   if (a === 'goDay') goDay(b.dataset.date);
   else if (a === 'arrive') {
@@ -1981,8 +2101,10 @@ VIEWS.set = {
     </div>`;
     if (S.setPart === 'menu') h += menuHtml();
     if (S.setPart === 'stats') {
-      h += `<div class="seg" data-mg="anview" data-mgs="button.on"><button class="${S.anView === 'site' ? 'on' : ''}" data-act="anView" data-v="site">予約ページ</button><button class="${S.anView === 'ig' ? 'on' : ''}" data-act="anView" data-v="ig">Instagram</button></div>`;
-      h += S.anView === 'ig' ? igHtml() : statsHtml();
+      const views = [['site', '予約ページ'], ['ig', 'Instagram']];
+      if (S.features.square || S.features.mf) views.push(['money', '売上・経費']);
+      h += `<div class="seg" data-mg="anview" data-mgs="button.on">${views.map(v => `<button class="${S.anView === v[0] ? 'on' : ''}" data-act="anView" data-v="${v[0]}">${v[1]}</button>`).join('')}</div>`;
+      h += S.anView === 'ig' ? igHtml() : S.anView === 'money' ? moneyHtml() : statsHtml();
     }
     if (S.setPart === 'line') h += `
     <div class="card"><h2>LINEの送信数（今月）</h2>
@@ -2204,6 +2326,7 @@ function igHtml() {
       ${x.action ? `<div class="todo">やること：${esc(x.action)}</div>` : ''}
       ${x.copy ? `<button class="btn small" data-act="copyUrl" data-v="${esc(x.copy)}" style="margin-top:6px">${x.copy.indexOf('ig-story') >= 0 ? 'ストーリー用の予約URLをコピー' : '予約URLをコピー'}</button>` : ''}</div></div>`).join('') || '<div class="sub">データが集まると、ここに気づきとやることが出ます。</div>'}
   </div>
+  ${igDraftHtml()}
   <div class="card"><h2>${icon('i-sun')}リーチと予約ページの閲覧 <span class="cnt">● はストーリーを出した日</span></h2>
     <div class="sub">リーチ（届いた人）</div>
     <div class="chart ig" data-grow="igr:${d.days}:${d.syncedAt}">${dl.map((x, i) => `<div class="col" data-tip="${jd(x.date)} リーチ${x.reach || 0}"><span class="cv">${x.stories ? '<i class="sdot">●</i>' : ''}</span><div class="cb" data-g="up" style="height:${Math.round((x.reach || 0) / maxR * 100)}%;background:#C13584"></div><span class="cl">${label(x, i)}</span></div>`).join('')}</div>
@@ -2389,11 +2512,23 @@ ACTIONS.set = async (a, b) => {
   if (a === 'openPick') { $('openUntil').value = b.dataset.v; toast(Number(b.dataset.v.slice(5, 7)) + '月末までにしました。「設定を保存する」で反映されます'); return; }
   if (a === 'setPart') {
     S.setPart = b.dataset.v; S.editCourse = null; refresh();
+    if (S.setPart === 'stats' && S.anView === 'money') { loadMoney(); return; }
+    if (S.setPart === 'stats' && S.anView === 'ig' && S.features.ai) loadIg();
     if (S.setPart === 'stats') { try { S.an = await api('analytics', { days: S.anDays }); refresh(); } catch (e) { fail(e); } }
     return;
   }
+  if (a === 'moneyPer') { S.moneyPeriod = b.dataset.v; refresh(); loadMoney(); return; }
+  if (a === 'moneyReload') { loadMoney(true, b); return; }
+  if (a === 'igSel') { S.igd.sel = b.dataset.v; S.igd.err = ''; refresh(); return; }
+  if (a === 'igKind') { S.igd.kind = b.dataset.v; refresh(); return; }
+  if (a === 'igMake') { igMake(false); return; }
+  if (a === 'igAgain') { igMake(true); return; }
+  if (a === 'igPhotoOff') { S.igd.photo = ''; refresh(); return; }
+  if (a === 'igCopy') { const dr = S.igd.drafts[S.igd.sel]; if (dr) await copyText(plainJa(dr[S.igd.kind])); return; }
   if (a === 'anView') {
     S.anView = b.dataset.v; refresh();
+    if (S.anView === 'money') { loadMoney(); return; }
+    if (S.anView === 'ig' && S.features.ai && !S.igd) loadIg();
     if (S.anView === 'ig' && !S.ig) { try { S.ig = await api('igStats', { days: S.anDays }); refresh(); } catch (e) { fail(e); } }
     if (S.anView === 'site' && !S.an) { try { S.an = await api('analytics', { days: S.anDays }); refresh(); } catch (e) { fail(e); } }
     return;
@@ -2441,6 +2576,521 @@ ACTIONS.set = async (a, b) => {
 };
 
 /* ---------- 操作の受け付け ---------- */
+/* =========================================================
+ * Claude・Square・マネーフォワード（src/services.js とやりとりする）
+ * ========================================================= */
+// 日本語の折り返し：文節ごとにまとめて、変なところで改行しない
+// Claude の文は「｜」で区切ってもらう。決まった文面などは、ひらがなと漢字の切れ目・句読点で区切る
+function segJa(s) {
+  const out = [];
+  let cur = '';
+  const ch = Array.from(s);
+  for (let i = 0; i < ch.length; i++) {
+    const c = ch[i], p = ch[i - 1], n = ch[i + 1];
+    let cut = false;
+    if (i > 0 && cur) {
+      if (/[、。，．！？!?）」』】〉》]/.test(p) && !/[、。，．！？!?）」』】〉》]/.test(c)) cut = true;
+      else if (/[ぁ-ゟ]/.test(p) && /[㐀-鿿々ァ-ヺA-Za-z0-9０-９¥￥（「『【〈《#＃]/.test(c) && !/^[おご]$/.test(cur)) cut = true;
+      else if (/[ぁ-ゟ]/.test(p) && /[おご]/.test(c) && n && /[㐀-鿿]/.test(n)) cut = true;
+    }
+    if (cut) { out.push(cur); cur = ''; }
+    cur += c;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+function phrLine(line, cls) {
+  const parts = line.indexOf('｜') >= 0 ? line.split('｜') : segJa(line);
+  // 空白はまとまりの外に出して、単語のあいだのすき間を残す
+  return parts.map(p => p.split(/(\s+)/).map(x => !x ? '' : /^\s+$/.test(x) ? ' '
+    : `<span class="ph${cls && cls(x) ? ' ' + cls(x) : ''}">${esc(x)}</span>`).join('')).join('');
+}
+function phr(text, cls) {
+  return String(text === undefined || text === null ? '' : text).split('\n').map(l => phrLine(l, cls)).join('<br>');
+}
+function plainJa(s) { return String(s || '').split('｜').join(''); }
+function hashStr(s) { let h = 5381; s = String(s); for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
+function num(v) { return Number(String(v === undefined || v === null ? '' : v).replace(/[^\d]/g, '')) || 0; }
+function fmtNum(v) { const n = num(v); return n ? n.toLocaleString() : ''; }
+function jdShort(date) { const p = date.split('-').map(Number); return p[1] + '/' + p[2]; }
+const WAIT = '<span class="waitbar"></span><span class="waitbar short"></span>';
+// 文面の欄の高さを中身に合わせる
+function fitAreas() {
+  document.querySelectorAll('#view textarea[data-auto]').forEach(t => { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; });
+}
+// 写真を小さくしてJPEGにする（送る量を減らす。長い辺 max px）
+async function toJpeg(file, max) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ng) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ng(new Error('写真を読み込めませんでした。別の写真でお試しください。')); i.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+    c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.78);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+function renderSet() { if (S.tab === 'set') renderWhenIdle('set'); }
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); } catch (e) {
+    const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); } catch (x) { /* 何もしない */ }
+    t.remove();
+  }
+  toast('コピーしました');
+}
+
+/* ---------- (1) 返事の下書き：決まった文面に、Claudeの「ひと言」を差し込む ---------- */
+function addKey(d) { return d.mode + (d.mode === 'offer' ? ':' + d.offer : ''); }
+// いま使うひと言（undefined＝まだ、null＝作れなかった、''＝足すことなし）
+function curAdd(d) { return S.features.ai && d.ai ? d.adds[addKey(d)] : ''; }
+function draftText(kind, x, d) {
+  const a = curAdd(d);
+  return kind === 'g' ? chgTemplate(x, d.mode, a ? plainJa(a) : '') : template(x, d, a ? plainJa(a) : '');
+}
+function newDraft(mode) { return { mode: mode, offer: 0, text: '', edited: false, editing: false, ai: true, adds: {}, wait: {}, err: '' }; }
+// ひと言を Claude に頼む（同じ種類の返事は一度だけ。fresh のときは書き直し）
+function wantAdd(kind, x, d, fresh) {
+  if (!S.features.ai || !d.ai) return;
+  const k = addKey(d);
+  if (d.wait[k] || (!fresh && d.adds[k] !== undefined)) return;
+  const offer = kind === 'r' && d.mode === 'offer' ? x.suggestions[d.offer] : null;
+  if (kind === 'r' && d.mode === 'offer' && !offer) return;
+  d.wait[k] = true;
+  d.err = '';
+  api('aiReply', { kind: kind, id: x.id, mode: d.mode, offer: offer, fresh: !!fresh, before: fresh ? plainJa(d.adds[k] || '') : '' })
+    .then(res => { d.adds[k] = res.add || ''; })
+    .catch(e => { if (d.adds[k] === undefined) d.adds[k] = null; d.err = e.message; })
+    .finally(() => {
+      delete d.wait[k];
+      if (!d.edited && !d.editing && addKey(d) === k) d.text = draftText(kind, x, d);
+      if (S.tab === 'today') renderWhenIdle('today');
+    });
+}
+function draftTools(kind, x, d) {
+  const add = curAdd(d);
+  return `<div class="dlabel"><span>送る文面</span>${S.features.ai && d.ai && add ? '<span class="aitag">Claudeの下書き</span>' : ''}</div>`;
+}
+// 文面の下のボタン（Claudeの一言の書き直し・いつもの文面・直した文面を戻す）
+function draftActs(kind, d) {
+  const reset = d.edited ? `<button class="btn small" data-act="${kind === 'g' ? 'cresetText' : 'resetText'}">文面を元に戻す</button>` : '';
+  const ai = !S.features.ai ? '' : d.ai
+    ? '<button class="btn small" data-act="aiAgain">一言を書き直す</button><button class="btn small" data-act="aiOff">いつもの文面にする</button>'
+    : '<button class="btn small" data-act="aiOn">Claudeの一言を足す</button>';
+  return reset || ai ? `<div class="draftacts">${reset}${ai}</div>` : '';
+}
+function draftBox(kind, x, d) {
+  const id = kind + x.id;
+  if (d.editing || d.edited) {
+    return `<textarea class="draft" rows="9" data-act="${kind === 'g' ? 'ctext' : 'text'}" data-auto="1" id="ta-${esc(id)}">${esc(d.text)}</textarea>`;
+  }
+  const p = kind === 'g' ? chgParts(x, d.mode) : parts(x, d);
+  const add = curAdd(d);
+  const wait = S.features.ai && d.ai && d.wait[addKey(d)];
+  const mid = wait ? '<br><br><span class="addwait">' + WAIT + '</span>'
+    : add ? `<br><br><mark class="add" data-appear="add:${esc(id)}:${hashStr(add)}">${phr(add)}</mark>` : '';
+  return `<div class="draft" data-act="editDraft" role="button" tabindex="0" aria-label="送る文面（押すと直せます）">${phr(p.head)}${mid}${phr(p.tail)}</div>`;
+}
+function draftHint(kind, d) {
+  const add = curAdd(d);
+  const out = [];
+  if (!d.editing && !d.edited) out.push('文面を押すと、自由に直せます。');
+  if (add && !d.edited) out.push('色の付いた部分は、ご要望や来店の記録を読んでClaudeが足した一言です。');
+  if (d.err && S.features.ai && d.ai) out.push(d.err);
+  if (kind === 'r') out.push(d.mode === 'offer' ? 'お客様には「確認して返事をする」ボタンが一緒に届きます。' : d.mode === 'ng' ? '' : 'お客様には「予約を確認する」ボタンが一緒に届きます。');
+  else out.push(d.mode === 'ok' ? '承認すると、元の予約がこの日時に移ります。' : 'お断りすると、元の予約はそのまま残ります。');
+  return out.filter(Boolean).map(t => `<span class="hl">${phr(t)}</span>`).join('');
+}
+// 文面の欄・ボタンの操作（予約のリクエスト r、変更のリクエスト g）
+function draftAction(a, kind, x, d, b) {
+  const redo = () => { d.text = draftText(kind, x, d); wantAdd(kind, x, d); refresh(); };
+  if (a === 'mode' || a === 'cmode') { d.mode = b.dataset.mode; d.edited = false; d.editing = false; redo(); return true; }
+  if (a === 'resetText' || a === 'cresetText') { d.edited = false; d.editing = false; redo(); return true; }
+  if (a === 'aiOff') { d.ai = false; d.edited = false; d.editing = false; redo(); return true; }
+  if (a === 'aiOn') { d.ai = true; d.edited = false; d.editing = false; redo(); return true; }
+  if (a === 'aiAgain') {
+    if (d.edited && !confirm('直した文面は元に戻ります。Claudeの一言を書き直しますか？')) return true;
+    d.edited = false; d.editing = false;
+    wantAdd(kind, x, d, true);
+    d.text = draftText(kind, x, d);
+    refresh();
+    return true;
+  }
+  if (a === 'editDraft') {
+    d.editing = true;
+    refresh();
+    const ta = $('ta-' + kind + x.id);
+    if (ta) { ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) { /* 何もしない */ } }
+    return true;
+  }
+  return false;
+}
+
+/* ---------- 今日の画面：来店前メモ・売上・レシートを裏で読み込む ---------- */
+function todayExtras() {
+  const d = S.dayCache[today()];
+  if (S.features.ai && d && (d.aiMissing || []).length && !S.memoWait[d.date]) loadMemos(d.date);
+  if (S.features.square && Date.now() - (S.salesAt || 0) > 60000) loadSales();
+  if (S.features.ai && S.features.mf && !S.rcptInfo) loadRcpt();
+}
+async function loadMemos(date) {
+  S.memoWait[date] = true;
+  try {
+    const res = await api('aiMemos', { date: date });
+    const d = S.dayCache[date];
+    if (d) { d.aiMemos = Object.assign({}, d.aiMemos, res.memos); d.aiMissing = []; }
+  } catch (e) {
+    const d = S.dayCache[date];
+    if (d) d.aiMissing = [];
+  }
+  delete S.memoWait[date];
+  if (S.tab === 'today') renderWhenIdle('today');
+}
+async function loadSales(force) {
+  S.salesAt = Date.now();
+  try {
+    const s = await api('sales', { force: !!force });
+    S.sales = s;
+  } catch (e) {
+    S.sales = S.sales || { connected: true, error: e.message, open: [], total: 0, withRes: 0, walkIn: 0, count: 0, walkCount: 0, day: today() };
+  }
+  if (S.tab === 'today') renderWhenIdle('today');
+}
+async function loadRcpt() {
+  try { S.rcptInfo = await api('rcptList'); } catch (e) { return; }
+  if (S.tab === 'today') renderWhenIdle('today');
+}
+
+function memoHtml(d, r) {
+  const memo = d.aiMemos && d.aiMemos[r.id];
+  if (memo) return `<div class="aimemo" data-appear="memo:${esc(r.id)}:${hashStr(memo)}"><span class="mlbl">来店前メモ</span>${phr(memo)}</div>`;
+  if ((d.aiMissing || []).indexOf(r.id) >= 0) return `<div class="aimemo" data-key="mw:${esc(r.id)}"><span class="mlbl">来店前メモ</span>${WAIT}</div>`;
+  return '';
+}
+
+/* ---------- 売上（Square） ---------- */
+function salesHtml() {
+  const s = S.sales;
+  if (!s) return `<div class="card" data-key="sales"><h2>${icon('i-coin')}今日の売上 <span class="tag amber">Square</span></h2>${WAIT}</div>`;
+  if (!s.connected) return '';
+  const label = s.day === today() ? '今日の売上' : s.day === addDays(today(), -1) ? '昨日の売上' : jd(s.day) + 'の売上';
+  const pr = s.total ? Math.round(s.withRes / s.total * 100) : 0;
+  let h = `<div class="card" data-key="sales"><h2>${icon('i-coin')}${label} <span class="tag amber">Square</span><span class="cnt" style="margin-left:auto">${s.syncedAt ? esc(s.syncedAt.slice(11)) + ' に取り込み' : ''}</span></h2>`;
+  if (s.error) h += `<div class="warn" style="margin-bottom:8px">${phr(s.error)}</div>`;
+  h += `<div class="sum3"><div><b>${yen(s.total)}</b><span>合計 ${s.count}件</span></div><div><b>${yen(s.withRes)}</b><span>予約あり</span></div><div><b>${yen(s.walkIn)}</b><span>予約なし ${s.walkCount}件</span></div></div>`;
+  if (s.total) h += `<div class="split" data-grow="split:${s.day}:${s.total}:${s.withRes}"><div data-g="x"><i class="a" style="width:${pr}%"></i><i class="b" style="width:${100 - pr}%"></i></div></div>`;
+  const open = (s.open || []).filter(p => p.date === s.day);
+  if (open.length) {
+    const shown = S.salesAll ? open : open.slice(0, 3);
+    h += `<h3>予約のない会計 <span class="cnt">${open.length}件</span></h3>
+      <div class="sub">${phr('お客様を選ぶと、その方の来店回数に1回足します。分からない会計は「このまま」で大丈夫です（売上にはそのまま入ります）。')}</div>`;
+    h += shown.map(payRow).join('');
+    if (open.length > shown.length) h += `<button class="more2" data-act="payAll">ほか ${open.length - shown.length}件を見る</button>`;
+  }
+  h += `<div class="sub" style="margin-top:8px">${phr('会計の時刻と予約の時間から、予約のお客様の会計かを見分けています。')}</div></div>`;
+  return h;
+}
+function payRow(p) {
+  const pick = S.salesPick === p.id;
+  return `<div class="pay" data-key="pay:${esc(p.id)}">
+    <div class="top"><span class="tm">${esc(p.time)}</span>${p.date !== S.sales.day ? `<span class="sub">${jd(p.date)}</span>` : ''}<span class="tag gray">${esc(p.method || '—')}</span><span class="am">${yen(p.amount)}</span></div>
+    ${pick ? payPicker(p) : `<div class="acts"><button class="btn small" data-act="payPick" data-id="${esc(p.id)}">お客様を選ぶ</button><button class="btn small" data-act="payRes" data-id="${esc(p.id)}">予約の会計</button><button class="btn small ghost" data-act="paySkip" data-id="${esc(p.id)}">このまま</button></div>`}
+  </div>`;
+}
+function payPicker(p) {
+  const q = (S.salesQ || '').trim();
+  const hits = S.salesHits || [];
+  return `<div class="picker" data-appear="pick:${esc(p.id)}">
+    <div class="search"><svg class="ink"><use href="#i-search"/></svg><input type="text" id="payQ" placeholder="お名前・電話番号で探す" value="${esc(S.salesQ || '')}" autocomplete="off"></div>
+    ${hits.map(c => `<button class="cust" data-act="payCust" data-id="${esc(p.id)}" data-ck="${esc(c.key)}"><div class="av ${c.total >= 3 ? 'vip' : ''}">${esc((c.name || '?').slice(0, 1))}</div><div style="min-width:0"><div class="n">${esc(c.name)}</div><div class="m">${c.total ? c.total + '回来店' : 'まだ来店なし'}${c.last ? '・最後 ' + jd(c.last) : ''}</div></div></button>`).join('')}
+    ${q && S.salesHits && !hits.length ? '<div class="sub">見つかりませんでした。</div>' : ''}
+    <div class="acts">${q ? `<button class="btn small" data-act="payNew" data-id="${esc(p.id)}">＋「${esc(q)}」様を新しく追加</button>` : ''}<button class="btn small ghost" data-act="payCancel">やめる</button></div>
+  </div>`;
+}
+// 会計を片付ける：押したらすぐ縮めて消し、裏で保存する
+async function linkPay(id, action, extra) {
+  const el = document.querySelector(`[data-key="pay:${CSS.escape(id)}"]`);
+  const prev = S.sales;
+  const anim = M.collapse(el);
+  try {
+    const res = await api('salesLink', Object.assign({ id: id, action: action }, extra || {}));
+    await anim;
+    S.sales = res.sales;
+    S.salesPick = null; S.salesQ = ''; S.salesHits = null;
+    refresh();
+    toast(action === 'res' ? '予約の会計にしました' : action === 'skip' ? 'このままにしました' : '来店を1回足しました');
+  } catch (e) {
+    await anim;
+    S.sales = prev;
+    refresh();
+    fail(e);
+  }
+}
+let payTimer = 0;
+function payQuery() {
+  clearTimeout(payTimer);
+  payTimer = setTimeout(async () => {
+    const q = (S.salesQ || '').trim();
+    if (!q) { S.salesHits = null; refresh(); return; }
+    try {
+      const res = await api('customers', { q: q });
+      if (q !== (S.salesQ || '').trim()) return;
+      S.salesHits = res.customers.slice(0, 6);
+      refresh();
+    } catch (e) { /* 何もしない */ }
+  }, 250);
+}
+
+/* ---------- レシートの登録（今日の画面から） ---------- */
+const RATE_LABEL = { '8': '8%（軽減税率）', '10': '10%', mixed: '8%と10%が混在', none: '対象外（税なし）' };
+const UNSURE_OF = { date: 'date', amount: 'total', payee: 'payee', accountId: 'account', rate: 'rate' };
+function newRcpt() { return { open: false, step: 'pick', img: '', form: null, accounts: [], pays: [], err: '', saved: 0, savedText: '', seq: 0 }; }
+function rcptButton() {
+  const L = S.rcptInfo && S.rcptInfo.list;
+  return `<button class="qbtn rcbtn" data-act="rcptOpen">${icon('i-receipt')}<div style="flex:1;min-width:0"><b>レシートを登録</b><span>${phr('写真を撮ると、マネーフォワードに登録します')}</span></div>${L ? `<span class="tag blue">今月 ${L.count}件</span>` : ''}</button>`;
+}
+function rcptHtml() {
+  const R = S.rcpt;
+  let h = `<button class="backlink" data-act="rcptClose">${icon('i-left')}今日へ戻る</button><div class="card" data-key="rcard">`;
+  if (R.step === 'pick') {
+    h += `<h2>${icon('i-receipt')}レシートを撮る</h2>
+      ${R.saved ? `<div class="okbar" data-appear="saved:${R.saved}">${icon('i-check-ink')}<span>${phr(R.savedText)}</span></div>` : ''}
+      ${R.err ? `<div class="warn" style="margin-bottom:10px">${phr(R.err)}</div>` : ''}
+      <label class="camera" for="rcptCam">${icon('i-camera')}<b>${R.saved ? '続けてもう1枚撮る' : 'カメラで撮る'}</b><span class="sub">${phr('レシート全体が入るように撮ってください')}</span></label>
+      <label class="btn wide" for="rcptLib" style="margin-top:8px">写真から選ぶ</label>`;
+  } else if (R.step === 'reading') {
+    h += `<h2>読み取っています <span class="aitag">Claude</span></h2>
+      <div class="rphoto"><img src="${R.img}" alt="撮ったレシート"><div style="flex:1;min-width:0">${WAIT}${WAIT}<div class="sub" style="margin-top:6px">${phr('金額・日付・お店の名前を読んでいます')}</div></div></div>`;
+  } else {
+    const f = R.form;
+    const uns = k => ((f.unsure || []).indexOf(k) >= 0 ? 'check' : '');
+    const acc = R.accounts.find(a => a.id === f.accountId);
+    const pay = R.pays.find(p => p.id === f.payId);
+    const warn = !f.readable ? 'うまく読み取れませんでした。手で直すか、撮り直してください。'
+      : (f.unsure || []).length ? (f.note ? f.note + '。' : '') + '色の付いた欄が合っているか、確かめてください。' : '';
+    h += `<h2>読み取った内容 <span class="aitag">Claudeの読み取り</span></h2>
+      <div class="rphoto" data-appear="rform:${R.seq}"><img src="${R.img}" alt="撮ったレシート"><div style="flex:1;min-width:0">
+        <div class="ramt">${yen(num(f.amount))}</div><div class="sub">${esc(f.payee || '（支払先なし）')}${f.date ? '　' + jd(f.date) : ''}</div>
+        <div class="sub" style="margin-top:4px">${esc(acc ? acc.name : '')}・${esc(RATE_LABEL[f.rate] || '')}<br>${esc(pay ? pay.label : '')}</div></div></div>
+      ${warn ? `<div class="warn">${phr(warn)}</div>` : ''}
+      <div class="grid2"><div><label class="f" for="rf-date">日付</label><input type="date" id="rf-date" data-rf="date" class="${uns('date')}" value="${esc(f.date)}"></div>
+        <div><label class="f" for="rf-amount">金額（税込）</label><input type="text" inputmode="numeric" id="rf-amount" data-rf="amount" class="${uns('total')}" value="${esc(fmtNum(f.amount))}"></div></div>
+      <label class="f" for="rf-payee">支払先</label><input type="text" id="rf-payee" data-rf="payee" class="${uns('payee')}" value="${esc(f.payee)}">
+      <div class="grid2"><div><label class="f" for="rf-acc">勘定科目</label><select id="rf-acc" data-rf="accountId" class="${uns('account')}">${R.accounts.map(a => `<option value="${esc(a.id)}" ${a.id === f.accountId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
+        <div><label class="f" for="rf-rate">消費税</label><select id="rf-rate" data-rf="rate" class="${uns('rate')}">${['8', '10', 'mixed', 'none'].map(k => `<option value="${k}" ${f.rate === k ? 'selected' : ''}>${RATE_LABEL[k]}</option>`).join('')}</select></div></div>
+      ${f.rate === 'mixed' ? `<label class="f" for="rf-a8">そのうち8%（軽減税率）の金額</label><input type="text" inputmode="numeric" id="rf-a8" data-rf="amount8" value="${esc(fmtNum(f.amount8))}"><div class="sub">${phr('残りの ' + yen(Math.max(0, num(f.amount) - num(f.amount8))) + ' を10%で登録します。')}</div>` : ''}
+      <div class="grid2"><div><label class="f" for="rf-pay">支払い方法</label><select id="rf-pay" data-rf="payId">${R.pays.map(p => `<option value="${esc(p.id)}" ${p.id === f.payId ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
+        <div><label class="f" for="rf-memo">メモ</label><input type="text" id="rf-memo" data-rf="memo" value="${esc(f.memo)}"></div></div>
+      <div class="sub" style="margin-top:8px">${phr('勘定科目は、これまでに登録したお店に合わせて選んでいます。')}</div>
+      <p class="err" id="rErr" role="alert"></p>
+      <button class="btn primary wide" data-act="rcptSave">マネーフォワードに登録</button>
+      <button class="btn wide ghost" data-act="rcptRetake" style="margin-top:6px">撮り直す</button>`;
+  }
+  h += '<input type="file" id="rcptCam" accept="image/*" capture="environment" class="vh" tabindex="-1"><input type="file" id="rcptLib" accept="image/*" class="vh" tabindex="-1"></div>';
+  const L = S.rcptInfo && S.rcptInfo.list;
+  if (L) {
+    h += `<div class="card rlist" data-key="rlist"><h2>登録したレシート <span class="cnt">今月 ${L.count}件 ${yen(L.total)}</span></h2>
+      ${L.items.length ? L.items.map(it => `<div class="it" data-key="rc:${esc(it.id)}" data-appear="rc:${esc(it.id)}"><span class="dt">${jdShort(it.date)}</span><div class="nm">${esc(it.payee || '（支払先なし）')}<span>${esc(it.account)}・${esc(it.method)}</span></div><span class="am">${yen(it.amount)}</span><button class="btn small ghost" data-act="rcptUndo" data-id="${esc(it.id)}">取り消す</button></div>`).join('') : '<div class="sub">まだありません。</div>'}
+    </div>`;
+  }
+  h += `<div class="sub" style="text-align:center;margin-bottom:12px"><span class="hl">${phr('登録した仕訳は、マネーフォワードの画面にもそのまま出ます。')}</span><span class="hl">${phr('レシートの写真はマネーフォワードに添付し、予約システムには残しません。')}</span></div>`;
+  return h;
+}
+async function rcptFile(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const R = S.rcpt;
+  R.err = ''; R.saved = 0;
+  try { R.img = await toJpeg(file, 1400); } catch (e) { R.err = e.message; refresh(); return; }
+  R.step = 'reading';
+  const seq = ++R.seq;
+  refresh();
+  window.scrollTo({ top: 0, behavior: M.reduce() ? 'auto' : 'smooth' });
+  try {
+    const res = await api('rcptRead', { image: R.img, type: 'image/jpeg' });
+    if (R !== S.rcpt || seq !== R.seq) return;
+    R.accounts = res.accounts; R.pays = res.pays;
+    R.form = Object.assign({}, res.read);
+    R.step = 'form';
+  } catch (e) {
+    if (R !== S.rcpt || seq !== R.seq) return;
+    R.step = 'pick'; R.img = ''; R.err = e.message;
+  }
+  if (S.tab === 'today') refresh();
+}
+async function rcptSave(btn) {
+  const R = S.rcpt, f = R.form;
+  const er = $('rErr');
+  if (er) er.textContent = '';
+  const amount = num(f.amount);
+  if (!f.date) { er.textContent = '日付を入れてください。'; return; }
+  if (!(amount > 0)) { er.textContent = '金額を入れてください。'; return; }
+  if (f.rate === 'mixed' && !(num(f.amount8) > 0 && num(f.amount8) < amount)) { er.textContent = '8%の金額を確かめてください。'; return; }
+  const mo = M.busy(btn);
+  try {
+    const res = await api('rcptSave', { date: f.date, amount: amount, payee: f.payee, memo: f.memo, accountId: f.accountId, payId: f.payId, rate: f.rate, amount8: num(f.amount8), payment: f.payment, image: R.img });
+    S.rcptInfo = { connected: true, list: res.list };
+    await mo.ok();
+    R.step = 'pick'; R.img = ''; R.form = null; R.saved = Date.now();
+    R.savedText = yen(amount) + '（' + (f.payee || '支払先なし') + '）を登録しました' + (res.attached ? '。写真も添付しました' : '');
+    refresh();
+    if (res.check) alert(res.check);
+  } catch (e) {
+    mo.fail();
+    if ($('rErr')) $('rErr').textContent = e.message;
+  }
+}
+
+/* ---------- 売上・経費の分析（設定＞分析） ---------- */
+async function loadMoney(force, btn) {
+  const seq = S.moneySeq = (S.moneySeq || 0) + 1;
+  const mo = btn ? M.busy(btn) : null;
+  try {
+    const m = await api('money', { period: S.moneyPeriod, force: !!force });
+    if (seq !== S.moneySeq) { if (mo) mo.fail(); return; }
+    S.money = m;
+    if (mo) await mo.ok();
+    renderSet();
+    // まだ分析がないとき・最新にしたときは、Claude に読んでもらう
+    if (S.features.ai && (force || !m.insight)) loadMoneyAi();
+  } catch (e) {
+    if (mo) mo.fail();
+    fail(e);
+  }
+}
+async function loadMoneyAi() {
+  if (S.moneyAiWait) return;
+  S.moneyAiWait = true; S.moneyAiErr = '';
+  renderSet();
+  try {
+    const r = await api('moneyAi');
+    if (S.money) S.money.insight = r.insight;
+  } catch (e) { S.moneyAiErr = e.message; }
+  S.moneyAiWait = false;
+  renderSet();
+}
+function moneyKpi(v, k, c) { return `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div>${c || '<div class="c">&nbsp;</div>'}</div>`; }
+function moneyHtml() {
+  const m = S.money;
+  const per = [['month', '今月'], ['last', '先月'], ['3m', '3か月']];
+  let h = `<div class="row" style="margin-bottom:8px;flex-wrap:wrap" data-mg="mper" data-mgs=".chip.on">${per.map(p => `<button class="chip ${S.moneyPeriod === p[0] ? 'on' : ''}" data-act="moneyPer" data-v="${p[0]}">${p[1]}</button>`).join('')}
+    <button class="btn small" data-act="moneyReload" style="margin-left:auto;margin-bottom:6px">${icon('i-refresh')}最新にする</button></div>`;
+  if (!m) return h + '<div class="card"><div class="loading">集計しています…</div></div>';
+  const n = m.now, p = m.prev, key = m.period.key;
+  const vs = { month: '先月より', last: '前の月より', '3m': '前の3か月より' }[key];
+  const was = { month: '先月', last: '前の月', '3m': '前の3か月' }[key];
+  const ch = (a, b, goodUp) => {
+    if (!(b > 0)) return '';
+    const c = Math.round((a - b) / b * 100);
+    return `<div class="c ${c === 0 ? '' : (c > 0) === goodUp ? 'up' : 'down'}">${vs} ${c > 0 ? '+' : ''}${c}%</div>`;
+  };
+  const pct = (a, b) => (b > 0 ? Math.round(a / b * 100) : null);
+  const food = m.hasExpense ? pct(n.food, n.sales) : null, foodP = m.hasExpense ? pct(p.food, p.sales) : null;
+  const one = n.guests ? Math.round(n.res / n.guests) : null, oneP = p.guests ? Math.round(p.res / p.guests) : null;
+  const walk = pct(n.walk, n.sales), walkP = pct(p.walk, p.sales);
+  h += `<div class="sub" style="margin:-4px 0 8px;text-align:right">${esc(m.period.label)}${m.syncedAt ? '・' + esc(m.syncedAt.slice(5).replace('-', '/')) + ' に取り込み' : ''}</div>`;
+  if (m.sqErr) h += `<div class="warn" style="margin-bottom:10px">${phr(m.sqErr)}</div>`;
+  if (m.mfErr) h += `<div class="warn" style="margin-bottom:10px">${phr(m.mfErr)}</div>`;
+  h += `<div class="kpis money">
+    ${moneyKpi(m.hasSales ? yen(n.sales) : '–', '売上', m.hasSales ? ch(n.sales, p.sales, true) : '')}
+    ${moneyKpi(m.hasExpense ? yen(n.expense) : '–', '経費', m.hasExpense ? ch(n.expense, p.expense, false) : '')}
+    ${moneyKpi(m.hasSales && m.hasExpense ? yen(n.sales - n.expense) : '–', '残り', m.hasSales && m.hasExpense ? ch(n.sales - n.expense, p.sales - p.expense, true) : '')}
+  </div><div class="kpis money">
+    ${moneyKpi(food !== null ? food + '%' : '–', '食材費の割合', foodP !== null ? `<div class="c ${food > foodP ? 'down' : food < foodP ? 'up' : ''}">${was} ${foodP}%</div>` : '')}
+    ${moneyKpi(m.hasSales && one !== null ? yen(one) : '–', '1人あたり（予約）', m.hasSales && oneP !== null ? `<div class="c ${one > oneP ? 'up' : one < oneP ? 'down' : ''}">${was} ${yen(oneP)}</div>` : '')}
+    ${moneyKpi(m.hasSales && walk !== null ? walk + '%' : '–', '予約なしの売上', m.hasSales && walkP !== null ? `<div class="c">${was} ${walkP}%</div>` : '')}
+  </div>`;
+  if (S.features.ai) {
+    const ins = m.insight;
+    h += `<div class="card insights" data-key="mins"><h2>${icon('i-leaf')}気づきとやること <span class="aitag">Claudeの分析</span></h2>`;
+    if (S.moneyAiWait) h += `<div class="aiwaitbox" data-key="miw">${WAIT}${WAIT}<div class="sub">${phr('Claudeが売上・経費・予約の数字を読んでいます（1分ほどかかります）')}</div></div>`;
+    if (S.moneyAiErr) h += `<div class="warn">${phr(S.moneyAiErr)}</div>`;
+    if (ins && ins.items && ins.items.length) {
+      h += ins.items.map((x, i) => `<div class="ins ${x.tone}" data-appear="mi:${esc(ins.at)}:${i}"><span class="ic">${INSIGHT_ICON[x.tone]}</span><div><b>${phr(x.title)}</b><div class="sub">${phr(x.body)}</div>${x.todo ? `<div class="todo">${phr('やること：' + x.todo)}</div>` : ''}</div></div>`).join('');
+    } else if (!S.moneyAiWait) h += '<div class="sub">まだ分析がありません。「最新にする」を押すと、Claudeが数字を読みます。</div>';
+    h += `<div class="sub" style="margin-top:6px"><span class="hl">${phr('売上（Square）・経費（マネーフォワード）・予約の数字を読んで書いています。')}</span><span class="hl">${phr('毎週月曜の朝に新しくして、お店のLINEにもまとめを送ります。')}${ins ? '（' + esc(ins.at.slice(5).replace('-', '/')) + ' 時点）' : ''}</span></div></div>`;
+  }
+  const mx = Math.max(1, ...m.months.map(x => Math.max(x.sales || 0, x.expense || 0)));
+  h += `<div class="card"><h2>${icon('i-cal')}月ごとの売上と経費</h2>
+    <div class="pchart" data-grow="mchart:${m.months.map(x => x.sales + '/' + x.expense).join(',')}">${m.months.map(x => `<div class="col" data-tip="${Number(x.ym.slice(5))}月 売上${yen(x.sales)}${x.expense !== null ? '・経費' + yen(x.expense) : ''}"><div class="pair"><div class="b1" data-g="up" style="height:${Math.round((x.sales || 0) / mx * 100)}%"></div>${x.expense !== null ? `<div class="b2" data-g="up" style="height:${Math.round(x.expense / mx * 100)}%"></div>` : ''}</div><span class="cl">${Number(x.ym.slice(5))}月</span></div>`).join('')}</div>
+    <div class="legend"><span><i style="background:var(--green)"></i>売上（Square）</span>${m.hasExpense ? '<span><i style="background:var(--amber)"></i>経費（マネーフォワード）</span>' : ''}</div></div>`;
+  if (m.hasExpense) {
+    const rows = m.expenses.slice(0, 5);
+    const rest = m.expenses.slice(5).reduce((a, x) => a + x.value, 0);
+    if (rest) rows.push({ name: 'そのほか', value: rest });
+    const mxe = Math.max(1, ...rows.map(x => x.value));
+    h += `<div class="card" data-grow="mex:${key}:${n.expense}"><h2>${icon('i-pot')}経費の内訳 <span class="tag blue">マネーフォワード</span></h2>
+      ${rows.length ? rows.map(x => `<div class="erow"><span class="fl">${esc(x.name)}</span><div class="ft" data-g="x"><div class="fb" style="width:${Math.round(x.value / mxe * 100)}%"></div></div><span class="fn">${yen(x.value)}</span></div>`).join('') : '<div class="sub">この期間の経費はまだ登録されていません。</div>'}
+      <div class="sub" style="margin-top:6px">${phr('家賃など月末にまとめて登録する経費は、登録した時点で反映されます。')}</div></div>`;
+  }
+  if (!S.features.square) h += `<div class="card"><h2>Squareはまだつながっていません</h2><div class="sub">${phr('Squareの開発者画面で発行したアクセストークンを、Cloudflareのシークレット「SQUARE_ACCESS_TOKEN」に登録すると、売上が出ます。')}</div></div>`;
+  if (!S.features.mf) h += `<div class="card"><h2>マネーフォワードはまだつながっていません</h2><div class="sub">${phr('マネーフォワードで発行したAPIキーを、Cloudflareのシークレット「MF_API_KEY」に登録すると、経費が出ます。')}</div></div>`;
+  return h;
+}
+
+/* ---------- Instagramの文案（設定＞分析＞Instagram） ---------- */
+async function loadIg() {
+  try {
+    const r = await api('igOpenings');
+    const g = S.igd || { drafts: {}, kind: 'story', photo: '', wait: false, err: '' };
+    g.list = r.openings;
+    Object.keys(r.drafts || {}).forEach(k => { if (!g.drafts[k]) g.drafts[k] = r.drafts[k]; });
+    if (!g.sel || (g.sel !== 'free' && !g.list.some(o => o.date + ':' + o.session === g.sel))) g.sel = g.list[0] ? g.list[0].date + ':' + g.list[0].session : 'free';
+    S.igd = g;
+    renderSet();
+  } catch (e) { /* 文案だけ出さない */ }
+}
+async function igMake(fresh) {
+  const g = S.igd;
+  if (!g || g.wait) return;
+  g.wait = true; g.err = '';
+  renderSet();
+  const sel = g.sel;
+  const i = sel.indexOf(':');
+  const before = fresh && g.drafts[sel] ? g.drafts[sel][g.kind] : '';
+  try {
+    const r = await api('igDraft', { date: sel === 'free' ? 'free' : sel.slice(0, i), session: sel === 'free' ? '' : sel.slice(i + 1), image: g.photo || undefined, fresh: !!fresh || !!g.photo, before: before || '' });
+    g.drafts[r.key] = r.draft;
+  } catch (e) { g.err = e.message; }
+  g.wait = false;
+  renderSet();
+}
+async function igPhoto(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file || !S.igd) return;
+  try { S.igd.photo = await toJpeg(file, 1280); } catch (e) { alert(e.message); return; }
+  igMake(true);
+}
+function igDraftHtml() {
+  if (!S.features.ai) return '';
+  const g = S.igd;
+  let h = `<div class="card" data-key="igd"><h2>${icon('i-pen')}投稿の文案 <span class="aitag">Claude</span></h2>`;
+  if (!g) return h + WAIT + '</div>';
+  const opts = g.list.map(o => ({ key: o.date + ':' + o.session, label: jdShort(o.date) + '（' + WD[weekday(o.date)] + '）' + o.label, tag: '空き' + o.left + '席' }))
+    .concat([{ key: 'free', label: 'ふだんの投稿', tag: '' }]);
+  h += `<div class="sub" style="margin-bottom:8px">${phr('告知したい日を選ぶと、これまでの投稿の書き方に合わせて文を用意します。')}</div>
+    <div class="filters" data-mg="igsel" data-mgs=".chip.on">${opts.map(o => `<button class="chip ${g.sel === o.key ? 'on' : ''}" data-act="igSel" data-v="${esc(o.key)}">${esc(o.label)}${o.tag ? ` <span class="fc">${esc(o.tag)}</span>` : ''}</button>`).join('')}</div>
+    <div class="seg" data-mg="igkind" data-mgs="button.on">${[['story', 'ストーリー'], ['post', '投稿'], ['reel', 'リール']].map(k => `<button class="${g.kind === k[0] ? 'on' : ''}" data-act="igKind" data-v="${k[0]}">${k[1]}</button>`).join('')}</div>`;
+  h += g.photo
+    ? `<div class="igph"><img src="${g.photo}" alt="選んだ料理の写真"><div style="flex:1;min-width:0">${phr('この写真に合わせた文にしています')}</div><button class="btn small ghost" data-act="igPhotoOff">外す</button></div>`
+    : `<label class="addph" for="igPhoto">${icon('i-camera')}<span>${phr('料理の写真を選ぶと、写真に合わせた文にします（なくても大丈夫です）')}</span></label>`;
+  h += '<input type="file" id="igPhoto" accept="image/*" class="vh" tabindex="-1">';
+  const dr = g.drafts[g.sel];
+  if (g.wait) h += `<div class="igtext" data-key="igw">${WAIT}${WAIT}<div class="sub">${phr('Claudeがこれまでの投稿を読んで書いています')}</div></div>`;
+  else if (dr && dr[g.kind]) {
+    h += `<div class="igtext" data-appear="ig:${esc(g.sel)}:${g.kind}:${hashStr(dr[g.kind])}">${phr(dr[g.kind], x => (x[0] === '#' ? 'hash' : ''))}</div>
+      <div class="acts"><button class="btn primary small" data-act="igCopy">文をコピー</button>${g.kind === 'story' && S.liffUrl ? `<button class="btn small" data-act="copyUrl" data-v="${esc(S.liffUrl + '?src=ig-story')}">ストーリー用の予約URLをコピー</button>` : ''}<button class="btn small" data-act="igAgain">書き直す</button></div>`;
+  } else h += '<button class="btn primary wide" data-act="igMake" style="margin-top:10px">文案を作る</button>';
+  if (g.err) h += `<div class="warn">${phr(g.err)}</div>`;
+  if (dr && dr.style && dr.style.length) h += `<h3>これまでの投稿から読んだ書き方</h3><div class="stylebox">${dr.style.map(x => `<span class="hl">・${phr(x)}</span>`).join('')}</div>`;
+  return h + '</div>';
+}
+
 $('view').addEventListener('click', async e => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
@@ -2449,19 +3099,19 @@ $('view').addEventListener('click', async e => {
     const cc = b.closest('[data-cid]');
     if (cc) {
       const c = S.req.changes.find(x => x.id === cc.dataset.cid);
+      if (!c) return;
       const d = S.drafts['g' + c.id];
-      if (a === 'cmode') { d.mode = b.dataset.mode; d.edited = false; d.text = chgTemplate(c, d.mode); refresh(); }
-      else if (a === 'cresetText') { d.edited = false; d.text = chgTemplate(c, d.mode); refresh(); }
-      else if (a === 'csend') await sendChangeReply(c, d, b, false);
+      if (draftAction(a, 'g', c, d, b)) return;
+      if (a === 'csend') await sendChangeReply(c, d, b, false);
       return;
     }
     const card = b.closest('[data-rid]');
     if (card) {
       const r = S.req.waiting.find(x => x.id === card.dataset.rid);
+      if (!r) return;
       const d = S.drafts[r.id];
-      if (a === 'mode') { d.mode = b.dataset.mode; d.edited = false; d.text = template(r, d); refresh(); }
-      else if (a === 'resetText') { d.edited = false; d.text = template(r, d); refresh(); }
-      else if (a === 'send') await sendReply(r, d, b, false);
+      if (draftAction(a, 'r', r, d, b)) return;
+      if (a === 'send') await sendReply(r, d, b, false);
       return;
     }
   }
@@ -2493,27 +3143,49 @@ $('view').addEventListener('input', e => {
     return;
   }
   if (S.tab !== 'today') return;
+  if (e.target.id === 'payQ') { S.salesQ = e.target.value; payQuery(); return; }
+  if (e.target.dataset.rf && S.rcpt && S.rcpt.form) {
+    const k = e.target.dataset.rf;
+    S.rcpt.form[k] = e.target.value;
+    S.rcpt.form.unsure = (S.rcpt.form.unsure || []).filter(x => x !== UNSURE_OF[k]);
+    if ($('rErr')) $('rErr').textContent = '';
+    refresh();
+    return;
+  }
   const cc = e.target.closest('[data-cid]');
   if (cc && e.target.dataset.act === 'ctext') {
     const d = S.drafts['g' + cc.dataset.cid];
-    d.text = e.target.value; d.edited = true;
+    if (!d.edited) { d.edited = true; refresh(); }
+    d.text = e.target.value;
+    fitAreas();
     const er = cc.querySelector('[data-cerr]'); if (er) er.textContent = '';
     return;
   }
   const card = e.target.closest('[data-rid]');
   if (!card || e.target.dataset.act !== 'text') return;
   const d = S.drafts[card.dataset.rid];
-  d.text = e.target.value; d.edited = true;
+  if (!d.edited) { d.edited = true; d.text = e.target.value; refresh(); }
+  d.text = e.target.value;
+  fitAreas();
   const er = card.querySelector('[data-err]'); if (er) er.textContent = '';
 });
 
 $('view').addEventListener('change', e => {
+  if (e.target.id === 'rcptCam' || e.target.id === 'rcptLib') { rcptFile(e.target); return; }
+  if (e.target.id === 'igPhoto') { igPhoto(e.target); return; }
   if (S.tab === 'today') {
+    if (e.target.dataset.rf && S.rcpt && S.rcpt.form) {
+      S.rcpt.form[e.target.dataset.rf] = e.target.value;
+      S.rcpt.form.unsure = (S.rcpt.form.unsure || []).filter(x => x !== UNSURE_OF[e.target.dataset.rf]);
+      refresh();
+      return;
+    }
     const card = e.target.closest('[data-rid]');
     if (card && e.target.dataset.act === 'offer') {
       const r = S.req.waiting.find(x => x.id === card.dataset.rid);
       const d = S.drafts[r.id];
-      d.offer = Number(e.target.value); d.edited = false; d.text = template(r, d);
+      d.offer = Number(e.target.value); d.edited = false; d.editing = false; d.text = draftText('r', r, d);
+      wantAdd('r', r, d);
       refresh();
     }
   } else if (S.tab === 'book') {

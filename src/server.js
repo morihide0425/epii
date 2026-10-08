@@ -68,7 +68,18 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS blocks (id TEXT PRIMARY KEY, date TEXT NOT NULL, type TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, seats INTEGER, memo TEXT, created_at TEXT NOT NULL)',
   'CREATE INDEX IF NOT EXISTS idx_blocks_date ON blocks (date)',
   'CREATE TABLE IF NOT EXISTS login_fail (ip TEXT PRIMARY KEY, count INTEGER NOT NULL, until INTEGER NOT NULL)'
-].concat(CHANGE_SCHEMA()).concat(CUSTOMER_SCHEMA()).concat(EVENT_SCHEMA()).concat(IG_SCHEMA());
+].concat(CHANGE_SCHEMA()).concat(CUSTOMER_SCHEMA()).concat(EVENT_SCHEMA()).concat(IG_SCHEMA()).concat(MONEY_SCHEMA_SQL());
+
+// 売上・経費とClaudeの下書き（あとから追加した表）
+function MONEY_SCHEMA_SQL() {
+  return [
+    'CREATE TABLE IF NOT EXISTS ai_cache (k TEXT PRIMARY KEY, src TEXT, v TEXT NOT NULL, at TEXT NOT NULL)',
+    "CREATE TABLE IF NOT EXISTS sq_payments (id TEXT PRIMARY KEY, ts TEXT NOT NULL, date TEXT NOT NULL, amount INTEGER NOT NULL, refunded INTEGER NOT NULL DEFAULT 0, tip INTEGER NOT NULL DEFAULT 0, method TEXT, status TEXT, link TEXT NOT NULL DEFAULT '', res_id TEXT, cust_key TEXT, updated_at TEXT)",
+    'CREATE INDEX IF NOT EXISTS idx_sq_date ON sq_payments (date)',
+    'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, date TEXT NOT NULL, amount INTEGER NOT NULL, payee TEXT, account TEXT, tax TEXT, method TEXT, memo TEXT, journal_id TEXT, status TEXT NOT NULL)',
+    'CREATE INDEX IF NOT EXISTS idx_receipts_at ON receipts (created_at)'
+  ];
+}
 
 // Instagramの数値（あとから追加した表）
 function IG_SCHEMA() {
@@ -110,7 +121,7 @@ const SEED_COURSES = [
   ['季節の薬膳フレンチ', 9800, 'fixed', '前菜から甘味まで全7皿', 'dinner', 1, 'default', 2, '23:59', 'default', 2, '23:59'],
   ['シェフおまかせ', 14000, 'from', '全9皿・薬膳酒のペアリング付き', 'dinner', 2, 'default', 2, '23:59', 'default', 2, '23:59']
 ];
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 let schemaReady = false;
 
@@ -154,10 +165,10 @@ async function route(request, env, ctx) {
 
   await ensureSchema(env);
   rememberOrigin(env, ctx, url.origin);
+  if (path.startsWith('/admin/api/')) return adminApi(path.slice(11), request, env, ctx);
   const body = await readJson(request);
 
   if (path.startsWith('/api/')) return customerApi(path.slice(5), body, request, env, ctx);
-  if (path.startsWith('/admin/api/')) return adminApi(path.slice(11), body, request, env);
   return new Response('Not found', { status: 404 });
 }
 
@@ -165,9 +176,9 @@ function checkEnv(env) {
   if (!env.DB) fail('データベース（DB）がつながっていません。手順書の「D1をつなぐ」を確認してください。', 500);
 }
 
-async function readJson(request) {
+async function readJson(request, max) {
   const text = await request.text();
-  if (text.length > 20000) fail('送信内容が大きすぎます。');
+  if (text.length > (max || 20000)) fail(max ? '写真が大きすぎます。' : '送信内容が大きすぎます。');
   if (!text) return {};
   try { return JSON.parse(text); } catch (e) { return fail('送信内容が正しくありません。'); }
 }
@@ -259,6 +270,9 @@ async function ensureSchema(env) {
   } catch (e) {
     version = 0;
   }
+  if (version > 0 && version < 9) {
+    await env.DB.batch(MONEY_SCHEMA_SQL().map(sql => env.DB.prepare(sql)));
+  }
   if (version > 0 && version < 8) {
     try { await env.DB.prepare('ALTER TABLE reservations ADD COLUMN stay INTEGER').run(); } catch (e) { /* すでにある */ }
   }
@@ -308,6 +322,9 @@ async function ensureSchema(env) {
     stmts.push(env.DB.prepare("INSERT OR IGNORE INTO kv (k, v) VALUES ('settings', ?)").bind(JSON.stringify(DEFAULT_SETTINGS)));
     stmts.push(env.DB.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('schema', ?)").bind(String(SCHEMA_VERSION)));
     await env.DB.batch(stmts);
+  } else if (version < SCHEMA_VERSION) {
+    // 移行が終わったら版を記録する（次からは移行を飛ばす）
+    await env.DB.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('schema', ?)").bind(String(SCHEMA_VERSION)).run();
   }
   schemaReady = true;
 }
@@ -402,6 +419,7 @@ async function customerApi(name, body, request, env, ctx) {
   if (name === 'init') return json({ ok: true, data: await customerData(env, user.userId) });
   if (name === 'request') {
     const r = await createRequest(env, user, body.data || {});
+    if (r.status === ST.WAIT && ctx) ctx.waitUntil(warmReply(env, 'r', r.id));
     return json({ ok: true, reservation: r, data: await customerData(env, user.userId) });
   }
   if (name === 'cancel') {
@@ -413,7 +431,8 @@ async function customerApi(name, body, request, env, ctx) {
     return json({ ok: true });
   }
   if (name === 'change') {
-    await createChange(env, user, body.data || {});
+    const chg = await createChange(env, user, body.data || {});
+    if (chg && chg.id && ctx) ctx.waitUntil(warmReply(env, 'g', chg.id));
     return json({ ok: true, data: await customerData(env, user.userId) });
   }
   if (name === 'cancelChange') {
@@ -698,7 +717,7 @@ async function createChange(env, user, d) {
     '電話：' + r.phone,
     '',
     '返事をする：' + await adminUrl(env)].join('\n'));
-  return true;
+  return { id: id };
 }
 
 async function cancelChange(env, user, id) {
@@ -831,8 +850,11 @@ async function declineOffer(env, user, id) {
 
 const ADMIN_COOKIE = 'epii_admin';
 
-async function adminApi(name, body, request, env) {
-  if (name === 'login') return adminLogin(env, request, body);
+// 写真を送る操作だけ、大きな送信を受け付ける（ログインを確かめてから読む）
+const ADMIN_BIG = { rcptRead: 1, rcptSave: 1, igDraft: 1 };
+
+async function adminApi(name, request, env, ctx) {
+  if (name === 'login') return adminLogin(env, request, await readJson(request));
   if (name === 'logout') {
     return json({ ok: true }, 200, { 'set-cookie': ADMIN_COOKIE + '=; Path=/admin; HttpOnly; Secure; SameSite=Strict; Max-Age=0' });
   }
@@ -842,7 +864,8 @@ async function adminApi(name, body, request, env) {
   if (!p || p.k !== 'a' || p.p !== await pwTag(env)) fail('ログインしてください。', 401);
   const fn = ADMIN_FUNCS[name];
   if (!fn) fail('不明な操作です。', 404);
-  const result = await fn(env, body);
+  const body = await readJson(request, ADMIN_BIG[name] ? 12000000 : 0);
+  const result = await fn(env, body, ctx);
   return json(Object.assign({ ok: true }, result));
 }
 
@@ -874,7 +897,7 @@ const ADMIN_FUNCS = {
   boot: async env => {
     const now = jstStamp(Date.now());
     const [s, courses, req] = await Promise.all([getSettings(env), allCourses(env), adminRequestsData(env)]);
-    return { now: now, settings: s, courses: courses, requests: req, liffUrl: appUrl(env, ''), bookingEnd: bookingEnd(s, now.slice(0, 10)) };
+    return { now: now, settings: s, courses: courses, requests: req, liffUrl: appUrl(env, ''), bookingEnd: bookingEnd(s, now.slice(0, 10)), features: features(env) };
   },
   requests: async env => ({ requests: await adminRequestsData(env) }),
   reply: adminReply,
@@ -938,7 +961,20 @@ const ADMIN_FUNCS = {
   quota: adminQuota,
   analytics: adminAnalytics,
   igStats: adminIgStats,
-  igSync: async env => ({ result: await igSync(env, true) })
+  igSync: async env => ({ result: await igSync(env, true) }),
+  // Claude・Square・マネーフォワード（src/services.js）
+  aiReply: adminAiReply,
+  aiMemos: adminAiMemos,
+  sales: adminSales,
+  salesLink: adminSalesLink,
+  money: adminMoney,
+  moneyAi: adminMoneyAi,
+  rcptList: adminRcptList,
+  rcptRead: adminRcptRead,
+  rcptSave: adminRcptSave,
+  rcptUndo: adminRcptUndo,
+  igOpenings: adminIgOpenings,
+  igDraft: adminIgDraft
 };
 
 async function allCourses(env) {
@@ -1190,8 +1226,11 @@ async function adminDay(env, b) {
     }
     return v;
   };
+  // 来店前メモ（作ってあるものだけ。まだのものは画面から作る）
+  let memo = { memos: {}, missing: [] };
+  if (env.ANTHROPIC_API_KEY && date >= today) memo = await dayMemos(env, rs[0].results, false, { grouped: grouped, info: info });
   return {
-    date: date, plan: plan, seats: s.seats, slots: slots,
+    date: date, plan: plan, seats: s.seats, slots: slots, aiMemos: memo.memos, aiMissing: memo.missing,
     reservations: rs[0].results.map(withCustomer),
     blocks: rs[1].results,
     changes: rs[2].results.map(c => ({
@@ -1856,6 +1895,13 @@ async function runSchedule(env) {
   }
   await openAlert(env, s, url);
   try { await igSync(env); } catch (e) { console.error('Instagram取り込みエラー', e && e.message); }
+  // Squareの売上を取り込み、月曜の朝はお店のLINEに先週のまとめを送る
+  try {
+    const today = jstStamp(Date.now()).slice(0, 10);
+    await sqEnsure(env, monthsBetween(addDays(today, -3), today), 30 * 60000);
+  } catch (e) { console.error('Square取り込みエラー', e && e.message); }
+  try { await weeklyReport(env); } catch (e) { console.error('週のまとめのエラー', e && e.message); }
+  await env.DB.prepare('DELETE FROM ai_cache WHERE at < ?').bind(addDays(jstStamp(Date.now()).slice(0, 10), -60)).run();
   await env.DB.prepare('DELETE FROM events WHERE date < ?').bind(addDays(jstStamp(Date.now()).slice(0, 10), -180)).run();
   await env.DB.prepare('DELETE FROM login_fail WHERE until < ?').bind(Date.now()).run();
 }
@@ -1978,7 +2024,7 @@ async function igSync(env, manual) {
     // ストーリーは24時間で数値が消えるので、取れなかったときは前回の値を残す
     const keep = (k, nv) => (nv === undefined || nv === null) ? (cur ? cur[k] : null) : nv;
     await env.DB.prepare('INSERT OR REPLACE INTO ig_media (id, kind, ts, date, caption, permalink, reach, views, likes, comments, saves, shares, interactions, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(x.id, x.kind, ts, ts.slice(0, 10), clean(x.caption, 120), x.permalink || (cur ? cur.permalink : ''),
+      .bind(x.id, x.kind, ts, ts.slice(0, 10), clean(x.caption, 1000), x.permalink || (cur ? cur.permalink : ''),
         keep('reach', v.reach), keep('views', v.views), keep('likes', x.like_count), keep('comments', x.comments_count),
         keep('saves', v.saved), keep('shares', v.shares), keep('interactions', v.total_interactions), now).run();
   }
@@ -2153,6 +2199,8 @@ async function pushOwner(env, text) {
   const results = await Promise.all(ids.map(id => linePush(env, id, [textMsg(text)])));
   return results.find(r => !r.ok) || { ok: true };
 }
+
+/*__SERVICES__*/
 
 /* =========================================================
  * 署名付きの通行証
