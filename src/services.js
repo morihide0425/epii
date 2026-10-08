@@ -637,6 +637,7 @@ async function mfMaster(env, force) {
   const m = {
     at: Date.now(),
     method: terms[0] ? terms[0].accounting_method || '' : '',
+    firstStart: terms.length ? String(terms[terms.length - 1].start_date || '').slice(0, 10) : '',
     accounts: (a.accounts || []).filter(x => x.available !== false).map(x => ({ id: x.id, name: x.name || '', group: x.account_group || '' })),
     taxes: (t.taxes || []).filter(x => x.available !== false).map(x => ({ id: x.id, name: x.name || x.abbreviation || '' }))
   };
@@ -2491,16 +2492,23 @@ async function bookBank(env, js, months) {
   }
   // Squareの明細（お取引）はのぞき、銀行の明細だけにする
   const bank = all.filter(t => !SQ_TX.test(String(t.content || '')) && !/お取引/.test(String(t.content || ''))).map(t => ({ d: t.date, v: Number(t.value) || 0, in: t.side === 'INCOME', c: clean(t.content, 40), st: t.journalizing_status || '', used: false }));
+  // 1つの仕訳の中で普通預金が何行かに分かれていても、銀行の明細は1回分なので、仕訳ごとに合計して比べる
   const book = [];
-  js.forEach(j => j.b.forEach(br => {
-    if (br[0] === '普通預金') book.push({ j: j, d: j.d, v: br[1], in: true, r: br[4] || j.m });
-    if (br[2] === '普通預金') book.push({ j: j, d: j.d, v: br[3], in: false, r: br[4] || j.m });
-  }));
-  const only = [];
-  book.forEach(b => {
-    const c = bank.filter(t => !t.used && t.in === b.in && t.v === b.v && Math.abs(diffDays(t.d, b.d)) <= 4).sort((x, y) => Math.abs(diffDays(x.d, b.d)) - Math.abs(diffDays(y.d, b.d)));
-    if (c.length) c[0].used = true; else only.push(b);
+  js.forEach(j => {
+    let inV = 0, outV = 0;
+    j.b.forEach(br => { if (br[0] === '普通預金') inV += br[1]; if (br[2] === '普通預金') outV += br[3]; });
+    const net = inV - outV;
+    if (net) book.push({ j: j, d: j.d, v: Math.abs(net), in: net > 0, r: bookRemark(j, 0) });
   });
+  // まず前後4日で、見つからなければ前後31日で（請求書の売上のように、登録した日と入金の日がずれるもの）
+  const only = [];
+  const pick = (b, days) => {
+    const c = bank.filter(t => !t.used && t.in === b.in && t.v === b.v && Math.abs(diffDays(t.d, b.d)) <= days).sort((x, y) => Math.abs(diffDays(x.d, b.d)) - Math.abs(diffDays(y.d, b.d)));
+    if (c.length) { c[0].used = true; return true; }
+    return false;
+  };
+  const rest = book.filter(b => !pick(b, 4));
+  rest.forEach(b => { if (!pick(b, 31)) only.push(b); });
   const sum = list => list.reduce((a, x) => a + (x.in ? x.v : -x.v), 0);
   // 銀行の明細が登録済みの分まで返ってこないとき（半分も合わない）は、照らし合わせない（まちがった知らせを出さない）
   if (book.length >= 4 && only.length > book.length / 2) return { unreliable: true, bankNet: 0, bookNet: sum(book), bookOnly: [], notYet: [] };
@@ -2514,16 +2522,17 @@ async function bookBank(env, js, months) {
     notYet: notYet.filter(t => t.in).map(t => ({ date: t.d, amount: t.v, content: t.c }))
   };
 }
-// 現金：1月1日の残高を入れてもらえば、帳簿の残高が出る。数えた手元の現金とも比べる
+// 現金：1月1日の残高（前年からの繰り越し）から、帳簿の残高を出す。数えた手元の現金とは、数えた日の時点で比べる
 function bookCash(js, cash) {
-  let run = cash && cash.open !== undefined && cash.open !== null ? Number(cash.open) : null;
-  let net = 0, low = null;
-  js.forEach(j => j.b.forEach(br => { if (br[0] === '現金') net += br[1]; if (br[2] === '現金') net -= br[3]; }));
-  if (run !== null) {
-    let r = run;
-    js.forEach(j => { j.b.forEach(br => { if (br[0] === '現金') r += br[1]; if (br[2] === '現金') r -= br[3]; }); if (low === null || r < low.v) low = { d: j.d, v: r }; });
-  }
-  return { net: net, open: run, book: run === null ? null : run + net, low: low, counted: cash && cash.counted !== undefined && cash.counted !== null ? Number(cash.counted) : null, countedAt: cash ? cash.at || '' : '' };
+  const has = v => v !== undefined && v !== null;
+  const open = cash && has(cash.open) ? Number(cash.open) : null;
+  const counted = cash && has(cash.counted) ? Number(cash.counted) : null;
+  const at = counted !== null && cash.at ? String(cash.at).slice(0, 10) : '';
+  let net = 0, upto = 0, low = null;
+  const days = {};
+  js.forEach(j => { let d = 0; j.b.forEach(br => { if (br[0] === '現金') d += br[1]; if (br[2] === '現金') d -= br[3]; }); if (!d) return; net += d; if (!at || j.d <= at) upto += d; days[j.d] = (days[j.d] || 0) + d; });
+  if (open !== null) { let r = open; Object.keys(days).sort().forEach(d => { r += days[d]; if (r < 0 && (low === null || r < low.v)) low = { d: d, v: r }; }); }
+  return { net: net, open: open, book: open === null ? null : open + net, bookAt: open === null ? null : open + upto, low: low, counted: counted, countedAt: at };
 }
 async function adminBook(env, b) {
   if (!env.MF_API_KEY) return { connected: false };
@@ -2535,20 +2544,104 @@ async function adminBook(env, b) {
     const ign = (await kvGet(env, 'bookIgnore')) || {};
     bank.bookOnly.forEach(x => { const k = 'bk:' + x.id + ':' + x.amount; if (!ign[k]) issues.push(x.twin
       ? { key: k, kind: 'pair', id: x.id, date: x.date, amount: x.amount, remark: x.remark, title: '二重に登録されているかも', detail: '同じ日・同じ金額の口座の仕訳が2つ', why: '銀行の明細には1回分しかありません', fix: true, dupBank: true }
-      : { key: k, kind: 'info', id: x.id, date: x.date, amount: x.amount, remark: x.remark, title: '通帳にない口座の動き', detail: (x.in ? '入金' : '出金') + 'の仕訳', why: '同じ金額の銀行の明細が前後4日にありません。手入力のまちがいかも', fix: false }); });
+      : { key: k, kind: 'info', id: x.id, date: x.date, amount: x.amount, remark: x.remark, title: '通帳にない口座の動き', detail: (x.in ? '入金' : '出金') + 'の仕訳', why: '同じ金額の銀行の' + (x.in ? '入金' : '出金') + 'が前後1か月にありません。金額や口座のまちがいかも', fix: false }); });
   }
-  const cash = bookCash(r.js, await kvGet(env, 'bookCash'));
-  if (cash.low && cash.low.v < 0) issues.push({ key: 'cashneg:' + cash.low.d, kind: 'info', date: cash.low.d, amount: -cash.low.v, remark: '', title: '帳簿の現金がマイナス', detail: jdShort(cash.low.d) + 'に ' + cash.low.v.toLocaleString() + '円', why: '現金の売上や、お店にお金を足した記録（事業主借）が抜けているかも', fix: false });
+  const saved = (await kvGet(env, 'bookCash')) || {};
+  let auto = null;
+  try { auto = await cashOpenAuto(env, r.months[0]); } catch (e) { console.error('現金の繰り越し', e && e.message); }
+  const own = saved.open !== undefined && saved.open !== null;
+  const cash = bookCash(r.js, !own && auto ? Object.assign({}, saved, { open: auto.v }) : saved);
+  cash.openSrc = own ? 'input' : auto ? auto.src : '';
+  cash.auto = auto ? auto.v : null;
   const n = issues.filter(x => x.fix).length + sales.filter(x => x.diffN).length;
   await kvPut(env, 'bookCount', { n: n, at: Date.now() });
   return { connected: true, issues: issues, sales: sales, bank: bank && !bank.unreliable ? { bankNet: bank.bankNet, bookNet: bank.bookNet, bookOnly: bank.bookOnly.length, notYet: bank.notYet } : null, cash: cash,
-    balanced: r.balanced, total: r.total, from: r.months[0], aiAt: ((await kvGet(env, 'bookAi')) || {}).at || '' };
+    balanced: r.balanced, total: r.total, from: r.months[0], aiAt: ((await kvGet(env, 'bookAi')) || {}).at || '', hidden: Object.keys((await kvGet(env, 'bookIgnore')) || {}).length };
+}
+// 1月1日の現金＝前年からの繰り越し。マネーフォワードの残高試算表の「前期残高」を使う。取れないときは、前年までの仕訳を足して出す
+async function cashOpenAuto(env, firstMonth) {
+  const hit = await kvGet(env, 'cashOpenAuto');
+  if (hit && hit.month === firstMonth && Date.now() - hit.t < 21600000) return hit.v === null ? null : hit;
+  let out = null;
+  try {
+    const tb = await mfApi(env, 'GET', '/reports/trial_balance_bs', { start_date: firstMonth + '-01', end_date: monthLast(firstMonth) });
+    const v = tbOpening(tb, '現金', firstMonth + '-01');
+    if (v !== null) out = { v: v, src: 'mf' };
+  } catch (e) { console.error('残高試算表', e && e.message); }
+  if (!out) {
+    const m = await mfMaster(env);
+    const first = (m.firstStart || '').slice(0, 7);
+    if (first && first < firstMonth && monthsBetween(first, addMonths(firstMonth, -1)).length <= 36) {
+      const js = await bookJournals(env, monthsBetween(first, addMonths(firstMonth, -1)), false);
+      let v = 0;
+      js.forEach(j => j.b.forEach(br => { if (br[0] === '現金') v += br[1]; if (br[2] === '現金') v -= br[3]; }));
+      out = { v: v, src: 'books' };
+    }
+  }
+  const rec = Object.assign({ month: firstMonth, t: Date.now(), v: null }, out || {});
+  await kvPut(env, 'cashOpenAuto', rec);
+  return out ? rec : null;
+}
+// 残高試算表（科目の木）から、科目の「前期残高」を探す
+function tbOpening(tb, name, start) {
+  if (!tb || typeof tb !== 'object') return null;
+  if (tb.start_date && String(tb.start_date).slice(0, 10) !== start) return null;
+  const cols = (tb.columns || []).map(c => (typeof c === 'string' ? c : (c && (c.key || c.name || c.type)) || ''));
+  let hit = null;
+  const walk = n => {
+    if (hit || !n || typeof n !== 'object') return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (n.name === name || n.account_name === name) { hit = n; return; }
+    Object.keys(n).forEach(k => { if (n[k] && typeof n[k] === 'object') walk(n[k]); });
+  };
+  walk(tb.rows);
+  if (!hit) return null;
+  let v = hit.opening_balance;
+  if (v === undefined && Array.isArray(hit.values) && cols.indexOf('opening_balance') >= 0) v = hit.values[cols.indexOf('opening_balance')];
+  if (v && typeof v === 'object') v = v.value !== undefined ? v.value : v.amount;
+  if (v === undefined || v === null || v === '' || !isFinite(Number(v))) return null;
+  return Math.round(Number(v));
+}
+// 確定申告の帳尻合わせ：12月31日に数えた現金と帳簿の差を、仕訳でうめる（雑損失・雑収入、または事業主貸・事業主借）
+// まちがって押さないように、選んだ科目と、差の金額を打ってもらったときだけ。同じ日に2回は入れない
+async function adminBookCashAdjust(env, b) {
+  const r = await adminBook(env, {});
+  const C = r.cash;
+  if (C.bookAt === null || C.counted === null) fail('手元の現金を入れてから押してください。');
+  if (!/-12-31$/.test(C.countedAt)) fail('帳尻合わせは、12月31日の現金を入れたときだけできます。');
+  const d = C.counted - C.bookAt;
+  if (!d) fail('差はありません。');
+  if (b.how !== 'misc' && b.how !== 'owner') fail('どちらで合わせるか選んでください。');
+  if (Number(String(b.amount === undefined ? '' : b.amount).replace(/[^\d]/g, '') || -1) !== Math.abs(d)) fail('入れた金額が差（' + Math.abs(d).toLocaleString() + '円）と合いません。');
+  const day = C.countedAt;
+  const js = await bookJournals(env, [day.slice(0, 7)], true);
+  if (js.some(j => j.d === day && j.b.some(br => /現金の帳尻合わせ/.test(br[4] || '')))) fail(jdShort(day) + 'の帳尻合わせは、もう登録してあります。直すときはマネーフォワードで直してください。');
+  const m = await mfMaster(env);
+  const owner = b.how === 'owner';
+  const name = d < 0 ? (owner ? '事業主貸' : '雑損失') : (owner ? '事業主借' : '雑収入');
+  const a = m.accounts.find(x => x.name === name);
+  const cashAcc = m.accounts.find(x => x.name === '現金');
+  if (!a || !cashAcc) fail('マネーフォワードに「' + (a ? '現金' : name) + '」の科目が見つかりませんでした。');
+  const v = Math.abs(d);
+  const deb = d < 0 ? { account_id: a.id, value: v } : { account_id: cashAcc.id, value: v };
+  const cre = d < 0 ? { account_id: cashAcc.id, value: v } : { account_id: a.id, value: v };
+  const t = pickTax(m.taxes, 'none');
+  if (t) { deb.tax_id = t; cre.tax_id = t; }
+  await mfApi(env, 'POST', '/journals', null, { journal: { transaction_date: day, journal_type: 'journal_entry', memo: 'épiiの予約管理から登録', branches: [{ debitor: deb, creditor: cre, remark: '現金の帳尻合わせ（数えた現金との差）' }] } });
+  await mfTouched(env, day);
+  return await adminBook(env, {});
 }
 async function adminBookCash(env, b) {
   const cur = (await kvGet(env, 'bookCash')) || {};
   const n = v => (v === '' || v === null || v === undefined ? null : Math.round(Number(String(v).replace(/[^\d-]/g, '')) || 0));
   if (b.open !== undefined) cur.open = n(b.open);
-  if (b.counted !== undefined) { cur.counted = n(b.counted); cur.at = jstStamp(Date.now()); }
+  if (b.counted !== undefined) {
+    cur.counted = n(b.counted);
+    const today = jstStamp(Date.now()).slice(0, 10);
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(String(b.at || '')) ? String(b.at) : today;
+    if (d > today || d < bookMonths(today)[0] + '-01') fail('数えた日は、' + jdShort(bookMonths(today)[0] + '-01') + 'から今日までの日にしてください。');
+    cur.at = d;
+  }
   await kvPut(env, 'bookCash', cur);
   return await adminBook(env, {});
 }
@@ -2586,6 +2679,7 @@ async function adminBookFix(env, b) {
   return await adminBook(env, {});
 }
 async function adminBookIgnore(env, b) {
+  if (b.reset) { await env.DB.prepare("DELETE FROM kv WHERE k = 'bookIgnore'").run(); return await adminBook(env, {}); }
   const ign = (await kvGet(env, 'bookIgnore')) || {};
   ign[String(b.key || '').slice(0, 120)] = jstStamp(Date.now());
   await kvPut(env, 'bookIgnore', ign);

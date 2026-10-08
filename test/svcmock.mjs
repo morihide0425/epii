@@ -47,7 +47,9 @@ const ACCOUNTS = [
   { id: 'A%3D14', name: '未収金', account_group: 'ASSET', available: true },
   { id: 'A%3D15', name: '売上値引・返品', account_group: 'REVENUE', available: true },
   { id: 'A%3D16', name: '損害保険料', account_group: 'EXPENSE', available: true },
-  { id: 'A%3D17', name: '支払手数料', account_group: 'EXPENSE', available: true }
+  { id: 'A%3D17', name: '支払手数料', account_group: 'EXPENSE', available: true },
+  { id: 'A%3D18', name: '雑損失', account_group: 'EXPENSE', available: true },
+  { id: 'A%3D19', name: '事業主借', account_group: 'LIABILITY', available: true }
 ];
 const TAXES = [
   { id: 'T1', name: '課仕 10%', available: true }, { id: 'T2', name: '課税仕入 10%', available: true },
@@ -81,6 +83,14 @@ function seedJournals() {
   jb('BK15', today, [['A%3D9', 300, 'A%3D13', 'Vサガク777777']]);
   // 本物の免税事業者の仕訳は、インボイス区分が「対象外」で返ってくる
   journals.push({ id: 'BK18', transaction_date: today, journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 947, tax_value: 0, invoice_kind: 'INVOICE_KIND_NOT_TARGET' }, creditor: { account_id: 'A%3D9', value: 947, tax_value: 0, invoice_kind: 'INVOICE_KIND_NOT_TARGET' }, remark: 'V510367 イズミヤ仕入れ' }] });
+  // 1回の入金を、1つの仕訳で2行に分けて登録（現金から＋自分のお金から）。銀行の明細は合計の1回分
+  journals.push({ id: 'BK19', transaction_date: addDays(today, -10), journal_type: 'journal_entry', memo: '', branches: [
+    { debitor: { account_id: 'A%3D9', value: 22807, tax_value: 0 }, creditor: { account_id: 'A%3D5', value: 22807, tax_value: 0 }, remark: 'カード' },
+    { debitor: { account_id: 'A%3D9', value: 32193, tax_value: 0 }, creditor: { account_id: 'A%3D6', value: 32193, tax_value: 0 }, remark: '' }] });
+  txs.push({ id: 'TXS1', date: addDays(today, -10), value: 55000, side: 'INCOME', content: 'ｶｰﾄﾞ', journalizing_status: 'registered' });
+  // 請求書の売上：登録した日から20日あとに入金
+  journals.push({ id: 'BK20', transaction_date: addDays(today, -30), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 4600, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 4600, tax_value: 0 }, remark: 'No.1 il Centrino' }] });
+  txs.push({ id: 'TXS2', date: addDays(today, -10), value: 4600, side: 'INCOME', content: 'ﾌﾘｺﾐ ｲﾙｾﾝﾄﾘﾉ', journalizing_status: 'registered' });
   // 口座の仕訳が二重（銀行の明細は1回分）
   jb('BK16', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
   jb('BK17', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
@@ -225,7 +235,19 @@ export function startSvcMock(port) {
         if (opts.exempt && /invoice_kind/.test(raw)) return send({ errors: [{ code: 'invalid', message: '免税事業者にインボイス区分を登録できません Target: invoice_kind TargetValue: INVOICE_KIND_NOT_TARGET' }] }, 400);
         if (p === '/accounts') return send({ accounts: ACCOUNTS });
         if (p === '/taxes') return send({ taxes: TAXES });
-        if (p === '/term_settings') return send({ term_settings: [{ fiscal_year: 2026, start_date: '2026-01-01', end_date: '2026-12-31', accounting_method: 'TAX_INCLUDED' }] });
+        if (p === '/term_settings') return send({ term_settings: [{ fiscal_year: 2026, start_date: '2026-01-01', end_date: '2026-12-31', accounting_method: 'TAX_INCLUDED' }].concat(opts.oldTerm ? [{ fiscal_year: 2025, start_date: '2025-01-01', end_date: '2025-12-31', accounting_method: 'TAX_INCLUDED' }] : []) });
+        // 残高試算表（貸借対照表）：科目の木。values は columns の順
+        if (p === '/reports/trial_balance_bs') {
+          if (opts.noTb) return send({ errors: [{ message: 'not found' }] }, 404);
+          const s0 = u.searchParams.get('start_date') || '2026-01-01';
+          const cols = ['opening_balance', 'debit_amount', 'credit_amount', 'closing_balance', 'ratio'];
+          return send({ columns: cols, start_date: s0, end_date: u.searchParams.get('end_date') || '2026-12-31', report_type: 'trial_balance_bs', created_at: '2026-10-08T00:00:00+09:00', rows: [
+            { name: '資産', type: 'financial_statement_item', values: [500000, 0, 0, 500000, 100], rows: [
+              { name: '流動資産', type: 'financial_statement_item', values: [500000, 0, 0, 500000, 100], rows: [
+                { name: '現金及び預金', type: 'financial_statement_item', values: [500000, 0, 0, 500000, 100], rows: [
+                  { name: '現金', type: 'account', values: [opts.tbCash === undefined ? 42000 : opts.tbCash, 0, 0, 42000, 8], rows: [] },
+                  { name: '普通預金', type: 'account', values: [458000, 0, 0, 458000, 92], rows: [] }] }] }] }] });
+        }
         if (p === '/transactions' && req.method === 'GET') {
           const q = u.searchParams;
           if (!q.get('start_date') || !q.get('end_date')) return send({ errors: [{ message: 'start_date and end_date required' }] }, 400);

@@ -352,7 +352,7 @@
   .askicon { margin-left: auto; width: 36px; height: 36px; border: 0; background: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
   .askicon svg.spark { width: 20px; height: 20px; }
   .txai { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--sub); min-width: 0; }
-  .txai > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .txai > span:first-of-type { min-width: 0; }
   .txai .tag { flex-shrink: 0; }
   .txpick { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--green); cursor: pointer; margin-right: 4px; }
   .txpick input { width: 20px; height: 20px; accent-color: var(--green); flex-shrink: 0; }
@@ -361,11 +361,16 @@
   .gcalc b small { display: block; font-size: 10px; font-weight: 400; color: var(--sub); }
   .bk { padding: 10px 0; border-top: 1px solid var(--line); }
   .bk .top { display: flex; gap: 8px; align-items: baseline; font-size: 13px; } .bk .nm { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .bk .am { font-weight: 700; white-space: nowrap; }
-  .bk .why { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; } .bk .why b { color: var(--amber); font-weight: 600; flex-shrink: 0; } .bk .why span { color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bk .why { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; margin-top: 4px; font-size: 12px; line-height: 1.6; } .bk .why b { color: var(--amber); font-weight: 600; } .bk .why span { color: var(--sub); }
   .bk .acts { align-items: center; margin-top: 6px; }
   .bk .basis { font-size: 11px; color: var(--sub); margin-top: 2px; line-height: 1.5; }
   .causes { list-style: none; margin: 2px 0 6px; padding: 0; font-size: 12px; line-height: 1.6; } .causes li { display: flex; gap: 8px; padding: 2px 0; } .causes li span { color: var(--sub); flex-shrink: 0; width: 34px; }
-  .cashin { display: flex; gap: 8px; align-items: flex-end; margin-top: 6px; } .cashin label { flex: 1; min-width: 0; font-size: 11px; color: var(--sub); } .cashin input { font-size: 15px; padding: 7px 9px; margin-top: 2px; } .bk select { width: auto; flex: 1; min-width: 0; font-size: 14px; padding: 6px 8px; }
+  .cashin { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; margin-top: 6px; } .cashin label { min-width: 0; font-size: 11px; color: var(--sub); } .cashin input[type=date] { width: 100%; min-width: 0; }
+  .cashadj { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; } .cashadj > small { flex-basis: 100%; font-size: 11px; color: var(--sub); line-height: 1.5; }
+  .cashadj.open { display: block; margin-top: 14px; padding: 12px; border: 1px solid var(--line2); border-radius: 12px; } .cashadj.open > b { display: block; font-size: 14px; margin-bottom: 2px; } .cashadj.open > small { display: block; }
+  .adjhow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; } .adjhow .chip { margin: 0; border-radius: 10px; padding: 8px 10px; text-align: left; } .adjhow .chip small { display: block; font-size: 10px; opacity: .75; margin-top: 2px; }
+  .cashadj label { display: block; font-size: 11px; color: var(--sub); } .cashadj label input { margin-top: 4px; font-size: 15px; padding: 7px 9px; }
+  .adjgo { display: flex; gap: 8px; margin-top: 10px; } .adjgo .btn[disabled] { cursor: not-allowed; } .cashin input { font-size: 15px; padding: 7px 9px; margin-top: 2px; } .bk select { width: auto; flex: 1; min-width: 0; font-size: 14px; padding: 6px 8px; }
   .custlist { margin-top: 8px; } .custrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
   .custrow .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pvnote { font-size: 12px; color: var(--amber); margin-bottom: 6px; white-space: normal; }
@@ -1524,10 +1529,21 @@ ACTIONS.today = async (a, b) => {
   }
   if (a === 'sqEnter') { await sqEnter(b); return; }
   if (a === 'bookFix') { await bookFix(b); return; }
-  if (a === 'bookIgnore') { await bookCall(b, 'bookIgnore', { key: b.dataset.k }, 'このままにしました'); return; }
+  if (a === 'bookIgnore') { await bookCall(b, 'bookIgnore', { key: b.dataset.k }, 'この知らせは、もう出しません'); return; }
+  if (a === 'bookUnhide') { await bookCall(b, 'bookIgnore', { reset: true }, '隠したものを、もう一度出しました'); return; }
   if (a === 'bookAi') { await bookAi(); return; }
   if (a === 'bookMore') { S.rcpt.bookAll = true; refresh(); return; }
-  if (a === 'bookCash') { await bookCall(b, 'bookCash', { open: $('bkOpen').value, counted: $('bkCount').value }, '比べました'); return; }
+  if (a === 'bookCash') { S.rcpt.cashAdj = null; const o = $('bkOpen'); await bookCall(b, 'bookCash', { open: o.dataset.auto && o.value === o.dataset.auto ? undefined : o.value, counted: $('bkCount').value, at: $('bkAt').value }, '比べました'); return; }
+  if (a === 'cashAdjOpen') { S.rcpt.cashAdj = { how: '', amt: '' }; refresh(); return; }
+  if (a === 'cashAdjClose') { S.rcpt.cashAdj = null; refresh(); return; }
+  if (a === 'cashAdjHow') { S.rcpt.cashAdj.how = b.dataset.v; document.querySelectorAll('[data-act=cashAdjHow]').forEach(x => x.classList.toggle('on', x === b)); cashAdjCheck(); return; }
+  if (a === 'bookCashAdj') {
+    if (!cashAdjReady()) return;
+    const C = S.rcpt.book.cash, d = C.counted - C.bookAt, owner = S.rcpt.cashAdj.how === 'owner';
+    if (!confirm(jdShort(C.countedAt) + 'の日付で、' + yen(Math.abs(d)) + 'を' + (d < 0 ? (owner ? '事業主貸' : '雑損失') : (owner ? '事業主借' : '雑収入')) + 'としてマネーフォワードに登録します。\n確定申告の前に1回だけ行うものです。よろしいですか？')) return;
+    if (await bookCall(b, 'bookCashAdjust', { how: S.rcpt.cashAdj.how, amount: S.rcpt.cashAdj.amt }, '登録しました')) { S.rcpt.cashAdj = null; refresh(); }
+    return;
+  }
   if (a === 'bookDays') { S.rcpt.bookDays = Object.assign({}, S.rcpt.bookDays, { [b.dataset.v]: true }); refresh(); return; }
   if (a === 'rcptForce') {
     if (!confirm('口座の明細を待たずに登録しますか？（あとで明細が届いたら、マネーフォワードで二重になっていないか確かめてください）')) return;
@@ -3570,7 +3586,7 @@ function bookRow(x) {
     <div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.remark || '（摘要なし）')}</span><span class="am">${yen(x.amount)}</span></div>
     <div class="why">${x.ai ? spark() : ''}<b>${esc(x.title)}</b><span>${esc(x.detail)}</span></div>
     ${x.why ? `<div class="basis">${esc(x.why)}</div>` : ''}
-    <div class="acts">${acts}<button class="btn small ghost" data-act="bookIgnore" data-k="${k}">${x.fix ? 'このまま' : 'わかった'}</button></div>
+    <div class="acts">${acts}<button class="btn small ghost" data-act="bookIgnore" data-k="${k}">${x.fix ? 'このままでいい' : '確認した'}</button></div>
   </div>`;
 }
 function bookHtml() {
@@ -3582,6 +3598,7 @@ function bookHtml() {
   if (B.err) h += `<div class="warn">${phr(B.err)}</div>`;
   if (!issues.length) h += '<div class="okbar">' + icon('i-check-ink') + 'おかしいところはありません</div>';
   else h += `<div class="sub" style="margin-bottom:4px">${phr('直すと、マネーフォワードの仕訳も直ります。')}</div>` + show.map(bookRow).join('') + (issues.length > show.length ? `<button class="more2" data-act="bookMore">ほか ${issues.length - show.length}件を見る</button>` : '');
+  if (B.hidden) h += `<button class="more2" data-act="bookUnhide">「確認した」で隠したもの ${B.hidden}件を、もう一度出す</button>`;
   h += bookSumHtml(B);
   if (S.features.ai) h += `<div class="acts" style="margin-top:10px">${S.rcpt.bookWait ? aiThink('Claudeが科目を見ています', true) : `<button class="btn small" data-act="bookAi">${spark()}Claudeに科目も見てもらう</button>${B.aiAt ? `<span class="sub">${esc(B.aiAt.slice(5, 10).replace('-', '/'))}に確認</span>` : ''}`}</div>`;
   const sales = B.sales || [];
@@ -3597,19 +3614,43 @@ function bookSumHtml(B) {
   if (B.total) rows.push(['貸借', B.balanced === B.total ? '合っています' : (B.total - B.balanced) + '件 合わない', B.total + '件の仕訳を確認', B.balanced !== B.total]);
   if (B.bank) {
     const ok = !B.bank.bookOnly;
-    rows.push(['口座', ok ? '通帳と合っています' : B.bank.bookOnly + '件 通帳にない', '帳簿の口座の動きを、銀行の明細と1件ずつ照らし合わせ', !ok]);
+    rows.push(['口座', ok ? '通帳と合っています' : B.bank.bookOnly + '件 通帳にない', '口座の仕訳を、銀行の明細と1件ずつ比べました', !ok]);
     if (B.bank.notYet && B.bank.notYet.length) rows.push(['口座の入金', 'まだ登録していない ' + B.bank.notYet.length + '件', B.bank.notYet.slice(0, 3).map(t => jdShort(t.date) + ' ' + yen(t.amount)).join('、'), true]);
   }
   const C = B.cash || {};
-  let cash = '';
-  if (C.book !== null && C.book !== undefined) {
-    const d = C.counted !== null && C.counted !== undefined ? C.counted - C.book : null;
-    const ys = v => (v < 0 ? '−' + yen(-v) : yen(v));
-    rows.push(['現金', '帳簿 ' + ys(C.book), d === null ? '手元の現金を数えて入れると比べます' : d === 0 ? '数えた現金と合っています' : '数えた現金 ' + yen(C.counted) + '（差 ' + (d > 0 ? '+' : '') + ys(d) + '）' + (d < 0 ? '：現金で払ったものの登録漏れかも' : '：現金売上や、お店にお金を足した記録の漏れかも'), d !== null && d !== 0]);
+  const has = v => v !== null && v !== undefined;
+  const ys = v => (v < 0 ? '−\u2060' + yen(-v) : yen(v));   // 記号と金額のあいだで折り返さない
+  let adj = '';
+  if (!has(C.open)) rows.push(['現金', '1月1日の額がわかりません', 'わかるときだけ入れてください。空のままで大丈夫です', false]);
+  else {
+    const src = { mf: '前年からの繰り越し', books: '前年までの帳簿から', input: '入れた額' }[C.openSrc] || '';
+    rows.push(['現金', '帳簿 ' + ys(C.book), '1月1日 ' + ys(C.open) + (src ? '（' + src + '）' : '') + (C.book < 0 ? '\nマイナスは、現金売上の記録漏れかも' : C.low ? '\n' + jdShort(C.low.d) + 'に一時 ' + ys(C.low.v) + '。現金売上の記録漏れかも' : ''), false]);
+    if (has(C.counted)) {
+      const d = C.counted - C.bookAt;
+      rows.push(['数えた現金', yen(C.counted) + (d ? '（差 ' + (d > 0 ? '+\u2060' : '') + ys(d) + '）' : ''), d ? jdShort(C.countedAt) + 'の帳簿 ' + ys(C.bookAt) + 'と比べて' : '帳簿と合っています', false]);
+      if (d) adj = cashAdjHtml(C, d);
+    }
   }
-  cash = `<div class="cashin"><label>1月1日の現金<input type="text" inputmode="numeric" id="bkOpen" value="${C.open === null || C.open === undefined ? '' : esc(fmtNum(C.open))}" placeholder="例）30,000"></label><label>いま手元の現金<input type="text" inputmode="numeric" id="bkCount" value="${C.counted === null || C.counted === undefined ? '' : esc(fmtNum(C.counted))}" placeholder="数えて入れる"></label><button class="btn small" data-act="bookCash">比べる</button></div>`;
-  return `<h3>合っているか</h3><div class="gcalc">${rows.map(r => `<div><span>${r[0]}</span><b>${r[3] ? `<span class="neg">${esc(r[1])}</span>` : esc(r[1])}<small>${esc(r[2])}</small></b></div>`).join('')}</div>${cash}`;
+  const cash = `<div class="cashin"><label>1月1日の現金<input type="text" inputmode="numeric" id="bkOpen" value="${has(C.open) ? esc(fmtNum(C.open)) : ''}" data-auto="${C.openSrc !== 'input' && has(C.open) ? esc(fmtNum(C.open)) : ''}" placeholder="わかれば"></label><label>手元の現金<input type="text" inputmode="numeric" id="bkCount" value="${has(C.counted) ? esc(fmtNum(C.counted)) : ''}" placeholder="数えて入れる"></label><label>数えた日<input type="date" id="bkAt" value="${esc(C.countedAt || today())}" max="${today()}"></label><button class="btn small" data-act="bookCash">比べる</button></div>${adj}`;
+  return `<h3>合っているか</h3><div class="gcalc">${rows.map(r => `<div><span>${r[0]}</span><b>${r[3] ? `<span class="neg">${esc(r[1])}</span>` : esc(r[1])}<small>${phr(r[2])}</small></b></div>`).join('')}</div>${cash}`;
 }
+// 確定申告の帳尻合わせ：12月31日の分だけ。開く→科目を選ぶ→差の金額を打つ→登録（まちがって押さないように）
+function cashAdjHtml(C, d) {
+  if (!/-12-31$/.test(C.countedAt || '')) return `<div class="cashadj"><small>確定申告の帳尻合わせは、数えた日を12月31日にすると出ます</small></div>`;
+  const R = S.rcpt, A = Math.abs(d);
+  if (!R.cashAdj) return `<div class="cashadj"><button class="btn small ghost" data-act="cashAdjOpen">確定申告の帳尻合わせ</button></div>`;
+  const names = d < 0 ? { misc: ['雑損失', '経費にする'], owner: ['事業主貸', '自分で使った'] } : { misc: ['雑収入', '収入にする'], owner: ['事業主借', '自分のお金を足した'] };
+  return `<div class="cashadj open" data-key="cashadj"><b>確定申告の帳尻合わせ</b><small>${phr(jdShort(C.countedAt) + 'の差 ' + yen(A) + 'を、仕訳でうめます\nどちらで合わせるか選んでください')}</small>
+    <div class="adjhow">${['misc', 'owner'].map(k => `<button class="chip${R.cashAdj.how === k ? ' on' : ''}" data-act="cashAdjHow" data-v="${k}"><b>${names[k][0]}</b><small>${names[k][1]}</small></button>`).join('')}</div>
+    <label>確かめのため、差の金額を入れてください<input type="text" inputmode="numeric" id="cashAdjAmt" value="${esc(R.cashAdj.amt || '')}" placeholder="${esc(fmtNum(A))}" autocomplete="off"></label>
+    <div class="adjgo"><button class="btn small" data-act="bookCashAdj"${cashAdjReady() ? '' : ' disabled'}>登録する</button><button class="btn small ghost" data-act="cashAdjClose">やめる</button></div></div>`;
+}
+function cashAdjReady() {
+  const R = S.rcpt, C = R && R.book && R.book.cash;
+  if (!C || !R.cashAdj || !R.cashAdj.how || C.counted === null || C.bookAt === null) return false;
+  return Number(String(R.cashAdj.amt || '').replace(/[^\d]/g, '') || -1) === Math.abs(C.counted - C.bookAt);
+}
+function cashAdjCheck() { const b = document.querySelector('[data-act=bookCashAdj]'); if (b) b.disabled = !cashAdjReady(); }
 async function bookCall(b, name, body, msg) {
   const mo = M.busy(b);
   try {
@@ -3621,7 +3662,8 @@ async function bookCall(b, name, body, msg) {
     if (S.rcptInfo && S.rcptInfo.list) S.rcptInfo.list.bookN = r.issues.filter(x => x.fix).length;
     refresh();
     if (msg) toast(msg);
-  } catch (e) { mo.fail(); fail(e); }
+    return true;
+  } catch (e) { mo.fail(); fail(e); return false; }
 }
 async function bookFix(b) {
   const x = (S.rcpt.book.issues || []).find(i => i.key === b.dataset.k);
@@ -4166,6 +4208,7 @@ $('view').addEventListener('click', async e => {
 });
 
 $('view').addEventListener('input', e => {
+  if (e.target.id === 'cashAdjAmt' && S.rcpt && S.rcpt.cashAdj) { S.rcpt.cashAdj.amt = e.target.value; cashAdjCheck(); return; }
   if (S.tab === 'set' && e.target.id === 'goalAmt' && S.goal) {
     S.goal.form.amount = e.target.value;
     const box = document.querySelector('[data-key=goalcalc]');

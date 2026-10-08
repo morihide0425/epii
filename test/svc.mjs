@@ -262,9 +262,65 @@ try {
   // 口座：帳簿の動きと銀行の明細を照らし合わせる（二重・通帳にない動き）
   const dupB = res.body.issues.find(x => x.dupBank);
   check(dupB && (dupB.id === 'BK16' || dupB.id === 'BK17') && res.body.issues.some(x => x.id === 'BK4' && x.title === '通帳にない口座の動き') && res.body.bank, 'bank reconciliation ' + JSON.stringify(res.body.bank));
+  check(!res.body.issues.some(x => x.id === 'BK19' || x.id === 'BK20'), 'split deposit and late payment are not flagged');
   // Square：会計ひとつずつ照らし合わせて、理由を出す
   const sm = res.body.sales.find(m => m.diffN);
   check(sm && sm.diff.some(d => d.text.includes('マネーフォワードにありません')), 'per-payment causes ' + JSON.stringify(sm && sm.diff.slice(0, 2)));
+  // 現金：1月1日の額は、マネーフォワードの残高試算表の前期残高（前年からの繰り越し）を自動で使う。マイナスでも「知らせ」にはしない
+  res = await post('/admin/api/book', {}, A);
+  check(res.body.cash.open === 42000 && res.body.cash.openSrc === 'mf' && res.body.cash.book === 42000 + res.body.cash.net, 'opening cash from trial balance ' + JSON.stringify(res.body.cash));
+  check(calls.mf.some(c => c.startsWith('GET /reports/trial_balance_bs') && c.includes('start_date=2026-01-01')), 'trial balance asked from 1/1');
+  check(!res.body.issues.some(x => /cashneg/.test(x.key) || /現金がマイナス/.test(x.title)), 'no error-like cash notice');
+  // 数えた日の時点の帳簿と比べる → 差を雑損失で合わせる（数えた日の日付）
+  const cday = add(T, -3);
+  res = await post('/admin/api/bookCash', { counted: '1,000', at: cday }, A);
+  const c0 = res.body.cash;
+  check(c0.counted === 1000 && c0.countedAt === cday && c0.bookAt !== null && c0.openSrc === 'mf', 'count with date ' + JSON.stringify(c0));
+  res = await post('/admin/api/bookCash', { counted: '1,000', at: add(T, 1) }, A);
+  check(res.status >= 400, 'future count date refused');
+  // 確定申告の帳尻合わせは12月31日の分だけ。科目を選んで、差の金額を打ったときだけ登録する
+  res = await post('/admin/api/bookCashAdjust', { how: 'misc', amount: String(Math.abs(1000 - c0.bookAt)) }, A);
+  check(res.status >= 400 && /12月31日/.test(res.body.error || res.body.message || JSON.stringify(res.body)), 'adjust only for 12/31 ' + JSON.stringify(res.body));
+  const ye = T.slice(0, 4) + '-12-31';
+  const kvc = JSON.parse((await db.prepare("SELECT v FROM kv WHERE k = 'bookCash'").first()).v);
+  await db.prepare("UPDATE kv SET v = ? WHERE k = 'bookCash'").bind(JSON.stringify(Object.assign(kvc, { counted: 1000, at: ye }))).run();
+  res = await post('/admin/api/book', {}, A);
+  const dd = 1000 - res.body.cash.bookAt;
+  check(res.body.cash.countedAt === ye && dd !== 0, 'year-end count');
+  const nj = journals.length;
+  res = await post('/admin/api/bookCashAdjust', { how: 'misc', amount: String(Math.abs(dd) + 1) }, A);
+  check(res.status >= 400 && journals.length === nj, 'wrong amount refused');
+  res = await post('/admin/api/bookCashAdjust', { amount: String(Math.abs(dd)) }, A);
+  check(res.status >= 400 && journals.length === nj, 'no account chosen refused');
+  res = await post('/admin/api/bookCashAdjust', { how: 'misc', amount: Math.abs(dd).toLocaleString() }, A);
+  const aj = journals[journals.length - 1];
+  check(res.status === 200 && journals.length === nj + 1 && aj.transaction_date === ye && aj.branches[0][dd < 0 ? 'debitor' : 'creditor'].account_id === (dd < 0 ? 'A%3D18' : 'A%3D13') && aj.branches[0][dd < 0 ? 'creditor' : 'debitor'].account_id === 'A%3D5' && aj.branches[0].debitor.value === Math.abs(dd), 'year-end adjust journal ' + JSON.stringify(aj));
+  await db.prepare("UPDATE kv SET v = ? WHERE k = 'bookCash'").bind(JSON.stringify(Object.assign(kvc, { counted: 1000 + 500, at: ye }))).run();
+  res = await post('/admin/api/book', {}, A);
+  res = await post('/admin/api/bookCashAdjust', { how: 'owner', amount: String(Math.abs(1500 - res.body.cash.bookAt)) }, A);
+  check(res.status >= 400 && /もう登録/.test(JSON.stringify(res.body)) && journals.length === nj + 1, 'second adjust on the same day refused ' + JSON.stringify(res.body));
+  journals.splice(nj, 1);
+  await db.prepare("DELETE FROM kv WHERE k LIKE 'mfs:%'").run();
+  await db.prepare("UPDATE kv SET v = ? WHERE k = 'bookCash'").bind(JSON.stringify(Object.assign(kvc, { counted: 1000, at: cday }))).run();
+  // 自分で入れた額が先。空にすると繰り越しに戻る
+  res = await post('/admin/api/bookCash', { open: '60,000' }, A);
+  check(res.body.cash.open === 60000 && res.body.cash.openSrc === 'input', 'own opening wins');
+  res = await post('/admin/api/bookCash', { open: '' }, A);
+  check(res.body.cash.open === 42000 && res.body.cash.openSrc === 'mf', 'cleared -> carry-forward again');
+  // 試算表が取れないときは、前年までの仕訳を足して出す（はじめの年は0から）
+  opts.noTb = true;
+  await db.prepare("DELETE FROM kv WHERE k IN ('cashOpenAuto', 'mfMaster')").run();
+  res = await post('/admin/api/book', {}, A);
+  check(res.body.cash.openSrc === '' && res.body.cash.open === null, 'no trial balance & first year -> unknown, quietly ' + JSON.stringify(res.body.cash));
+  // 前年もマネーフォワードにあれば、前年の仕訳から出す
+  opts.oldTerm = true;
+  journals.push({ id: 'OLD1', transaction_date: '2025-12-10', journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D5', value: 7000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 7000, tax_value: 0 }, remark: '現金売上' }] });
+  await db.prepare("DELETE FROM kv WHERE k IN ('cashOpenAuto', 'mfMaster')").run();
+  res = await post('/admin/api/book', {}, A);
+  check(res.body.cash.openSrc === 'books' && res.body.cash.open === 7000, 'opening from last year journals ' + JSON.stringify(res.body.cash));
+  journals.splice(journals.findIndex(j => j.id === 'OLD1'), 1);
+  opts.noTb = false; opts.oldTerm = false;
+  await db.prepare("DELETE FROM kv WHERE k IN ('cashOpenAuto', 'mfMaster')").run();
   // 現金：1月1日の残高と、数えた現金を入れると比べられる
   res = await post('/admin/api/bookCash', { open: '50,000', counted: '30,000' }, A);
   check(res.body.cash.open === 50000 && res.body.cash.counted === 30000 && res.body.cash.book === 50000 + res.body.cash.net, 'cash balance');
@@ -284,6 +340,9 @@ try {
   check(!jOf('BK3') && !res.body.issues.some(x => x.id === 'BK3'), 'meaningless pair deleted');
   res = await post('/admin/api/bookIgnore', { key: res.body.issues.find(x => x.id === 'BK9' && x.title === '10万円以上の消耗品').key }, A);
   check(!res.body.issues.some(x => x.id === 'BK9' && x.title === '10万円以上の消耗品'), 'ignore');
+  check(res.body.hidden === 1, 'hidden count');
+  res = await post('/admin/api/bookIgnore', { reset: true }, A);
+  check(res.body.hidden === 0 && res.body.issues.some(x => x.id === 'BK9' && x.title === '10万円以上の消耗品'), 'unhide');
   res = await post('/admin/api/bookAi', {}, A);
   const ai1 = res.body.issues.find(x => x.kind === 'acct' && x.id === 'BK8');
   const bkText = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
