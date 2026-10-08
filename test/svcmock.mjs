@@ -2,6 +2,7 @@
 import http from 'node:http';
 export const calls = { ai: [], sq: [], mf: [] };
 export const journals = [];
+export const txs = [];
 export const opts = { aiDelay: 0, aiFail: 0 };
 
 const jst = (ms = Date.now()) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
@@ -37,7 +38,9 @@ const ACCOUNTS = [
   { id: 'A%3D5', name: '現金', account_group: 'ASSET', available: true },
   { id: 'A%3D6', name: '事業主借', account_group: 'CAPITAL', available: true },
   { id: 'A%3D7', name: '売上高', account_group: 'REVENUE', available: true },
-  { id: 'A%3D8', name: '未払金', account_group: 'LIABILITY', available: true }
+  { id: 'A%3D8', name: '未払金', account_group: 'LIABILITY', available: true },
+  { id: 'A%3D9', name: '普通預金', account_group: 'ASSET', available: true },
+  { id: 'A%3D10', name: '通信費', account_group: 'EXPENSE', available: true }
 ];
 const TAXES = [
   { id: 'T1', name: '課仕 10%', available: true }, { id: 'T2', name: '課税仕入 10%', available: true },
@@ -52,6 +55,11 @@ function seedJournals() {
     if (i % 9 === 0) journals.push({ id: 'K' + i, transaction_date: d, journal_type: 'journal_entry', branches: [{ debitor: { account_id: 'A%3D2', value: 2000, tax_value: 200 }, creditor: { account_id: 'A%3D6', value: 2200, tax_value: 0 } }] });
   }
   journals.push({ id: 'S1', transaction_date: today, journal_type: 'journal_entry', branches: [{ debitor: { account_id: 'A%3D5', value: 1000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 1000, tax_value: 0 } }] });
+  // 口座の明細（まだ登録していないもの）：デビットカードの支払い、引き落とし、入金
+  txs.push({ id: 'TX%3D1', date: today, value: 6580, side: 'EXPENSE', content: 'VISAデビット アベノセイカ', journalizing_status: 'none', connected_account_id: 'CA1' });
+  txs.push({ id: 'TX%3D2', date: addDays(today, -3), value: 5500, side: 'EXPENSE', content: 'NTTﾋｶﾞｼﾆﾎﾝ', journalizing_status: 'none', connected_account_id: 'CA1' });
+  txs.push({ id: 'TX%3D3', date: addDays(today, -5), value: 33000, side: 'EXPENSE', content: 'ｶﾝｻｲﾃﾞﾝﾘﾖｸ', journalizing_status: 'none', connected_account_id: 'CA1' });
+  txs.push({ id: 'TX%3D4', date: addDays(today, -2), value: 120000, side: 'INCOME', content: 'ｽｸｴｱ', journalizing_status: 'none', connected_account_id: 'CA1' });
 }
 
 // Claude：system の内容で何の依頼かを見分けて、それらしい JSON を返す
@@ -63,11 +71,23 @@ function aiAnswer(body) {
     if (text.includes('結婚記念日')) return { add: '結婚記念日との｜こと、｜おめでとう｜ございます。｜くるみの｜アレルギーも｜承りました。' };
     return { add: '' };
   }
+  if (sys.includes('口座から出たお金の明細')) {
+    const ids = [...text.matchAll(/(TX%3D\d+)｜/g)].map(m => m[1]);
+    return { items: ids.map(id => ({ id: id, account: id === 'TX%3D2' ? '通信費' : id === 'TX%3D3' ? '水道光熱費' : '仕入高', rate: id === 'TX%3D1' ? '8' : '10', reason: id === 'TX%3D2' ? '電話・インターネット代なので' : '電気代なので', unsure: false })) };
+  }
+  if (sys.includes('相談相手')) return { answer: 'お店で使う｜洗剤なら｜消耗品費で｜大丈夫です。', account: '消耗品費' };
   if (sys.includes('来店前メモ')) return { memo: '2回目。｜前回も｜ランチ。｜辛いものが｜苦手。' };
   if (sys.includes('レシート')) {
     // 1枚目は日付に自信がない、2枚目からは自信あり（金額も少しずつ変える）
     const n = calls.ai.filter(c => (c.body.system || '').includes('レシート')).length;
-    return { readable: true, date: jst(), total: 6480 + (n - 1) * 100, payee: '阿倍野青果', items: 'にんじん・れんこん他', rate: '8', amount8: 0, amount10: 0, payment: 'cash', account: '仕入高', unsure: n === 1 ? ['date'] : [], note: n === 1 ? '日付の数字がかすれています' : '' };
+    return { readable: true, date: jst(), total: 6480 + (n - 1) * 100, payee: '阿倍野青果', items: 'にんじん・れんこん他', invoice_no: 'T1234567890123', rate: '8', amount8: 0, amount10: 0, payment: n === 1 ? 'cash' : 'card', account: '仕入高', reason: '料理に使う｜野菜なので', unsure: n === 1 ? ['date'] : [], note: n === 1 ? '日付の数字がかすれています' : '' };
+  }
+  if (sys.includes('相談役') && !text.includes('今週いちばん大事なこと')) {
+    const sec = text.includes('売上と経費だけ') ? '売上' : text.includes('予約と予約ページだけ') ? '予約' : 'Instagram';
+    return { items: [
+      { tone: 'info', title: sec + 'の｜気づき｜その1', body: sec + 'の｜数字の｜根拠。', todo: sec + 'で｜やること' },
+      { tone: 'good', title: sec + 'の｜気づき｜その2', body: '根拠。', todo: '今のまま' }
+    ] };
   }
   if (sys.includes('相談役')) {
     return { items: [
@@ -130,9 +150,31 @@ export function startSvcMock(port) {
         if (p === '/accounts') return send({ accounts: ACCOUNTS });
         if (p === '/taxes') return send({ taxes: TAXES });
         if (p === '/term_settings') return send({ term_settings: [{ fiscal_year: 2026, start_date: '2026-01-01', end_date: '2026-12-31', accounting_method: 'TAX_INCLUDED' }] });
+        if (p === '/transactions' && req.method === 'GET') {
+          const q = u.searchParams;
+          if (!q.get('start_date') || !q.get('end_date')) return send({ errors: [{ message: 'start_date and end_date required' }] }, 400);
+          let list = txs.filter(t => t.date >= q.get('start_date') && t.date <= q.get('end_date'));
+          if (q.get('side')) list = list.filter(t => t.side === q.get('side'));
+          if (q.get('journalizing_statuses')) list = list.filter(t => q.getAll('journalizing_statuses').includes(t.journalizing_status));
+          if (q.get('value_min')) list = list.filter(t => t.value >= Number(q.get('value_min')));
+          if (q.get('value_max')) list = list.filter(t => t.value <= Number(q.get('value_max')));
+          return send({ transactions: list, metadata: { total_count: list.length, total_pages: 1 } });
+        }
+        if (p === '/transactions/journalize' && req.method === 'POST') {
+          const b = JSON.parse(raw);
+          const t = txs.find(x => x.id === b.transaction_id);
+          if (!t || t.journalizing_status !== 'none' || !b.account_id) return send({ errors: [{ message: 'bad transaction' }] }, 400);
+          t.journalizing_status = 'registered';
+          const rate = b.tax_id === 'T3' ? 8 : b.tax_id === 'T2' ? 10 : 0;
+          const tax = rate ? Math.floor(t.value * rate / (100 + rate)) : 0;
+          const id = 'TXJ%2B' + journals.length;
+          journals.push({ id: id, transaction_id: t.id, transaction_date: t.date, journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: b.account_id, tax_id: b.tax_id, value: t.value - tax, tax_value: tax, invoice_kind: b.invoice_kind }, creditor: { account_id: 'A%3D9', value: t.value, tax_value: 0 }, remark: b.remark }] });
+          return send({ journal: { id: id } }, 201);
+        }
         if (p === '/journals' && req.method === 'GET') {
           const s = u.searchParams.get('start_date'), e = u.searchParams.get('end_date');
-          const list = journals.filter(j => j.transaction_date >= s && j.transaction_date <= e);
+          let list = journals.filter(j => j.transaction_date >= s && j.transaction_date <= e);
+          if (u.searchParams.get('transaction_ids')) list = list.filter(j => j.transaction_id === u.searchParams.get('transaction_ids'));
           return send({ journals: list, metadata: { total_count: list.length, total_pages: list.length ? 1 : 0 } });
         }
         if (p === '/journals' && req.method === 'POST') {
@@ -152,7 +194,21 @@ export function startSvcMock(port) {
           const id = decodeURIComponent(m[1]);
           const j = journals.find(x => x.id === id);
           if (!j) return send({ errors: [{ message: 'not found' }] }, 404);
-          if (req.method === 'DELETE') { journals.splice(journals.indexOf(j), 1); return send({}); }
+          if (req.method === 'DELETE') {
+            journals.splice(journals.indexOf(j), 1);
+            const t = txs.find(x => x.id === j.transaction_id);
+            if (t) t.journalizing_status = 'none';
+            return send({});
+          }
+          if (req.method === 'PUT') {
+            const nj = JSON.parse(raw).journal;
+            j.branches = nj.branches.map(b => {
+              const rate = b.debitor.tax_id === 'T3' ? 8 : b.debitor.tax_id === 'T2' ? 10 : 0;
+              const tax = rate ? Math.floor(b.debitor.value * rate / (100 + rate)) : 0;
+              return { debitor: Object.assign({}, b.debitor, { value: b.debitor.value - tax, tax_value: tax }), creditor: Object.assign({ tax_value: 0 }, b.creditor), remark: b.remark };
+            });
+            return send({ journal: { id: j.id } });
+          }
           return send({ journal: j });
         }
         if (p === '/vouchers' && req.method === 'POST') {

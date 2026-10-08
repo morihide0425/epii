@@ -202,6 +202,8 @@ async function replyFacts(env, b) {
   lines.push('ご要望（お客様の入力）：' + (noPrivate(r.note, 300) || 'なし'));
   lines.push('これまでのご来店（' + (f ? f.visits : 0) + '回）：\n' + pastText(f));
   if (f && f.memo) lines.push('お店のメモ：' + f.memo);
+  const note = await ownerNote(env);
+  if (note) lines.push('お店からClaudeへのメモ（返事に関係することだけ参考に）：' + note);
   const key = 'reply:' + kind + ':' + id + ':' + mode + (mode === 'offer' && b.offer ? ':' + b.offer.date + ' ' + b.offer.time : '');
   return { key: key, text: lines.join('\n') };
 }
@@ -604,72 +606,168 @@ function pickTax(taxes, rate) {
   list.sort((x, y) => x.name.length - y.name.length);
   return list[0] ? list[0].id : null;
 }
-const PAY_ACCOUNTS = [['現金', '現金'], ['事業主借', '個人のお金・カード（事業主借）'], ['未払金', '事業用のカード（未払金）'], ['普通預金', '口座から（普通預金）'], ['小口現金', '小口現金']];
+// 支払い方法（会計が分からなくても選べる言葉で）。debit は口座の明細と結びつけて、二重に登録しない
+const PAY_KINDS = [
+  { kind: 'debit', label: 'デビットカード・口座から', help: '事業用の口座から出たお金です。口座の明細と結びつけるので、二重には登録されません。', account: '普通預金' },
+  { kind: 'cash', label: '現金（お店のお金）', help: 'レジやお店の財布から払ったとき。', account: '現金' },
+  { kind: 'own', label: '自分のお金・個人のカード', help: '自分の財布や個人のカードで払ったとき（事業主借で登録します）。', account: '事業主借' }
+];
 function payOptions(m) {
-  return PAY_ACCOUNTS.map(p => { const a = m.accounts.find(x => x.name === p[0]); return a ? { id: a.id, name: a.name, label: p[1] } : null; }).filter(Boolean);
+  return PAY_KINDS.map(p => {
+    const a = m.accounts.find(x => x.name === p.account);
+    return a || p.kind === 'debit' ? { kind: p.kind, label: p.label, help: p.help, id: a ? a.id : '' } : null;
+  }).filter(Boolean);
 }
-function expenseOptions(m) {
-  return m.accounts.filter(a => a.group === 'EXPENSE').map(a => ({ id: a.id, name: a.name }));
+// 勘定科目のやさしい説明（画面に出し、Claude の手がかりにもする）
+const ACCOUNT_HELP = {
+  '仕入高': '料理に使う食材・飲み物・お酒', '消耗品費': '10万円未満の道具・食器・日用品・洗剤', '水道光熱費': '電気・ガス・水道',
+  '通信費': '電話・インターネット・切手', '地代家賃': 'お店の家賃', '支払手数料': '振込手数料・決済の手数料・サービスの利用料',
+  '広告宣伝費': 'チラシ・広告・ショップカード', '旅費交通費': '電車・バス・タクシー・駐車場', '接待交際費': '取引先との食事・お祝い・手土産',
+  '雑費': 'どれにも当てはまらない少額のもの', '修繕費': '設備や道具の修理', '租税公課': '印紙・税金（所得税・住民税は除く）',
+  '荷造運賃': '宅配便・送料', '新聞図書費': '本・雑誌・新聞', '福利厚生費': '従業員のための費用', '研修費': 'セミナー・講習',
+  '支払保険料': 'お店の保険', '車両費': 'ガソリン・車の維持費', 'リース料': 'リース契約の機器', '外注工賃': '外に頼んだ作業',
+  '衛生費': '清掃・衛生用品', '会議費': '打ち合わせの飲食', '諸会費': '組合・協会の会費', '減価償却費': '高い設備を年ごとに分けた費用'
+};
+async function expenseOptions(env, m) {
+  const used = {};
+  try {
+    (await env.DB.prepare('SELECT account, COUNT(*) AS n FROM mf_lines WHERE date >= ? GROUP BY account').bind(addDays(jstStamp(Date.now()).slice(0, 10), -180)).all())
+      .results.forEach(r => { used[r.account] = r.n; });
+  } catch (e) { /* まだ表がないとき */ }
+  return m.accounts.filter(a => a.group === 'EXPENSE')
+    .map(a => ({ id: a.id, name: a.name, help: ACCOUNT_HELP[a.name] || '', n: used[a.name] || 0 }))
+    .sort((x, y) => (y.n - x.n) || ((y.help ? 1 : 0) - (x.help ? 1 : 0)));
+}
+// これまでの登録（お店→科目）。Claude が科目を選ぶ手がかり
+async function accountHistory(env) {
+  const out = [];
+  const seen = {};
+  const add = (k, acc) => { const key = String(k || '').slice(0, 14); if (key && acc && !seen[key]) { seen[key] = true; out.push(key + '→' + acc); } };
+  (await env.DB.prepare("SELECT payee, account FROM receipts WHERE status IN ('ok','wait') ORDER BY created_at DESC LIMIT 80").all()).results.forEach(r => add(r.payee, r.account));
+  try { (await env.DB.prepare("SELECT remark, account FROM mf_lines WHERE remark != '' ORDER BY date DESC LIMIT 300").all()).results.forEach(r => add(r.remark, r.account)); } catch (e) { /* 何もしない */ }
+  return out.slice(0, 40);
+}
+// お店がClaudeに伝えておくこと（どの下書き・分析にも添える）
+async function ownerNote(env) {
+  const v = await kvGet(env, 'aiNote');
+  return v && v.text ? noPrivate(v.text, 1000) : '';
 }
 
-// 1か月分の経費（仕訳から経費の科目だけを集める。日付ごと・科目ごと）
+/* ---------- マネーフォワードのデータを手元に置く ----------
+ * 経費の仕訳は月ごとに取り込んで表（mf_lines）に置く。今月は10分、先月は6時間、それより前は7日たったら取り直す（差分は月単位）
+ */
 async function mfMonth(env, ym, maxAge) {
-  const key = 'mfm:' + ym;
-  const saved = await kvGet(env, key);
-  if (saved && Date.now() - saved.at < maxAge) return saved;
-  const m = await mfMaster(env);
-  const acc = {};
-  m.accounts.forEach(a => { acc[a.id] = a; });
-  const gross = m.method !== 'TAX_EXCLUDED';
-  const sums = {};
-  for (let page = 1; page <= 20; page++) {
-    const j = await mfApi(env, 'GET', '/journals', { start_date: ym + '-01', end_date: monthLast(ym), per_page: 1000, page: page });
-    (j.journals || []).forEach(jr => (jr.branches || []).forEach(br => {
-      [['debitor', 1], ['creditor', -1]].forEach(x => {
-        const side = br[x[0]];
-        if (!side || !side.account_id) return;
-        const a = acc[side.account_id];
-        if (!a || a.group !== 'EXPENSE') return;
-        const v = (Number(side.value) || 0) + (gross ? Number(side.tax_value) || 0 : 0);
-        const k = jr.transaction_date + '|' + a.name;
-        sums[k] = (sums[k] || 0) + x[1] * v;
-      });
-    }));
-    const meta = j.metadata || {};
-    if (!meta.total_pages || page >= meta.total_pages) break;
+  const st = await kvGet(env, 'mfs:' + ym);
+  if (!(st && Date.now() - st.at < maxAge)) {
+    const m = await mfMaster(env);
+    const acc = {};
+    m.accounts.forEach(a => { acc[a.id] = a; });
+    const gross = m.method !== 'TAX_EXCLUDED';
+    const lines = [];
+    for (let page = 1; page <= 20; page++) {
+      const j = await mfApi(env, 'GET', '/journals', { start_date: ym + '-01', end_date: monthLast(ym), per_page: 1000, page: page });
+      (j.journals || []).forEach(jr => (jr.branches || []).forEach(br => {
+        [['debitor', 1], ['creditor', -1]].forEach(x => {
+          const side = br[x[0]];
+          if (!side || !side.account_id) return;
+          const a = acc[side.account_id];
+          if (!a || a.group !== 'EXPENSE') return;
+          const v = (Number(side.value) || 0) + (gross ? Number(side.tax_value) || 0 : 0);
+          if (v) lines.push([String(jr.id || ''), jr.transaction_date, a.name, x[1] * v, clean(br.remark || jr.memo || '', 60)]);
+        });
+      }));
+      const meta = j.metadata || {};
+      if (!meta.total_pages || page >= meta.total_pages) break;
+    }
+    const stmts = [env.DB.prepare('DELETE FROM mf_lines WHERE ym = ?').bind(ym)];
+    lines.forEach(l => stmts.push(env.DB.prepare('INSERT INTO mf_lines (jid, date, ym, account, value, remark) VALUES (?, ?, ?, ?, ?, ?)').bind(l[0], l[1], ym, l[2], l[3], l[4])));
+    for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));
+    await kvPut(env, 'mfs:' + ym, { at: Date.now(), n: lines.length });
   }
-  const out = { at: Date.now(), rows: Object.keys(sums).filter(k => sums[k]).map(k => { const p = k.split('|'); return [p[0], p[1], sums[k]]; }) };
-  await kvPut(env, key, out);
-  return out;
+  const rows = (await env.DB.prepare('SELECT date, account, value, remark FROM mf_lines WHERE ym = ?').bind(ym).all()).results;
+  return { rows: rows.map(r => [r.date, r.account, r.value, r.remark]) };
 }
+async function mfTouched(env, date) { await env.DB.prepare('DELETE FROM kv WHERE k = ?').bind('mfs:' + String(date).slice(0, 7)).run(); }
 const FOOD = /仕入/;
+
+/* ---------- 口座の明細（デビットカード・引き落とし） ---------- */
+// レシートと同じ金額で、まだ登録していない口座の明細を探す（支払った日の2日前〜7日後）
+async function mfFindTx(env, amount, date) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const end = addDays(date, 7) > today ? today : addDays(date, 7);
+  const j = await mfApi(env, 'GET', '/transactions', { start_date: addDays(date, -2), end_date: end, side: 'EXPENSE', journalizing_statuses: 'none', value_min: amount, value_max: amount, per_page: 50 });
+  const list = (j.transactions || []).filter(t => Number(t.value) === amount && (!t.side || t.side === 'EXPENSE') && (!t.journalizing_status || t.journalizing_status === 'none'));
+  list.sort((a, b) => Math.abs(diffDays(date, a.date)) - Math.abs(diffDays(date, b.date)));
+  return list[0] || null;
+}
+// 明細から仕訳を作る（口座の科目はマネーフォワードが決める）。8%と10%が混ざるときは、あとで2行に分ける
+async function mfFromTx(env, m, tx, f) {
+  const body = { transaction_id: tx.id, account_id: f.accountId, remark: f.remark };
+  const tax = pickTax(m.taxes, f.rate === 'mixed' ? '8' : f.rate);
+  if (tax) body.tax_id = tax;
+  if (f.invoice) body.invoice_kind = 'INVOICE_KIND_QUALIFIED';
+  const r = await mfApi(env, 'POST', '/transactions/journalize', null, body);
+  let jid = (r.journal && r.journal.id) || r.journal_id || (r.journals && r.journals[0] && r.journals[0].id) || '';
+  if (!jid) {
+    const j = await mfApi(env, 'GET', '/journals', { start_date: tx.date, end_date: tx.date, transaction_ids: tx.id });
+    const hit = (j.journals || []).find(x => x.transaction_id === tx.id) || (j.journals || [])[0];
+    jid = hit ? hit.id : '';
+  }
+  let check = '';
+  if (jid && f.rate === 'mixed') {
+    try {
+      const g = await mfApi(env, 'GET', '/journals/' + encodeURIComponent(jid));
+      const jr = g.journal || {};
+      const cr = ((jr.branches || [])[0] || {}).creditor || {};
+      const parts = [['8', f.amount8], ['10', f.amount - f.amount8]];
+      await mfApi(env, 'PUT', '/journals/' + encodeURIComponent(jid), null, { journal: {
+        transaction_date: jr.transaction_date || tx.date, journal_type: jr.journal_type || 'journal_entry', memo: jr.memo || f.memo || '',
+        branches: parts.map(p => {
+          const deb = { account_id: f.accountId, value: p[1] };
+          const t = pickTax(m.taxes, p[0]);
+          if (t) deb.tax_id = t;
+          const c = { account_id: cr.account_id, value: p[1] };
+          if (cr.sub_account_id) c.sub_account_id = cr.sub_account_id;
+          return { debitor: deb, creditor: c, remark: f.remark };
+        })
+      } });
+    } catch (e) { check = '8%と10%の分け方は登録できませんでした。マネーフォワードで直してください。'; }
+  }
+  return { jid: jid, check: check };
+}
+// 写真を証憑として仕訳に添付する（予約システムには残さない）
+async function mfAttach(env, jid, date, image) {
+  if (!jid || !image) return false;
+  try {
+    await mfApi(env, 'POST', '/vouchers', null, { journal_id: jid, voucher_files: [{ file_name: 'receipt-' + date + '.jpg', file_data: String(image).replace(/^data:[^,]*,/, '') }] });
+    return true;
+  } catch (e) { console.error('証憑の添付に失敗', e && e.message); return false; }
+}
 
 /* ---------- レシートの登録（今日の画面から） ---------- */
 const RECEIPT_SYSTEM = [
-  'あなたは、小さな飲食店の経理を手伝っています。レシート・領収書の写真から、マネーフォワードに経費として登録するための内容を読み取ります。',
+  'あなたは、小さな飲食店の経理を手伝っています。店主は会計に詳しくありません。レシート・領収書の写真から、マネーフォワードの確定申告に経費として登録する内容を読み取ります。',
   '- date：支払った日を YYYY-MM-DD で。年がないときは今日に近い日付にする（未来にならないように）。和暦は西暦に直す。',
   '- total：支払った合計金額（税込、円、整数）。おつり・お預かりと間違えない。',
   '- payee：お店・会社の名前（支店名はなくてよい、20文字以内）。',
-  '- items：買ったものを短く（例「にんじん・れんこん他」、20文字以内）。',
-  '- rate：消費税の税率。食料品だけなら "8"、それ以外だけなら "10"、両方あれば "mixed"、税のかからないもの（切手・印紙・公共料金の一部など）は "none"、分からなければ "unknown"。',
+  '- items：買ったものを短く（例「にんじん・れんこん他」、20文字以内）。帳簿の「摘要」になる。',
+  '- invoice_no：インボイスの登録番号（T＋13桁の数字）。なければ空。',
+  '- rate：消費税の税率。食料品だけなら "8"、それ以外だけなら "10"、両方あれば "mixed"、税のかからないもの（切手・印紙など）は "none"、分からなければ "unknown"。',
   '- amount8・amount10：rate が "mixed" のときだけ、8%と10%それぞれの税込の金額。それ以外は 0。',
-  '- payment：支払い方法。現金 "cash"、クレジットカード "card"、QRコード・電子マネー "qr"、分からなければ "unknown"。',
-  '- account：勘定科目。必ず、渡した一覧の中から1つ選ぶ。食材・飲み物の仕入れは「仕入高」があればそれ。過去の登録に同じお店があれば、それに合わせる。',
+  '- payment：支払い方法。現金 "cash"、カード（デビット・クレジット）"card"、QRコード・電子マネー "qr"、分からなければ "unknown"。',
+  '- account：勘定科目。必ず、渡した一覧の中から1つ選ぶ（一覧の説明を参考に）。過去の登録に同じお店があれば、それに合わせる。',
+  '- reason：その科目にした理由を、会計の言葉を使わずに短く（25文字以内）。例「料理に使う野菜なので」。',
   '- unsure：読み取りに自信がない項目（"date"・"total"・"payee"・"rate"・"account" から）。',
   '- note：自信がない理由を短く（30文字以内、なければ空）。例「日付の数字がかすれています」。',
   '- readable：レシートとして読めないとき（写真がぼやけている、レシートではない）は false。'
 ].join('\n');
 const RECEIPT_SCHEMA = strSchema({
-  readable: { type: 'boolean' },
-  date: { type: 'string' },
-  total: { type: 'integer' },
-  payee: { type: 'string' },
-  items: { type: 'string' },
+  readable: { type: 'boolean' }, date: { type: 'string' }, total: { type: 'integer' }, payee: { type: 'string' },
+  items: { type: 'string' }, invoice_no: { type: 'string' },
   rate: { type: 'string', enum: ['8', '10', 'mixed', 'none', 'unknown'] },
-  amount8: { type: 'integer' },
-  amount10: { type: 'integer' },
+  amount8: { type: 'integer' }, amount10: { type: 'integer' },
   payment: { type: 'string', enum: ['cash', 'card', 'qr', 'unknown'] },
-  account: { type: 'string' },
+  account: { type: 'string' }, reason: { type: 'string' },
   unsure: { type: 'array', items: { type: 'string', enum: ['date', 'total', 'payee', 'rate', 'account'] } },
   note: { type: 'string' }
 });
@@ -680,130 +778,331 @@ function imageBlock(b) {
   const type = ['image/jpeg', 'image/png', 'image/webp'].indexOf(b.type) >= 0 ? b.type : 'image/jpeg';
   return { type: 'image', source: { type: 'base64', media_type: type, data: data } };
 }
+function accountList(expense) {
+  return expense.map(a => a.name + (a.help ? '（' + a.help + '）' : '')).join('、');
+}
 
 async function rcptList(env) {
-  const ym = jstStamp(Date.now()).slice(0, 7);
+  const now = jstStamp(Date.now());
+  const ym = now.slice(0, 7);
   const rs = await env.DB.batch([
-    env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total FROM receipts WHERE status = 'ok' AND substr(created_at, 1, 7) = ?").bind(ym),
-    env.DB.prepare("SELECT * FROM receipts WHERE status = 'ok' ORDER BY created_at DESC LIMIT 12")
+    env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total FROM receipts WHERE status IN ('ok','wait') AND substr(created_at, 1, 7) = ?").bind(ym),
+    env.DB.prepare("SELECT * FROM receipts WHERE status IN ('ok','wait') ORDER BY created_at DESC LIMIT 12"),
+    env.DB.prepare("SELECT MAX(created_at) AS last FROM receipts WHERE status IN ('ok','wait')"),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM receipts WHERE status = 'wait'")
   ]);
+  const last = rs[2].results[0].last || '';
+  const tx = await kvGet(env, 'mfTxCount');
   return {
-    count: rs[0].results[0].n, total: rs[0].results[0].total,
-    items: rs[1].results.map(r => ({ id: r.id, date: r.date, amount: r.amount, payee: r.payee, account: r.account, method: r.method, at: r.created_at }))
+    count: rs[0].results[0].n, total: rs[0].results[0].total, waiting: rs[3].results[0].n,
+    last: last, idle: last ? diffDays(last.slice(0, 10), now.slice(0, 10)) : null,
+    txCount: tx ? tx.n : 0,
+    items: rs[1].results.map(r => ({ id: r.id, date: r.date, amount: r.amount, payee: r.payee, account: r.account, method: r.method, at: r.created_at, status: r.status,
+      old: r.status === 'wait' && diffDays(r.created_at.slice(0, 10), now.slice(0, 10)) >= 7 }))
   };
 }
 async function adminRcptList(env) {
   if (!env.MF_API_KEY) return { connected: false };
+  // 口座の明細が届くのを待っているレシートを、ついでに結びつける（10分に1回まで）
+  const at = await kvGet(env, 'rcptMatchAt');
+  if (!at || Date.now() - at.at > 600000) {
+    await kvPut(env, 'rcptMatchAt', { at: Date.now() });
+    try { await rcptMatchWaiting(env); } catch (e) { console.error('明細との結びつけ', e && e.message); }
+  }
   return { connected: true, list: await rcptList(env) };
 }
 
 async function adminRcptRead(env, b) {
   const img = imageBlock(b);
   const m = await mfMaster(env);
-  const expense = expenseOptions(m);
+  const expense = await expenseOptions(env, m);
   if (!expense.length) fail('マネーフォワードに経費の勘定科目が見つかりませんでした。');
-  const past = (await env.DB.prepare("SELECT payee, account FROM receipts WHERE status = 'ok' ORDER BY created_at DESC LIMIT 60").all()).results;
-  const seen = {};
-  const hist = past.filter(p => p.payee && !seen[p.payee] && (seen[p.payee] = true)).slice(0, 20).map(p => p.payee + '→' + p.account);
+  const hist = await accountHistory(env);
+  const note = await ownerNote(env);
   const today = jstStamp(Date.now()).slice(0, 10);
   const out = await claude(env, {
     system: RECEIPT_SYSTEM, effort: 'low', maxTokens: 6000,
-    content: [img, { type: 'text', text: '今日：' + today + '\n勘定科目の一覧：' + expense.map(a => a.name).join('、') + '\n過去に登録したお店と科目：' + (hist.join('、') || 'なし') }],
+    content: [img, { type: 'text', text: '今日：' + today + '\n勘定科目の一覧：' + accountList(expense) + '\n過去に登録したお店と科目：' + (hist.join('、') || 'なし') + (note ? '\nお店からのメモ：' + note : '') }],
     schema: RECEIPT_SCHEMA
   });
   const acc = expense.find(a => a.name === out.account) || expense.find(a => FOOD.test(a.name)) || expense[0];
   const pays = payOptions(m);
   const remember = (await kvGet(env, 'rcptPay')) || {};
-  const byName = n => (pays.find(p => p.name === n) || {}).id;
-  const payId = remember[out.payment] && pays.some(p => p.id === remember[out.payment]) ? remember[out.payment]
-    : out.payment === 'card' ? byName('未払金') || byName('事業主借') || byName('現金')
-    : out.payment === 'qr' ? byName('事業主借') || byName('現金')
-    : byName('現金') || byName('事業主借');
+  const has = k => pays.some(p => p.kind === k);
+  // 事業用のカードはデビットカード。現金は前に選んだもの
+  const kind = remember[out.payment] && has(remember[out.payment]) ? remember[out.payment]
+    : out.payment === 'card' || out.payment === 'qr' ? 'debit' : has('cash') ? 'cash' : 'own';
   const total = Math.max(0, Number(out.total) || 0);
   const rate = out.rate === 'unknown' ? (FOOD.test(acc.name) ? '8' : '10') : out.rate;
+  const inv = String(out.invoice_no || '').replace(/[^T\d]/gi, '').toUpperCase();
   return {
     read: {
       readable: out.readable !== false && total > 0,
       date: isDate(out.date) && out.date <= today ? out.date : today,
-      amount: total, payee: clean(out.payee, 40), memo: clean(out.items, 40),
+      amount: total, payee: clean(out.payee, 40), memo: clean(out.items, 40), invoiceNo: /^T\d{13}$/.test(inv) ? inv : '',
       rate: rate, amount8: Number(out.amount8) || 0, amount10: Number(out.amount10) || 0,
-      payment: out.payment, accountId: acc.id, payId: payId || (pays[0] ? pays[0].id : ''),
+      payment: out.payment, accountId: acc.id, pay: kind, reason: aiText(out.reason, 60),
       unsure: (out.unsure || []).concat(out.rate === 'unknown' ? ['rate'] : []).concat(isDate(out.date) ? [] : ['date']),
       note: clean(out.note, 60)
     },
-    accounts: expense, pays: pays, taxes: { '8': !!pickTax(m.taxes, '8'), '10': !!pickTax(m.taxes, '10') }
+    accounts: expense, pays: pays
   };
 }
 
-async function adminRcptSave(env, b) {
-  const m = await mfMaster(env);
+// 画面から届いたレシートの内容を確かめる
+function rcptForm(m, expense, b) {
   const date = String(b.date || '');
   if (!isDate(date)) fail('日付を入れてください。');
   const amount = Math.round(Number(String(b.amount || '').replace(/[^\d]/g, '')));
   if (!(amount > 0 && amount < 100000000)) fail('金額を入れてください。');
-  const acc = expenseOptions(m).find(a => a.id === b.accountId);
+  const acc = expense.find(a => a.id === b.accountId);
   if (!acc) fail('勘定科目を選んでください。');
-  const pay = m.accounts.find(a => a.id === b.payId);
+  const pay = PAY_KINDS.find(p => p.kind === b.pay);
   if (!pay) fail('支払い方法を選んでください。');
   const rate = ['8', '10', 'mixed', 'none'].indexOf(b.rate) >= 0 ? b.rate : '10';
+  const amount8 = Math.round(Number(String(b.amount8 || '').replace(/[^\d]/g, '')) || 0);
+  if (rate === 'mixed' && !(amount8 > 0 && amount8 < amount)) fail('8%と10%の金額を確かめてください。');
   const payee = clean(b.payee, 40);
   const memo = clean(b.memo, 60);
-  const remark = clean([payee, memo].filter(Boolean).join(' '), 200);
-  let parts;
-  if (rate === 'mixed') {
-    const a8 = Math.round(Number(b.amount8) || 0);
-    const a10 = amount - a8;
-    if (!(a8 > 0 && a10 > 0)) fail('8%と10%の金額を確かめてください。');
-    parts = [['8', a8], ['10', a10]];
-  } else {
-    parts = [[rate, amount]];
-  }
+  const inv = String(b.invoiceNo || '').replace(/[^T\d]/gi, '').toUpperCase();
+  return {
+    date: date, amount: amount, amount8: amount8, rate: rate, accountId: acc.id, accountName: acc.name, pay: pay.kind, payLabel: pay.label,
+    payee: payee, memo: memo, invoice: /^T\d{13}$/.test(inv) ? inv : '',
+    remark: clean([payee, memo].filter(Boolean).join(' '), 200),
+    payment: ['cash', 'card', 'qr'].indexOf(b.payment) >= 0 ? b.payment : ''
+  };
+}
+// 現金・自分のお金：新しい仕訳を作る
+async function rcptJournal(env, m, f) {
+  const payName = (PAY_KINDS.find(p => p.kind === f.pay) || {}).account;
+  const pay = m.accounts.find(a => a.name === payName);
+  if (!pay) fail('マネーフォワードに「' + payName + '」の科目が見つかりませんでした。');
+  const parts = f.rate === 'mixed' ? [['8', f.amount8], ['10', f.amount - f.amount8]] : [[f.rate, f.amount]];
   const branches = parts.map(p => {
-    const tax = pickTax(m.taxes, p[0] === 'none' ? 'none' : p[0]);
-    const deb = { account_id: acc.id, value: p[1] };
+    const tax = pickTax(m.taxes, p[0]);
+    const deb = { account_id: f.accountId, value: p[1] };
     if (tax) deb.tax_id = tax;
-    return { debitor: deb, creditor: { account_id: pay.id, value: p[1] }, remark: remark };
+    if (f.invoice) deb.invoice_kind = 'INVOICE_KIND_QUALIFIED';
+    return { debitor: deb, creditor: { account_id: pay.id, value: p[1] }, remark: f.remark };
   });
-  const r = await mfApi(env, 'POST', '/journals', null, { journal: { transaction_date: date, journal_type: 'journal_entry', branches: branches, memo: 'épiiの予約管理から登録' } });
+  const r = await mfApi(env, 'POST', '/journals', null, { journal: { transaction_date: f.date, journal_type: 'journal_entry', branches: branches, memo: 'épiiの予約管理から登録' + (f.invoice ? '・登録番号 ' + f.invoice : '') } });
   const jid = (r.journal && r.journal.id) || r.id || '';
-  // 登録した金額が合っているか、取り直して確かめる（税込で記帳しているとき）
   let check = '';
   if (jid && m.method !== 'TAX_EXCLUDED') {
     try {
       const g = await mfApi(env, 'GET', '/journals/' + encodeURIComponent(jid));
       const got = ((g.journal || {}).branches || []).reduce((a, br) => a + (br.debitor ? (Number(br.debitor.value) || 0) + (Number(br.debitor.tax_value) || 0) : 0), 0);
-      if (got && got !== amount) check = 'マネーフォワード側の金額が' + '¥' + got.toLocaleString() + 'になっています。マネーフォワードで確かめてください。';
+      if (got && got !== f.amount) check = 'マネーフォワード側の金額が¥' + got.toLocaleString() + 'になっています。マネーフォワードで確かめてください。';
     } catch (e) { /* 確認できなくても登録はできている */ }
   }
-  // 写真は証憑としてマネーフォワードに添付する（予約システムには残さない）
-  let attached = false;
-  if (jid && b.image) {
-    try {
-      await mfApi(env, 'POST', '/vouchers', null, { journal_id: jid, voucher_files: [{ file_name: 'receipt-' + date + '.jpg', file_data: String(b.image).replace(/^data:[^,]*,/, '') }] });
-      attached = true;
-    } catch (e) { console.error('証憑の添付に失敗', e && e.message); }
-  }
-  await env.DB.prepare("INSERT INTO receipts (id, created_at, date, amount, payee, account, tax, method, memo, journal_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok')")
-    .bind(newId('P'), jstStamp(Date.now()), date, amount, payee, acc.name, rate, pay.name, memo, jid).run();
-  if (['cash', 'card', 'qr'].indexOf(b.payment) >= 0) {
-    const remember = (await kvGet(env, 'rcptPay')) || {};
-    remember[b.payment] = pay.id;
-    await kvPut(env, 'rcptPay', remember);
-  }
-  await env.DB.prepare('DELETE FROM kv WHERE k = ?').bind('mfm:' + date.slice(0, 7)).run();
-  return { check: check, attached: attached, list: await rcptList(env) };
+  return { jid: jid, check: check };
+}
+function rcptRow(id, f, status, jid, extra) {
+  return ["INSERT OR REPLACE INTO receipts (id, created_at, date, amount, payee, account, tax, method, memo, journal_id, status, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, jstStamp(Date.now()), f.date, f.amount, f.payee, f.accountName, f.rate, f.payLabel, f.memo, jid || '', status, JSON.stringify(Object.assign({ form: f }, extra || {}))]];
 }
 
-async function adminRcptUndo(env, b) {
-  const r = await env.DB.prepare("SELECT * FROM receipts WHERE id = ? AND status = 'ok'").bind(String(b.id || '')).first();
-  if (!r) fail('取り消すレシートが見つかりません。');
-  if (r.journal_id) await mfApi(env, 'DELETE', '/journals/' + encodeURIComponent(r.journal_id));
-  await env.DB.prepare("UPDATE receipts SET status = 'deleted' WHERE id = ?").bind(r.id).run();
-  await env.DB.prepare('DELETE FROM kv WHERE k = ?').bind('mfm:' + r.date.slice(0, 7)).run();
+async function adminRcptSave(env, b) {
+  const m = await mfMaster(env);
+  const f = rcptForm(m, await expenseOptions(env, m), b);
+  let res = { jid: '', check: '' };
+  let waiting = false;
+  let matched = '';
+  if (f.pay === 'debit') {
+    const tx = await mfFindTx(env, f.amount, f.date);
+    if (tx) { res = await mfFromTx(env, m, tx, f); matched = clean(tx.content, 40); }
+    else waiting = true;
+  } else {
+    res = await rcptJournal(env, m, f);
+  }
+  const id = newId('P');
+  if (waiting) {
+    // 口座の明細がまだ届いていない：写真といっしょに預かり、明細が届いたら登録する（登録したら写真は消す）
+    const row = rcptRow(id, f, 'wait', '', {});
+    await env.DB.batch([
+      env.DB.prepare(row[0]).bind(...row[1]),
+      env.DB.prepare('INSERT OR REPLACE INTO receipt_photos (id, img) VALUES (?, ?)').bind(id, String(b.image || '').replace(/^data:[^,]*,/, '').slice(0, 1900000))
+    ]);
+  } else {
+    const attached = await mfAttach(env, res.jid, f.date, b.image);
+    const row = rcptRow(id, f, 'ok', res.jid, { matched: matched });
+    await env.DB.prepare(row[0]).bind(...row[1]).run();
+    res.attached = attached;
+  }
+  if (f.payment) {
+    const remember = (await kvGet(env, 'rcptPay')) || {};
+    remember[f.payment] = f.pay;
+    await kvPut(env, 'rcptPay', remember);
+  }
+  await mfTouched(env, f.date);
+  return { check: res.check, attached: !!res.attached, waiting: waiting, matched: matched, list: await rcptList(env) };
+}
+
+// 明細を待っているレシートを、届いた明細と結びつけて登録する（画面を開いたとき・定期実行）
+async function rcptMatchWaiting(env) {
+  if (!env.MF_API_KEY) return 0;
+  const rows = (await env.DB.prepare("SELECT * FROM receipts WHERE status = 'wait' ORDER BY created_at LIMIT 20").all()).results;
+  if (!rows.length) return 0;
+  const m = await mfMaster(env);
+  let n = 0;
+  for (const r of rows) {
+    const d = JSON.parse(r.data || '{}');
+    const f = d.form;
+    if (!f) continue;
+    const tx = await mfFindTx(env, f.amount, f.date);
+    if (!tx) continue;
+    const res = await mfFromTx(env, m, tx, f);
+    const ph = await env.DB.prepare('SELECT img FROM receipt_photos WHERE id = ?').bind(r.id).first();
+    await mfAttach(env, res.jid, f.date, ph ? ph.img : '');
+    await env.DB.batch([
+      env.DB.prepare("UPDATE receipts SET status = 'ok', journal_id = ?, data = ? WHERE id = ?").bind(res.jid, JSON.stringify(Object.assign(d, { matched: clean(tx.content, 40) })), r.id),
+      env.DB.prepare('DELETE FROM receipt_photos WHERE id = ?').bind(r.id)
+    ]);
+    await mfTouched(env, f.date);
+    n++;
+  }
+  return n;
+}
+// 明細を待たずに登録する（口座の明細が来ないとき。普通預金で登録）
+async function adminRcptForce(env, b) {
+  const r = await env.DB.prepare("SELECT * FROM receipts WHERE id = ? AND status = 'wait'").bind(String(b.id || '')).first();
+  if (!r) fail('レシートが見つかりません。画面を更新してください。');
+  const m = await mfMaster(env);
+  const d = JSON.parse(r.data || '{}');
+  const bank = m.accounts.find(a => a.name === '普通預金');
+  if (!bank) fail('マネーフォワードに「普通預金」の科目が見つかりませんでした。');
+  const parts = d.form.rate === 'mixed' ? [['8', d.form.amount8], ['10', d.form.amount - d.form.amount8]] : [[d.form.rate, d.form.amount]];
+  const rr = await mfApi(env, 'POST', '/journals', null, { journal: { transaction_date: d.form.date, journal_type: 'journal_entry', memo: 'épiiの予約管理から登録', branches: parts.map(p => {
+    const deb = { account_id: d.form.accountId, value: p[1] };
+    const t = pickTax(m.taxes, p[0]);
+    if (t) deb.tax_id = t;
+    return { debitor: deb, creditor: { account_id: bank.id, value: p[1] }, remark: d.form.remark };
+  }) } });
+  const jid = (rr.journal && rr.journal.id) || rr.id || '';
+  const ph = await env.DB.prepare('SELECT img FROM receipt_photos WHERE id = ?').bind(r.id).first();
+  await mfAttach(env, jid, d.form.date, ph ? ph.img : '');
+  await env.DB.batch([
+    env.DB.prepare("UPDATE receipts SET status = 'ok', journal_id = ? WHERE id = ?").bind(jid, r.id),
+    env.DB.prepare('DELETE FROM receipt_photos WHERE id = ?').bind(r.id)
+  ]);
+  await mfTouched(env, d.form.date);
   return { list: await rcptList(env) };
 }
 
-/* ---------- 売上・経費の分析 ---------- */
+async function adminRcptUndo(env, b) {
+  const r = await env.DB.prepare("SELECT * FROM receipts WHERE id = ? AND status IN ('ok','wait')").bind(String(b.id || '')).first();
+  if (!r) fail('取り消すレシートが見つかりません。');
+  const d = JSON.parse(r.data || '{}');
+  if (r.status === 'ok' && r.journal_id) {
+    // 口座の明細から作った仕訳は、消すと明細が「まだ登録していない」に戻る
+    await mfApi(env, 'DELETE', '/journals/' + encodeURIComponent(r.journal_id));
+  }
+  await env.DB.batch([
+    env.DB.prepare("UPDATE receipts SET status = 'deleted' WHERE id = ?").bind(r.id),
+    env.DB.prepare('DELETE FROM receipt_photos WHERE id = ?').bind(r.id)
+  ]);
+  await mfTouched(env, r.date);
+  void d;
+  return { list: await rcptList(env) };
+}
+
+/* ---------- まだ登録していない口座の明細（引き落とし・デビットカード） ---------- */
+const TX_SYSTEM = [
+  'あなたは、小さな飲食店の経理を手伝っています。店主は会計に詳しくありません。',
+  '銀行口座から出たお金の明細（デビットカードの支払い・引き落とし・振込）の内容から、経費の勘定科目を選びます。',
+  '- account：必ず渡した一覧の中から1つ。過去の登録に同じ相手があれば合わせる。',
+  '- rate：消費税。食材・飲み物なら "8"、ほとんどの経費は "10"、税のかからないもの（振込手数料以外の税金・保険料・家賃の一部など）は "none"。',
+  '- reason：理由を会計の言葉を使わずに短く（25文字以内）。',
+  '- unsure：明細の名前だけでは分からないとき true（例：個人名への振込、略称で分からない）。'
+].join('\n');
+async function adminMfTx(env, b) {
+  if (!env.MF_API_KEY) return { connected: false };
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const m = await mfMaster(env);
+  const j = await mfApi(env, 'GET', '/transactions', { start_date: addDays(today, -60), end_date: today, side: 'EXPENSE', journalizing_statuses: 'none', order: 'desc', per_page: 200 });
+  let list = (j.transactions || []).filter(t => (!t.side || t.side === 'EXPENSE') && (!t.journalizing_status || t.journalizing_status === 'none'))
+    .map(t => ({ id: String(t.id), date: t.date, amount: Number(t.value) || 0, content: clean(t.content, 60) }))
+    .filter(t => t.amount > 0).sort((a, x) => x.date.localeCompare(a.date));
+  await kvPut(env, 'mfTxCount', { n: list.length, at: Date.now() });
+  // レシートを預かっている（明細を待っている）ものは、レシートの側で登録するので印を付ける
+  const waits = (await env.DB.prepare("SELECT amount FROM receipts WHERE status = 'wait'").all()).results.map(r => r.amount);
+  list = list.slice(0, 30);
+  list.forEach(t => { t.receipt = waits.indexOf(t.amount) >= 0; });
+  const expense = await expenseOptions(env, m);
+  // Claude の科目の提案（作ってあるものは使い回す）
+  const keys = list.map(t => 'tx:' + t.id);
+  const hits = {};
+  if (keys.length) (await env.DB.prepare('SELECT k, v FROM ai_cache WHERE k IN (' + keys.map(() => '?').join(',') + ')').bind(...keys).all()).results
+    .forEach(r => { try { hits[r.k.slice(3)] = JSON.parse(r.v); } catch (e) { /* 何もしない */ } });
+  const need = list.filter(t => !hits[t.id] && !t.receipt);
+  if (need.length && env.ANTHROPIC_API_KEY && b.suggest !== false) {
+    try {
+      const hist = await accountHistory(env);
+      const out = await claude(env, {
+        system: TX_SYSTEM, effort: 'low', maxTokens: 8000,
+        content: [{ type: 'text', text: '勘定科目の一覧：' + accountList(expense) + '\n過去に登録した相手と科目：' + (hist.join('、') || 'なし') +
+          '\n\n明細（id｜日付｜内容｜金額）：\n' + need.map(t => t.id + '｜' + t.date + '｜' + t.content + '｜¥' + t.amount).join('\n') }],
+        schema: strSchema({ items: { type: 'array', items: strSchema({ id: { type: 'string' }, account: { type: 'string' }, rate: { type: 'string', enum: ['8', '10', 'none'] }, reason: { type: 'string' }, unsure: { type: 'boolean' } }) } })
+      });
+      for (const x of out.items || []) {
+        const a = expense.find(e => e.name === x.account);
+        if (!a || !need.some(t => t.id === x.id)) continue;
+        hits[x.id] = { accountId: a.id, rate: x.rate, reason: aiText(x.reason, 60), unsure: !!x.unsure };
+        await aiCachePut(env, 'tx:' + x.id, '', hits[x.id]);
+      }
+    } catch (e) { if (!e.userFacing) throw e; }
+  }
+  list.forEach(t => { t.ai = hits[t.id] || null; });
+  return { connected: true, list: list, accounts: expense };
+}
+async function adminMfTxSave(env, b) {
+  const m = await mfMaster(env);
+  const expense = await expenseOptions(env, m);
+  const acc = expense.find(a => a.id === b.accountId);
+  if (!acc) fail('勘定科目を選んでください。');
+  const tx = { id: String(b.id || ''), date: String(b.date || ''), content: clean(b.content, 60) };
+  if (!tx.id || !isDate(tx.date)) fail('明細が見つかりません。画面を更新してください。');
+  const rate = ['8', '10', 'none'].indexOf(b.rate) >= 0 ? b.rate : '10';
+  await mfFromTx(env, m, tx, { accountId: acc.id, rate: rate, remark: clean(b.memo || tx.content, 200) });
+  await mfTouched(env, tx.date);
+  const left = await kvGet(env, 'mfTxCount');
+  if (left && left.n) await kvPut(env, 'mfTxCount', { n: left.n - 1, at: left.at });
+  return { ok: true };
+}
+
+/* ---------- Claudeに相談（勘定科目・支払い方法など） ---------- */
+const ASK_SYSTEM = [
+  'あなたは、会計に詳しくない飲食店の店主の相談相手です。マネーフォワードで確定申告をしています。事業用のカードはデビットカードです。',
+  '- やさしい言葉で、3文以内で答える。会計の言葉を使うときは、ひとことで説明を添える。',
+  '- 勘定科目を聞かれたら、渡した一覧の中から1つおすすめを account に入れる（なければ空）。',
+  '- 迷うものは「どちらでも大きな問題はない」など安心できる言い方で。税金の最終的な判断が必要なときだけ、税理士や税務署への確認をすすめる。',
+  '- ' + AI_BREAK_RULE
+].join('\n');
+async function adminAiAsk(env, b) {
+  const q = clean(b.question, 300);
+  if (!q) fail('聞きたいことを入れてください。');
+  const m = env.MF_API_KEY ? await mfMaster(env) : { accounts: [] };
+  const expense = env.MF_API_KEY ? await expenseOptions(env, m) : [];
+  const note = await ownerNote(env);
+  const ctx = b.context || {};
+  const facts = [
+    '勘定科目の一覧：' + (accountList(expense) || 'なし'),
+    note ? 'お店からのメモ：' + note : '',
+    '相談しているもの：' + [ctx.payee, ctx.content, ctx.items, ctx.amount ? '¥' + num0(ctx.amount) : '', ctx.date, ctx.account ? '今の科目：' + ctx.account : '', ctx.pay ? '支払い方法：' + ctx.pay : ''].filter(Boolean).map(x => clean(x, 80)).join('、')
+  ].filter(Boolean).join('\n');
+  const msgs = [];
+  (Array.isArray(b.history) ? b.history : []).slice(-4).forEach(h => { msgs.push('店主：' + clean(h.q, 300)); msgs.push('あなた：' + plain(clean(h.a, 400))); });
+  const out = await claude(env, {
+    system: ASK_SYSTEM, effort: 'low', maxTokens: 4000,
+    content: [{ type: 'text', text: facts + (msgs.length ? '\n\nここまでのやりとり：\n' + msgs.join('\n') : '') + '\n\n店主の質問：' + q }],
+    schema: strSchema({ answer: { type: 'string' }, account: { type: 'string' } })
+  });
+  const a = expense.find(e => e.name === out.account);
+  return { answer: aiText(out.answer, 400), accountId: a ? a.id : '', account: a ? a.name : '' };
+}
+function num0(v) { return (Number(String(v).replace(/[^\d]/g, '')) || 0).toLocaleString(); }
+
+/* ---------- 売上・経費の数字 ---------- */
 function moneyPeriod(key, today) {
   const cur = today.slice(0, 7);
   if (key === 'last') {
@@ -821,7 +1120,6 @@ function moneyPeriod(key, today) {
   const day = Math.min(Number(today.slice(8)), Number(monthLast(pv).slice(8)));
   return { key: 'month', from: cur + '-01', to: today, prevFrom: pv + '-01', prevTo: pv + '-' + pad(day), label: '今月（' + Number(today.slice(8)) + '日まで）', prevLabel: '先月の同じ日まで' };
 }
-
 async function salesSums(env, from, to) {
   const r = await env.DB.prepare(
     "SELECT COALESCE(SUM(amount - refunded), 0) AS sales, COALESCE(SUM(CASE WHEN link IN ('auto','res') THEN amount - refunded ELSE 0 END), 0) AS res, " +
@@ -834,6 +1132,7 @@ async function salesSums(env, from, to) {
 }
 function expenseSums(monthsData, from, to) {
   const by = {};
+  const payees = {};
   let total = 0;
   let food = 0;
   monthsData.forEach(md => (md ? md.rows : []).forEach(x => {
@@ -841,8 +1140,30 @@ function expenseSums(monthsData, from, to) {
     by[x[1]] = (by[x[1]] || 0) + x[2];
     total += x[2];
     if (FOOD.test(x[1])) food += x[2];
+    const p = String(x[3] || '').split(/\s/)[0].slice(0, 14);
+    if (p) payees[p] = (payees[p] || 0) + x[2];
   }));
-  return { total: total, food: food, accounts: Object.keys(by).map(k => ({ name: k, value: by[k] })).filter(x => x.value).sort((a, b) => b.value - a.value) };
+  return {
+    total: total, food: food,
+    accounts: Object.keys(by).map(k => ({ name: k, value: by[k] })).filter(x => x.value).sort((a, b) => b.value - a.value),
+    payees: Object.keys(payees).map(k => ({ name: k, value: payees[k] })).filter(x => x.value > 0).sort((a, b) => b.value - a.value).slice(0, 8)
+  };
+}
+function mfAge(ym, cur, force) {
+  return force && ym >= addMonths(cur, -1) ? 0 : ym === cur ? 600000 : ym === addMonths(cur, -1) ? 6 * 3600000 : 7 * 86400000;
+}
+async function loadMoneyData(env, months, force) {
+  const f = features(env);
+  const cur = jstStamp(Date.now()).slice(0, 7);
+  let sqErr = '';
+  let mfErr = '';
+  if (f.square) { try { await sqEnsure(env, months, force ? 0 : 600000); } catch (e) { if (!e.userFacing) throw e; sqErr = e.message; } }
+  const mfData = {};
+  if (f.mf) {
+    try { await eachLimit(months, 3, async ym => { mfData[ym] = await mfMonth(env, ym, mfAge(ym, cur, force)); }); }
+    catch (e) { if (!e.userFacing) throw e; mfErr = e.message; }
+  }
+  return { sqErr: sqErr, mfErr: mfErr, mf: mfData, hasSales: f.square && !sqErr, hasExpense: f.mf && !mfErr };
 }
 
 async function adminMoney(env, b) {
@@ -853,97 +1174,127 @@ async function adminMoney(env, b) {
   const chartMonths = [];
   for (let i = 5; i >= 0; i--) chartMonths.push(addMonths(cur, -i));
   const need = monthsBetween(P.prevFrom < chartMonths[0] + '-01' ? P.prevFrom : chartMonths[0] + '-01', today);
-  let sqErr = '';
-  let mfErr = '';
-  if (f.square) {
-    try { await sqEnsure(env, need, b.force ? 0 : 600000); } catch (e) { if (!e.userFacing) throw e; sqErr = e.message; }
-  }
-  const mfData = {};
-  if (f.mf) {
-    try {
-      await eachLimit(need, 3, async ym => { mfData[ym] = await mfMonth(env, ym, b.force && ym >= addMonths(cur, -1) ? 0 : ym === cur ? 600000 : ym === addMonths(cur, -1) ? 6 * 3600000 : 7 * 86400000); });
-    } catch (e) { if (!e.userFacing) throw e; mfErr = e.message; }
-  }
-  const all = Object.values(mfData);
+  const D = await loadMoneyData(env, need, b.force);
+  const all = Object.values(D.mf);
   const [now, prev] = await Promise.all([salesSums(env, P.from, P.to), salesSums(env, P.prevFrom, P.prevTo)]);
   const ex = expenseSums(all, P.from, P.to);
   const exPrev = expenseSums(all, P.prevFrom, P.prevTo);
   const months = await Promise.all(chartMonths.map(async ym => {
     const s = await salesSums(env, ym + '-01', monthLast(ym));
-    return { ym: ym, sales: s.sales, expense: mfData[ym] ? expenseSums([mfData[ym]], ym + '-01', monthLast(ym)).total : null };
+    return { ym: ym, sales: s.sales, expense: D.mf[ym] ? expenseSums([D.mf[ym]], ym + '-01', monthLast(ym)).total : null };
   }));
-  const insight = await kvGet(env, 'aiMoney');
   const st = (await kvGet(env, 'sqMonths')) || {};
   return {
-    features: f, sqErr: sqErr, mfErr: mfErr, period: P,
+    features: f, sqErr: D.sqErr, mfErr: D.mfErr, period: P,
     now: Object.assign(now, { expense: ex.total, food: ex.food }),
     prev: Object.assign(prev, { expense: exPrev.total, food: exPrev.food }),
-    expenses: ex.accounts, months: months,
-    hasExpense: f.mf && !mfErr, hasSales: f.square && !sqErr,
-    insight: insight, syncedAt: st[cur] ? jstStamp(st[cur]) : ''
+    expenses: ex.accounts, payees: ex.payees, months: months,
+    hasExpense: D.hasExpense, hasSales: D.hasSales,
+    insight: await kvGet(env, 'ai:money'), syncedAt: st[cur] ? jstStamp(st[cur]) : ''
   };
 }
 
-// Claude に渡す数字（お客様の名前・電話は入れない）
-async function moneyFacts(env) {
+/* ---------- 分析：まとめ（全体）と、予約・Instagram・売上経費ごとの気づき ----------
+ * Claude は前のやりとりを覚えていないので、毎回「前回の気づきとやること」と「お店からのメモ」を添えて、続きとして考えてもらう
+ */
+async function factsHead(env) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const s = await getSettings(env);
+  const note = await ownerNote(env);
+  return [
+    '今日：' + jdLong(today),
+    'お店：大阪・阿倍野の薬膳レストラン、' + s.seats + '席、店主ひとり。予約はLINEのリクエスト制（お店が承認して確定）。',
+    'いつもの営業：' + WD.split('').map((w, i) => w + '曜 ' + ((s.weekly[String(i)] || []).map(k => sessionLabel(s, k)).join('・') || '休み')).join('、'),
+    note ? 'お店からのメモ（覚えておいてほしいこと）：' + note : ''
+  ].filter(Boolean).join('\n');
+}
+async function factsMoney(env) {
   const f = features(env);
   const today = jstStamp(Date.now()).slice(0, 10);
   const cur = today.slice(0, 7);
   const s = await getSettings(env);
-  const lines = ['今日：' + jdLong(today), 'お店：' + s.seats + '席、店主ひとり。予約はLINEのリクエスト制（お店が承認して確定）。'];
-  lines.push('いつもの営業：' + WD.split('').map((w, i) => w + '曜 ' + ((s.weekly[String(i)] || []).map(k => sessionLabel(s, k)).join('・') || '休み')).join('、'));
-  lines.push('締切：予約は' + s.cutoff.days + '日前、変更は' + s.changeCutoff.days + '日前、ネットでのキャンセルは' + s.cancelDays + '日前まで。受付は' + (s.openUntil ? jdLong(s.openUntil) + 'まで' : s.aheadDays + '日先まで'));
   const months = [];
   for (let i = 5; i >= 0; i--) months.push(addMonths(cur, -i));
-  if (f.square) { try { await sqEnsure(env, months, 600000); } catch (e) { lines.push('Squareの取り込みエラー：' + e.message); } }
-  const mfData = {};
-  if (f.mf) {
-    try { await eachLimit(months, 3, async ym => { mfData[ym] = await mfMonth(env, ym, ym === cur ? 600000 : 6 * 3600000); }); }
-    catch (e) { lines.push('マネーフォワードの取り込みエラー：' + e.message); }
-  }
-  lines.push('', '【月ごと】（売上はSquareのレジ、経費はマネーフォワード。今月は今日まで）');
+  const D = await loadMoneyData(env, months, false);
+  const lines = ['【売上と経費】売上はSquareのレジ、経費はマネーフォワードの仕訳。'];
+  if (D.sqErr) lines.push('Squareの取り込みエラー：' + D.sqErr);
+  if (D.mfErr) lines.push('マネーフォワードの取り込みエラー：' + D.mfErr);
+  if (!D.hasSales) lines.push('売上のデータはありません。');
+  if (!D.hasExpense) lines.push('経費のデータはありません。');
+  lines.push('月ごと（今月は今日まで）：');
   for (const ym of months) {
     const x = await salesSums(env, ym + '-01', ym === cur ? today : monthLast(ym));
-    const e = mfData[ym] ? expenseSums([mfData[ym]], ym + '-01', monthLast(ym)) : null;
-    lines.push(ym + '：' + (f.square ? '売上 ¥' + x.sales.toLocaleString() + '（予約あり ¥' + x.res.toLocaleString() + '・予約なしの会計 ' + x.walkN + '件 ¥' + x.walk.toLocaleString() + '）' : '売上データなし') +
-      '、予約の来店 ' + x.groups + '組 ' + x.guests + '名' +
-      (e ? '、経費 ¥' + e.total.toLocaleString() + '（食材の仕入れ ¥' + e.food.toLocaleString() + '）、内訳：' + e.accounts.slice(0, 6).map(a => a.name + ' ¥' + a.value.toLocaleString()).join('・') : ''));
+    const e = D.mf[ym] ? expenseSums([D.mf[ym]], ym + '-01', monthLast(ym)) : null;
+    const parts = [ym];
+    if (D.hasSales) parts.push('売上 ¥' + x.sales.toLocaleString() + '（会計 ' + x.payments + '件、1会計あたり ¥' + (x.payments ? Math.round(x.sales / x.payments) : 0).toLocaleString() +
+      '、予約の会計 ¥' + x.res.toLocaleString() + '、予約なしの会計 ' + x.walkN + '件 ¥' + x.walk.toLocaleString() + '）');
+    parts.push('予約の来店 ' + x.groups + '組 ' + x.guests + '名' + (D.hasSales && x.guests ? '（予約の1人あたり ¥' + Math.round(x.res / x.guests).toLocaleString() + '）' : ''));
+    if (e) parts.push('経費 ¥' + e.total.toLocaleString() + '（食材の仕入れ ¥' + e.food.toLocaleString() + (D.hasSales && x.sales ? '、食材費の割合 ' + Math.round(e.food / x.sales * 100) + '%' : '') + '）、科目別：' +
+      e.accounts.slice(0, 8).map(a => a.name + ' ¥' + a.value.toLocaleString()).join('・'));
+    if (D.hasSales && e) parts.push('残り（売上－経費）¥' + (x.sales - e.total).toLocaleString());
+    lines.push('・' + parts.join('、'));
   }
   const P = moneyPeriod('month', today);
   const a = await salesSums(env, P.from, P.to);
   const b = await salesSums(env, P.prevFrom, P.prevTo);
-  lines.push('今月（' + P.to.slice(8) + '日まで）と先月の同じ日まで：売上 ¥' + a.sales.toLocaleString() + ' / ¥' + b.sales.toLocaleString() + '、予約の来店 ' + a.guests + '名 / ' + b.guests + '名');
+  lines.push('今月（' + Number(P.to.slice(8)) + '日まで）と先月の同じ日まで：売上 ¥' + a.sales.toLocaleString() + ' / ¥' + b.sales.toLocaleString() + '、予約の来店 ' + a.guests + '名 / ' + b.guests + '名');
+  if (D.hasExpense) {
+    const all = Object.values(D.mf);
+    const p3 = expenseSums(all, addMonths(cur, -3) + '-01', today);
+    if (p3.payees.length) lines.push('直近3か月の主な支払先：' + p3.payees.map(x => x.name + ' ¥' + x.value.toLocaleString()).join('、'));
+  }
   // 曜日・時間帯ごと（直近8週）
   const from8 = addDays(today, -56);
   const rs = await env.DB.batch([
     env.DB.prepare("SELECT date, ts, amount - refunded AS v, link FROM sq_payments WHERE status = 'COMPLETED' AND amount > refunded AND date BETWEEN ? AND ?").bind(from8, today),
-    env.DB.prepare("SELECT date, session, guests, status, arrived, course_name FROM reservations WHERE date BETWEEN ? AND ? AND status IN ('確定','キャンセル')").bind(from8, addDays(today, -1)),
-    env.DB.prepare("SELECT c.date, c.session FROM change_requests c WHERE c.created_at >= ?").bind(from8)
+    env.DB.prepare("SELECT date, session, guests, course_name FROM reservations WHERE date BETWEEN ? AND ? AND status = '確定' AND (arrived IS NULL OR arrived != 'no')").bind(from8, addDays(today, -1))
   ]);
-  const ws = {};
   const sessOf = hm => {
     const m = toMin(hm);
     const keys = sessionKeys(s);
-    const hit = keys.find(k => toMin(s.sessions[k].open) - 30 <= m && m < toMin(s.sessions[k].close) + 90);
-    return hit || keys[keys.length - 1];
+    return keys.find(k => toMin(s.sessions[k].open) - 30 <= m && m < toMin(s.sessions[k].close) + 90) || keys[keys.length - 1];
   };
-  const cell = (d, k) => { const id = WD[weekday(d)] + '曜' + sessionLabel(s, k); return ws[id] || (ws[id] = { sales: 0, walk: 0, walkN: 0, guests: 0, cancel: 0, noshow: 0 }); };
-  rs[0].results.forEach(p => { const c = cell(p.date, sessOf(p.ts.slice(11, 16))); c.sales += p.v; if (!(p.link === 'auto' || p.link === 'res')) { c.walk += p.v; c.walkN++; } });
+  const ws = {};
+  const cell = (d, k) => { const id = WD[weekday(d)] + '曜' + sessionLabel(s, k); return ws[id] || (ws[id] = { sales: 0, n: 0, walk: 0, walkN: 0, guests: 0, days: {} }); };
+  if (D.hasSales) rs[0].results.forEach(p => { const c = cell(p.date, sessOf(p.ts.slice(11, 16))); c.sales += p.v; c.n++; c.days[p.date] = 1; if (!(p.link === 'auto' || p.link === 'res')) { c.walk += p.v; c.walkN++; } });
   const courses = {};
-  rs[1].results.forEach(r => {
+  rs[1].results.forEach(r => { const c = cell(r.date, r.session); c.guests += r.guests; courses[r.course_name] = (courses[r.course_name] || 0) + r.guests; });
+  if (D.hasSales) {
+    lines.push('直近8週の曜日・時間帯ごと（合計）：');
+    Object.keys(ws).forEach(k => { const c = ws[k]; lines.push('・' + k + '：売上 ¥' + c.sales.toLocaleString() + '（営業 ' + Object.keys(c.days).length + '回、会計 ' + c.n + '件、予約なし ' + c.walkN + '件 ¥' + c.walk.toLocaleString() + '）、予約の来店 ' + c.guests + '名'); });
+    const daily = {};
+    rs[0].results.forEach(p => { if (p.date >= addDays(today, -13)) daily[p.date] = (daily[p.date] || 0) + p.v; });
+    lines.push('直近2週間の日ごとの売上：' + Object.keys(daily).sort().map(d => jdShort(d) + ' ¥' + daily[d].toLocaleString()).join('、'));
+  }
+  lines.push('メニューごとの来店人数（直近8週）：' + (Object.keys(courses).map(k => k + ' ' + courses[k] + '名').join('、') || 'なし'));
+  const menu = (await allCourses(env)).filter(c => c.visible).map(c => c.name + ' ¥' + Number(c.price).toLocaleString() + (c.price_type === 'from' ? '〜' : ''));
+  lines.push('メニューと料金：' + menu.join('、'));
+  return lines.join('\n');
+}
+async function factsBooking(env) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const s = await getSettings(env);
+  const lines = ['【予約と予約ページ】'];
+  lines.push('締切：予約は' + s.cutoff.days + '日前、変更は' + s.changeCutoff.days + '日前、ネットでのキャンセルは' + s.cancelDays + '日前まで。受付は' + (s.openUntil ? jdLong(s.openUntil) + 'まで' : s.aheadDays + '日先まで'));
+  const from8 = addDays(today, -56);
+  const rs = await env.DB.batch([
+    env.DB.prepare("SELECT date, session, guests, status, arrived, course_name, source, created_at FROM reservations WHERE date BETWEEN ? AND ? AND status IN ('確定','キャンセル','お断り')").bind(from8, addDays(today, -1)),
+    env.DB.prepare('SELECT COUNT(*) AS n FROM change_requests WHERE created_at >= ?').bind(from8)
+  ]);
+  const ws = {};
+  const cell = (d, k) => { const id = WD[weekday(d)] + '曜' + sessionLabel(s, k); return ws[id] || (ws[id] = { guests: 0, groups: 0, cancel: 0, noshow: 0, ng: 0 }); };
+  const src = {};
+  let lead = 0, leadN = 0;
+  rs[0].results.forEach(r => {
     const c = cell(r.date, r.session);
     if (r.status === 'キャンセル') c.cancel++;
+    else if (r.status === 'お断り') c.ng++;
     else if (r.arrived === 'no') c.noshow++;
-    else { c.guests += r.guests; courses[r.course_name] = (courses[r.course_name] || 0) + r.guests; }
+    else { c.guests += r.guests; c.groups++; src[r.source || '不明'] = (src[r.source || '不明'] || 0) + 1; if (r.created_at) { lead += diffDays(r.created_at.slice(0, 10), r.date); leadN++; } }
   });
-  lines.push('', '【直近8週の曜日・時間帯ごと】（合計）');
-  Object.keys(ws).forEach(k => {
-    const c = ws[k];
-    lines.push(k + '：' + (f.square ? '売上 ¥' + c.sales.toLocaleString() + '（予約なし ' + c.walkN + '件 ¥' + c.walk.toLocaleString() + '）、' : '') + '予約の来店 ' + c.guests + '名、キャンセル ' + c.cancel + '件、来店なし ' + c.noshow + '件');
-  });
-  lines.push('メニューごとの来店人数（直近8週）：' + (Object.keys(courses).map(k => k + ' ' + courses[k] + '名').join('、') || 'なし'));
-  lines.push('予約の変更の申し込み（直近8週）：' + rs[2].results.length + '件');
-  // これからの空き
+  lines.push('直近8週の曜日・時間帯ごと（合計）：');
+  Object.keys(ws).forEach(k => { const c = ws[k]; lines.push('・' + k + '：来店 ' + c.groups + '組 ' + c.guests + '名、キャンセル ' + c.cancel + '件、来店なし ' + c.noshow + '件、満席でお断り ' + c.ng + '件'); });
+  lines.push('予約の入り方：' + Object.keys(src).map(k => k + ' ' + src[k] + '件').join('、') + (leadN ? '、平均 ' + Math.round(lead / leadN) + '日前に予約' : '') + '、変更の申し込み ' + rs[1].results[0].n + '件');
   const w = await loadWindow(env, today, addDays(today, 13));
   const idx = buildIndex(w.holds, w.blocks, s);
   const end = bookingEnd(s, today);
@@ -960,68 +1311,128 @@ async function moneyFacts(env) {
     });
     Object.keys(per).forEach(k => open.push(jdShort(d) + '（' + WD[weekday(d)] + '）' + sessionLabel(s, k) + ' 空き' + per[k] + '席'));
   }
-  lines.push('', '【これから2週間の空き】（各時間帯のいちばん空いている時間）', open.join('、') || '受付中の日がありません');
+  lines.push('これから2週間の空き（各時間帯のいちばん空いている時間）：' + (open.join('、') || '受付中の日がありません'));
   if (s.openUntil && diffDays(today, s.openUntil) <= 14) lines.push('受付の最終日が近い：' + jdLong(s.openUntil));
-  // 予約ページの閲覧（直近30日）
   try {
     const an = await adminAnalytics(env, { days: 30 });
-    lines.push('', '【予約ページ（直近30日）】開かれた ' + an.totals.opens + '回、見た人 ' + an.totals.users + '人、リクエスト ' + an.funnel.request + '人。満席・締切で選べなかった日を押した人：' + an.blocked.reduce((x, y) => x + y.users, 0) + '人');
-    lines.push('どこから：' + an.sources.slice(0, 5).map(x => x.src + ' ' + x.users + '人').join('、'));
-  } catch (e) { /* なくても続ける */ }
-  // Instagram（直近30日）
-  try {
-    const ig = await env.DB.prepare('SELECT COALESCE(SUM(reach), 0) AS reach, COUNT(*) AS days FROM ig_daily WHERE date >= ?').bind(addDays(today, -30)).first();
-    const md = await env.DB.prepare("SELECT kind, COUNT(*) AS n FROM ig_media WHERE date >= ? GROUP BY kind").bind(addDays(today, -30)).all();
-    if (ig && ig.days) lines.push('【Instagram（直近30日）】リーチ ' + ig.reach + '、' + md.results.map(x => ({ feed: '投稿', reel: 'リール', story: 'ストーリー' }[x.kind] || x.kind) + ' ' + x.n + '件').join('・'));
+    const f = an.funnel;
+    lines.push('予約ページ（直近30日）：開かれた ' + an.totals.opens + '回、見た人 ' + an.totals.users + '人、日付を選んだ ' + f.date + '人、時間 ' + f.time + '人、メニュー ' + f.course + '人、リクエスト ' + f.request + '人');
+    lines.push('満席・締切で選べなかった日：' + (an.blocked.map(x => jdShort(x.date) + (x.reason === '×' ? '満席' : x.reason) + ' ' + x.users + '人').join('、') || 'なし'));
+    lines.push('どこから：' + (an.sources.slice(0, 6).map(x => x.src + ' ' + x.users + '人').join('、') || 'なし'));
+    lines.push('メニューを見た人とリクエスト：' + (an.courses.map(x => x.name + ' ' + x.users + '人/' + x.requests + '件').join('、') || 'なし'));
+    lines.push('何度も見ているのに予約していない人：' + an.lookers.length + '人');
   } catch (e) { /* なくても続ける */ }
   return lines.join('\n');
 }
+async function factsIg(env) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const lines = ['【Instagram】'];
+  try {
+    const d = await adminIgStats(env, { days: 30 });
+    if (!d.connected) return lines.concat('Instagramはつながっていません。').join('\n');
+    const first = d.daily.find(x => x.opens > 0);
+    lines.push('直近30日：フォロワー ' + (d.account ? d.account.followers : '不明') + '人、リーチ合計 ' + d.daily.reduce((a, x) => a + (x.reach || 0), 0) +
+      '、プロフィール訪問 ' + d.daily.reduce((a, x) => a + (x.profileViews || 0), 0) + '、リンクのタップ ' + d.daily.reduce((a, x) => a + (x.linkTaps || 0), 0) +
+      '、Instagramから予約ページ ' + d.daily.reduce((a, x) => a + (x.igOpens || 0), 0) + '回');
+    lines.push('日ごと（日付｜リーチ｜予約ページを開いた回数｜ストーリー数｜投稿数）' + (first ? '。予約ページの記録は' + jdShort(first.date) + 'から' : '') + '：');
+    lines.push(d.daily.map(x => jdShort(x.date) + '｜' + (x.reach ?? '-') + '｜' + x.opens + '｜' + x.stories + '｜' + x.posts).join('、'));
+    lines.push('投稿ごと（新しい順、種類｜日時｜リーチ｜保存｜出したあと24時間の予約ページ）：');
+    (d.media || []).slice(0, 15).forEach(m => lines.push('・' + ({ feed: '投稿', reel: 'リール', story: 'ストーリー' }[m.kind] || m.kind) + '｜' + m.ts + '｜' + (m.reach ?? '-') + '｜' + (m.saves ?? '-') + '｜' + m.visits + '｜' + clean(m.caption, 30)));
+    lines.push('告知の候補（空き）：' + (d.openings.map(o => jdShort(o.date) + o.session + ' 空き' + o.left).join('、') || 'なし'));
+  } catch (e) { lines.push('Instagramのデータを読めませんでした。'); }
+  void today;
+  return lines.join('\n');
+}
 
-const MONEY_SYSTEM = [
-  'あなたは、大阪・阿倍野の小さな薬膳レストラン「épii」（店主ひとりで営業）の経営を手伝う相談役です。店主は数字や専門用語が得意ではありません。',
-  '売上（Squareのレジ）・経費（マネーフォワード）・予約・予約ページの閲覧・Instagramの数字を読み、今いちばん大事な気づきを3つ（多くても4つ）選び、それぞれに今週できる「やること」を1つ付けます。',
-  '目的は損益をよくすること：売上を増やす、食材のロスや経費を減らす、空いている席を埋める。',
+const SECTION = {
+  summary: { label: 'まとめ', focus: 'お店全体（売上・経費・予約・Instagram）を見て、今週いちばん大事なことを3つ選ぶ。できるだけ違う分野から選び、損益（売上を増やす・経費を減らす・空席を埋める）につながる順に並べる。' },
+  money: { label: '売上・経費', focus: '売上と経費だけを見る（予約ページの閲覧やInstagramには触れない）。売上の増減と理由（曜日・時間帯・予約の会計と予約なしの会計・1人あたり・1会計あたり）、経費（食材費の割合・大きい科目・増えた科目・主な支払先）、残り（売上－経費）を、数字をはっきり示して書く。3〜4つ。' },
+  booking: { label: '予約', focus: '予約と予約ページだけを見る（売上の金額やInstagramには触れない）。混む・空く曜日と時間帯、キャンセル・来店なし、満席で断った需要、予約ページのどこで離れているか、受付の期間や締切。3〜4つ。' },
+  ig: { label: 'Instagram', focus: 'Instagramだけを見る。届いている人数の動き、どんな投稿・ストーリーが予約ページにつながったか、出す頻度や時間、空きの告知。3〜4つ。' }
+};
+const ANALYSIS_SYSTEM = [
+  'あなたは、大阪・阿倍野の小さな薬膳レストラン「épii」（店主ひとりで営業）の経営を手伝う相談役です。店主は数字や会計の言葉が得意ではありません。',
+  '渡す数字を読み、気づきと、それぞれに今週できる「やること」を1つずつ書きます。',
   '',
   '書き方：',
-  '- title：何が起きているかを1文で（40文字以内）。例「食材費の割合が31%から35%に上がっています」',
-  '- body：そう言える根拠の数字を2文以内で（90文字以内）。データにないことは書かない。推測するときは「〜かもしれません」。',
+  '- title：何が起きているかを1文で（40文字以内）。数字を入れる。例「食材費の割合が31%から35%に上がっています」',
+  '- body：そう言える根拠の数字を2文以内で（100文字以内）。データにないことは書かない。推測するときは「〜かもしれません」。',
   '- todo：今週できる具体的な行動を1つ（40文字以内）。管理画面でできることなら場所も書く（例：設定＞受付、予約＞受付を止める、設定＞分析＞Instagramの文案）。良い状態なら「今のまま」でもよい。',
   '- tone：good（良い変化）、warn（気をつけたいこと）、info（参考になること）。',
   '- 専門用語（原価率・客単価・CVR・KPIなど）は使わず、「食材費の割合」「1人あたり」「予約まで進んだ割合」のように書く。',
   '- 金額は「¥12,300」、割合は「35%」と書く。',
-  '- データが少ない項目や、つながっていないサービスの項目には触れない。',
+  '- 前回の気づきとやることが渡されたら、その後どうなったかに触れてよい（同じことのくり返しは避ける）。',
+  '- データが少ない・つながっていない項目には触れない。',
   '- ' + AI_BREAK_RULE
 ].join('\n');
-const MONEY_SCHEMA = strSchema({
-  items: {
-    type: 'array',
-    items: strSchema({
-      tone: { type: 'string', enum: ['good', 'warn', 'info'] },
-      title: { type: 'string' }, body: { type: 'string' }, todo: { type: 'string' }
-    })
-  }
+const ANALYSIS_SCHEMA = strSchema({
+  items: { type: 'array', items: strSchema({ tone: { type: 'string', enum: ['good', 'warn', 'info'] }, title: { type: 'string' }, body: { type: 'string' }, todo: { type: 'string' } }) }
 });
 
-// 週のまとめ（定期実行）はじっくり、画面の「最新にする」は待たせすぎないように
-async function makeMoneyInsight(env, effort) {
-  const facts = await moneyFacts(env);
-  const out = await claude(env, { system: MONEY_SYSTEM, effort: effort || 'medium', maxTokens: 32000, timeout: 240000, content: [{ type: 'text', text: facts }], schema: MONEY_SCHEMA });
-  const items = (out.items || []).slice(0, 4).map(x => ({
+async function makeSection(env, sec, effort) {
+  const head = await factsHead(env);
+  const body = sec === 'money' ? await factsMoney(env) : sec === 'booking' ? await factsBooking(env) : sec === 'ig' ? await factsIg(env)
+    : [await factsMoney(env), await factsBooking(env), await factsIg(env)].join('\n\n');
+  const prev = await kvGet(env, 'ai:' + sec);
+  const before = prev && prev.items && prev.items.length
+    ? '\n\n前回（' + prev.at.slice(5, 10).replace('-', '/') + '）の気づきとやること：\n' + prev.items.map(x => '・' + plain(x.title) + ' → ' + plain(x.todo)).join('\n') : '';
+  const out = await claude(env, {
+    system: ANALYSIS_SYSTEM, effort: effort || 'medium', maxTokens: 32000, timeout: 240000,
+    content: [{ type: 'text', text: 'この分析で見るもの：' + SECTION[sec].focus + '\n\n' + head + '\n\n' + body + before }],
+    schema: ANALYSIS_SCHEMA
+  });
+  const items = (out.items || []).slice(0, sec === 'summary' ? 3 : 4).map(x => ({
     tone: ['good', 'warn', 'info'].indexOf(x.tone) >= 0 ? x.tone : 'info',
-    title: aiText(x.title, 120), body: aiText(x.body, 240), todo: aiText(x.todo, 120)
+    title: aiText(x.title, 120), body: aiText(x.body, 260), todo: aiText(x.todo, 120)
   }));
   const v = { at: jstStamp(Date.now()), items: items };
-  await kvPut(env, 'aiMoney', v);
+  await kvPut(env, 'ai:' + sec, v);
   return v;
 }
-async function adminMoneyAi(env) {
-  return { insight: await makeMoneyInsight(env) };
+async function adminAnalysisAi(env, b) {
+  const sec = SECTION[b.section] ? b.section : 'summary';
+  return { section: sec, insight: await makeSection(env, sec) };
+}
+// 分析のまとめ：主な数字と、Claude の気づき（4つの分野ぶん）
+async function adminDash(env) {
+  const f = features(env);
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const cur = today.slice(0, 7);
+  const P = moneyPeriod('month', today);
+  const out = { features: f, period: P };
+  if (f.square || f.mf) {
+    const D = await loadMoneyData(env, [addMonths(cur, -1), cur], false);
+    const all = Object.values(D.mf);
+    const [a, b] = await Promise.all([salesSums(env, P.from, P.to), salesSums(env, P.prevFrom, P.prevTo)]);
+    const ea = expenseSums(all, P.from, P.to), eb = expenseSums(all, P.prevFrom, P.prevTo);
+    out.money = { hasSales: D.hasSales, hasExpense: D.hasExpense, sales: a.sales, salesPrev: b.sales, expense: ea.total, expensePrev: eb.total, food: ea.food, err: D.sqErr || D.mfErr };
+  }
+  const rs = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) AS groups, COALESCE(SUM(guests), 0) AS guests FROM reservations WHERE status = '確定' AND date BETWEEN ? AND ?").bind(P.from, monthLast(cur)),
+    env.DB.prepare("SELECT COUNT(*) AS groups, COALESCE(SUM(guests), 0) AS guests FROM reservations WHERE status = '確定' AND date BETWEEN ? AND ?").bind(P.prevFrom, monthLast(addMonths(cur, -1))),
+    env.DB.prepare("SELECT COUNT(*) AS opens, COUNT(DISTINCT user_id) AS users FROM events WHERE kind = 'open' AND date >= ?").bind(addDays(today, -29)),
+    env.DB.prepare("SELECT COUNT(DISTINCT user_id) AS n FROM events WHERE kind = 'request' AND date >= ?").bind(addDays(today, -29)),
+    env.DB.prepare('SELECT COALESCE(SUM(reach), 0) AS reach, COUNT(*) AS days FROM ig_daily WHERE date >= ?').bind(addDays(today, -29)),
+    env.DB.prepare("SELECT v FROM kv WHERE k = 'igAccount'")
+  ]);
+  out.booking = { groups: rs[0].results[0].groups, guests: rs[0].results[0].guests, groupsPrev: rs[1].results[0].groups, opens: rs[2].results[0].opens, users: rs[2].results[0].users, requests: rs[3].results[0].n };
+  const acc = rs[5].results[0] ? JSON.parse(rs[5].results[0].v) : null;
+  out.ig = rs[4].results[0].days || acc ? { reach: rs[4].results[0].reach, followers: acc ? acc.followers : null } : null;
+  out.ai = {};
+  for (const sec of Object.keys(SECTION)) out.ai[sec] = await kvGet(env, 'ai:' + sec);
+  const note = await kvGet(env, 'aiNote');
+  out.note = note ? note.text : '';
+  return out;
+}
+async function adminAiNote(env, b) {
+  await kvPut(env, 'aiNote', { text: clean(b.text, 1000), at: jstStamp(Date.now()) });
+  return {};
 }
 
 /* ---------- (2) 週1回のまとめ（月曜 9:00 にお店のLINEへ） ---------- */
 async function weeklyReport(env, force) {
   const f = features(env);
-  if (!f.ai && !f.square) return { skipped: 'off' };
+  if (!f.ai && !f.square && !f.mf) return { skipped: 'off' };
   const now = jstStamp(Date.now());
   const today = now.slice(0, 10);
   const sent = await kvGet(env, 'weeklyAt');
@@ -1049,10 +1460,25 @@ async function weeklyReport(env, force) {
       if (sm.sales && ex.food) lines.push('食材費の割合 ' + Math.round(ex.food / sm.sales * 100) + '%（今月）');
     } catch (e) { /* 経費がなくても送る */ }
   }
+  // 経費の登録のお知らせ（たまっていそうなときだけ）
+  if (f.mf) {
+    const exp = [];
+    try {
+      await rcptMatchWaiting(env);
+      const L = await rcptList(env);
+      if (L.idle === null || L.idle >= 7) exp.push(L.idle === null ? 'レシートの登録がまだありません。たまったレシートは今日の画面からまとめて撮れます' : '最後にレシートを登録してから' + L.idle + '日です。たまっていたら今日の画面からまとめて撮れます');
+      const tx = await adminMfTx(env, { suggest: false });
+      if (tx.list && tx.list.length) exp.push('口座から出たお金で、まだ登録していないものが' + tx.list.length + '件あります');
+      if (L.items.some(x => x.old)) exp.push('口座の明細が見つからないレシートがあります（今日の画面＞レシートを登録）');
+    } catch (e) { console.error('週のまとめ：経費', e.message); }
+    if (exp.length) lines.push('', '【経費の登録】', ...exp.map(x => '・' + x));
+  }
   let todos = [];
   if (f.ai) {
-    try { todos = (await makeMoneyInsight(env, 'high')).items.map(x => plain(x.todo)).filter(Boolean).slice(0, 3); }
-    catch (e) { console.error('週のまとめ：分析', e.message); }
+    try {
+      const secs = await Promise.allSettled(['summary', 'money', 'booking', 'ig'].map(s => makeSection(env, s, 'high')));
+      if (secs[0].status === 'fulfilled') todos = secs[0].value.items.map(x => plain(x.todo)).filter(Boolean).slice(0, 3);
+    } catch (e) { console.error('週のまとめ：分析', e.message); }
   }
   if (todos.length) lines.push('', '【今週やること】', ...todos.map((t, i) => (i + 1) + '. ' + t));
   const url = await adminUrl(env);
@@ -1150,6 +1576,7 @@ async function adminIgDraft(env, b) {
   const today = jstStamp(Date.now()).slice(0, 10);
   const prev = await aiCacheGet(env, key);
   const draft = prev ? prev.v : {};
+  const note = await ownerNote(env);
   const ask = [
     '今日：' + jdLong(today),
     free ? '告知：空きのお知らせではない、ふだんの投稿' : '告知する空き：' + jdLong(op.date) + ' ' + op.label + (op.date === today ? '（今日）' : op.date === addDays(today, 1) ? '（明日）' : ''),
@@ -1157,7 +1584,8 @@ async function adminIgDraft(env, b) {
     '書く文：' + IG_KIND_NAME[kind] + '。' + IG_KIND_RULE[kind],
     b.image ? '料理の写真：あり（1枚目）' : '',
     b.before ? '前の案とは違う書き出しにしてください：' + plain(clean(b.before, 600)) : '',
-    needStyle ? 'style（書き方の特徴）も書いてください。' : 'style は空の配列でよい。'
+    needStyle ? 'style（書き方の特徴）も書いてください。' : 'style は空の配列でよい。',
+    note ? 'お店からのメモ（投稿に関係することだけ参考に）：' + note : ''
   ].filter(Boolean).join('\n');
   const content = [];
   if (b.image) content.push(imageBlock(b));

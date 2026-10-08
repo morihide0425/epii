@@ -1,7 +1,7 @@
 // Claude・Square・マネーフォワードの連携のテスト（仮のサーバーで動かす）
 import assert from 'node:assert';
 import { start, pushes } from './env.mjs';
-import { startSvcMock, calls, journals, opts, SVC_ENV } from './svcmock.mjs';
+import { startSvcMock, calls, journals, txs, opts, SVC_ENV } from './svcmock.mjs';
 const B = 'http://127.0.0.1:8787';
 const mock = startSvcMock(8841);
 const env = await start({ extra: Object.assign(SVC_ENV(8841), { WEEKLY_ANY_DAY: '1' }) });
@@ -90,35 +90,86 @@ try {
   check(res.body.now.food === res.body.expenses[0].value, 'food = 仕入高');
   res = await post('/admin/api/money', { period: 'month' }, A);
   check(res.body.period.key === 'month' && res.body.now.payments > 0, 'money month');
-  res = await post('/admin/api/moneyAi', {}, A);
-  check(res.body.insight.items.length === 3 && res.body.insight.items[0].todo.includes('｜'), 'insight');
-  const moneyCall = calls.ai[calls.ai.length - 1].body;
-  check(moneyCall.output_config.effort === 'medium' && JSON.stringify(moneyCall).includes('月ごと') && !JSON.stringify(moneyCall).includes('090'), 'insight facts');
+  check(res.body.payees && res.body.payees.length >= 0, 'payees');
+  const mfCalls = calls.mf.filter(c => c.startsWith('GET /journals?')).length;
+  res = await post('/admin/api/money', { period: 'last' }, A);
+  check(calls.mf.filter(c => c.startsWith('GET /journals?')).length === mfCalls, 'mf data kept on site');
+  // 分析：分野ごとに Claude の気づき。前回の気づきを添えて続きとして考える
+  res = await post('/admin/api/analysisAi', { section: 'money' }, A);
+  check(res.body.insight.items.length === 2 && res.body.insight.items[0].title.includes('売上'), 'money section');
+  let aiBody = JSON.stringify(calls.ai[calls.ai.length - 1].body);
+  check(aiBody.includes('売上と経費だけ') && aiBody.includes('科目別') && !aiBody.includes('予約ページ（直近30日）') && !aiBody.includes('090'), 'money facts only');
+  res = await post('/admin/api/aiNote', { text: '仕入れは主に阿倍野青果。電話は090-1111-2222' }, A);
+  res = await post('/admin/api/analysisAi', { section: 'money' }, A);
+  aiBody = JSON.stringify(calls.ai[calls.ai.length - 1].body);
+  check(aiBody.includes('前回') && aiBody.includes('阿倍野青果') && !aiBody.includes('1111-2222'), 'previous items + owner note (no phone)');
+  res = await post('/admin/api/analysisAi', { section: 'summary' }, A);
+  check(res.body.insight.items.length === 3 && res.body.insight.items[0].todo.includes('｜'), 'summary');
+  aiBody = JSON.stringify(calls.ai[calls.ai.length - 1].body);
+  check(aiBody.includes('【売上と経費】') && aiBody.includes('【予約と予約ページ】') && aiBody.includes('【Instagram】'), 'summary sees all');
+  res = await post('/admin/api/analysisAi', { section: 'booking' }, A);
+  check(res.body.insight.items[0].title.includes('予約'), 'booking section');
+  res = await post('/admin/api/dash', {}, A);
+  check(res.body.money.hasSales && res.body.ai.summary.items.length === 3 && res.body.ai.money && res.body.ai.booking && res.body.note.includes('阿倍野青果') && res.body.booking, 'dash');
   res = await post('/admin/api/money', { period: '3m' }, A);
-  check(res.body.insight && res.body.insight.items.length === 3, 'insight stored');
+  check(res.body.insight && res.body.insight.items.length === 2, 'money insight from section');
 
-  // レシート：読み取り → 登録 → 取り消し
+  // レシート：読み取り → 登録（現金は仕訳を作る／デビットは口座の明細と結びつける）→ 取り消し
   const img = Buffer.from('fake-jpeg-data-for-test').toString('base64');
   res = await post('/admin/api/rcptList', {}, A);
-  check(res.body.connected && res.body.list.count === 0, 'receipt list empty');
+  check(res.body.connected && res.body.list.count === 0 && res.body.list.idle === null, 'receipt list empty');
   res = await post('/admin/api/rcptRead', { image: img, type: 'image/jpeg' }, A);
-  check(res.body.read.amount === 6480 && res.body.read.payee === '阿倍野青果' && res.body.read.unsure.includes('date'), 'read ' + JSON.stringify(res.body.read));
+  check(res.body.read.amount === 6480 && res.body.read.payee === '阿倍野青果' && res.body.read.unsure.includes('date') && res.body.read.invoiceNo === 'T1234567890123' && res.body.read.reason.includes('野菜'), 'read ' + JSON.stringify(res.body.read));
   const acc = res.body.accounts.find(a => a.name === '仕入高');
-  check(res.body.read.accountId === acc.id && res.body.pays.some(p => p.name === '現金'), 'account & pays');
+  check(res.body.read.accountId === acc.id && acc.help.includes('食材') && res.body.read.pay === 'cash' && res.body.pays.some(p => p.kind === 'debit') && res.body.pays.some(p => p.kind === 'own'), 'account help & pays');
+  check(JSON.stringify(calls.ai[calls.ai.length - 1].body).includes('仕入高（料理に使う食材'), 'account help sent to Claude');
   check(calls.ai[calls.ai.length - 1].body.messages[0].content[0].type === 'image', 'image sent');
   const rd = res.body.read;
-  res = await post('/admin/api/rcptSave', { date: rd.date, amount: '6,480', payee: rd.payee, memo: rd.memo, accountId: rd.accountId, payId: rd.payId, rate: '8', payment: 'cash', image: img }, A);
-  check(res.body.list.count === 1 && res.body.list.total === 6480 && res.body.attached && !res.body.check, 'saved ' + JSON.stringify(res.body).slice(0, 200));
+  res = await post('/admin/api/rcptSave', { date: rd.date, amount: '6,480', payee: rd.payee, memo: rd.memo, accountId: rd.accountId, pay: 'cash', rate: '8', payment: 'cash', invoiceNo: rd.invoiceNo, image: img }, A);
+  check(res.body.list.count === 1 && res.body.list.total === 6480 && res.body.attached && !res.body.check && !res.body.waiting, 'saved ' + JSON.stringify(res.body).slice(0, 200));
   const j = journals[journals.length - 1];
-  check(j.branches[0].debitor.tax_id === 'T3' && j.branches[0].debitor.value + j.branches[0].debitor.tax_value === 6480 && j.branches[0].creditor.account_id === rd.payId, 'journal body');
+  check(j.branches[0].debitor.tax_id === 'T3' && j.branches[0].debitor.value + j.branches[0].debitor.tax_value === 6480 && j.branches[0].creditor.account_id === 'A%3D5' && j.branches[0].debitor.invoice_kind === 'INVOICE_KIND_QUALIFIED' && j.memo.includes('T1234567890123'), 'cash journal ' + JSON.stringify(j));
   check(calls.mf.some(c => c.startsWith('GET /journals/NEW')), 'verified by GET');
-  res = await post('/admin/api/rcptSave', { date: rd.date, amount: 3300, payee: 'ホームセンター', accountId: res.body.list.items[0] && acc.id, payId: rd.payId, rate: 'mixed', amount8: 1100 }, A);
-  const j2 = journals[journals.length - 1];
-  check(j2.branches.length === 2 && j2.branches[1].debitor.tax_id === 'T2', 'mixed rates');
+  // デビットカード：口座の明細（¥6,580）があれば、それを仕訳にする（二重にならない）
+  const nJ = journals.length;
+  res = await post('/admin/api/rcptSave', { date: rd.date, amount: 6580, payee: '阿倍野青果', memo: '野菜', accountId: acc.id, pay: 'debit', rate: '8', payment: 'card', image: img }, A);
+  check(!res.body.waiting && res.body.matched.includes('アベノセイカ') && res.body.attached, 'debit matched ' + JSON.stringify(res.body).slice(0, 200));
+  check(journals.length === nJ + 1 && journals[journals.length - 1].transaction_id === 'TX%3D1' && txs[0].journalizing_status === 'registered', 'journalized the transaction, no duplicate');
+  // 明細がまだないデビットの支払い：預かって、明細が届いたら登録する
+  res = await post('/admin/api/rcptSave', { date: rd.date, amount: 4400, payee: 'ホームセンター', memo: '洗剤', accountId: res.body.list.items[0] && acc.id, pay: 'debit', rate: 'mixed', amount8: 1100, image: img }, A);
+  check(res.body.waiting && res.body.list.waiting === 1 && res.body.list.items[0].status === 'wait', 'waiting for bank line');
+  const nJ2 = journals.length;
+  txs.push({ id: 'TX%3D9', date: rd.date, value: 4400, side: 'EXPENSE', content: 'VISAデビット ホームセンター', journalizing_status: 'none' });
+  const db0 = await env.mf.getD1Database('DB');
+  await db0.prepare("DELETE FROM kv WHERE k = 'rcptMatchAt'").run();
+  res = await post('/admin/api/rcptList', {}, A);
+  check(res.body.list.waiting === 0 && journals.length === nJ2 + 1, 'matched later');
+  const jm = journals[journals.length - 1];
+  check(jm.branches.length === 2 && jm.branches[0].debitor.tax_id === 'T3' && jm.branches[1].debitor.tax_id === 'T2' && jm.branches[1].creditor.account_id === 'A%3D9', 'mixed split after journalize ' + JSON.stringify(jm.branches));
+  check(!(await db0.prepare('SELECT COUNT(*) AS n FROM receipt_photos').first()).n, 'photo deleted after match');
   res = await post('/admin/api/rcptUndo', { id: res.body.list.items[0].id }, A);
-  check(res.body.list.count === 1 && !journals.includes(j2), 'undo deletes journal');
-  res = await post('/admin/api/rcptSave', { date: 'x', amount: 1, accountId: acc.id, payId: rd.payId }, A);
+  check(!journals.includes(jm) && txs.find(t => t.id === 'TX%3D9').journalizing_status === 'none', 'undo returns bank line');
+  res = await post('/admin/api/rcptSave', { date: 'x', amount: 1, accountId: acc.id, pay: 'cash' }, A);
   check(res.status === 400, 'bad date');
+  // 明細が来ないとき：待たずに登録（普通預金）
+  res = await post('/admin/api/rcptSave', { date: rd.date, amount: 777, payee: 'テスト', accountId: acc.id, pay: 'debit', rate: '10', image: img }, A);
+  const wid = res.body.list.items.find(x => x.status === 'wait').id;
+  res = await post('/admin/api/rcptForce', { id: wid }, A);
+  check(res.body.list.waiting === 0 && journals[journals.length - 1].branches[0].creditor.account_id === 'A%3D9', 'force with bank account');
+  // まだ登録していない口座の明細：Claude が科目を提案 → そのまま登録
+  res = await post('/admin/api/mfTx', {}, A);
+  check(res.body.list.length >= 2 && res.body.list.every(t => t.amount > 0 && t.id.startsWith('TX')) && !res.body.list.some(t => t.content === 'ｽｸｴｱ'), 'unregistered bank lines ' + JSON.stringify(res.body.list.map(t => t.content)));
+  const nt = res.body.list.find(t => t.id === 'TX%3D2');
+  check(nt.ai && res.body.accounts.find(a => a.id === nt.ai.accountId).name === '通信費' && nt.ai.reason, 'suggested account');
+  const nAi = calls.ai.length;
+  res = await post('/admin/api/mfTx', {}, A);
+  check(calls.ai.length === nAi, 'suggestions cached');
+  res = await post('/admin/api/mfTxSave', { id: nt.id, date: nt.date, content: nt.content, accountId: nt.ai.accountId, rate: nt.ai.rate }, A);
+  check(txs.find(t => t.id === 'TX%3D2').journalizing_status === 'registered', 'bank line registered');
+  // Claude に相談
+  res = await post('/admin/api/aiAsk', { question: '洗剤は何の科目？', history: [{ q: '前の質問', a: '前の答え' }], context: { payee: 'ホームセンター', amount: 1100 } }, A);
+  check(res.body.answer.includes('消耗品費') && res.body.account === '消耗品費' && res.body.accountId, 'ask');
+  check(JSON.stringify(calls.ai[calls.ai.length - 1].body).includes('前の答え'), 'ask keeps the thread');
   const big = 'A'.repeat(30000);
   res = await post('/admin/api/addCustomer', { name: big }, A);
   check(res.status === 400 && res.body.message.includes('大きすぎ'), 'normal api keeps small limit');
@@ -169,7 +220,8 @@ try {
   check(sc.ok, 'scheduled');
   check(await wait(() => pushes.some(p => p.messages[0].text.includes('先週のまとめ')), 8000), 'weekly pushed');
   const wk = pushes.find(p => p.messages[0].text.includes('先週のまとめ')).messages[0].text;
-  check(calls.ai.filter(c => c.body.system.includes('相談役')).pop().body.output_config.effort === 'high', 'weekly thinks harder');
+  check(calls.ai.filter(c => String(c.body.system).includes('相談役')).slice(-4).every(c => c.body.output_config.effort === 'high'), 'weekly makes all 4 sections, thinking harder');
+  check(wk.includes('【経費の登録】') && wk.includes('まだ登録していないもの'), 'weekly expense reminder');
   check(wk.includes('売上 ¥') && wk.includes('今週やること') && !wk.includes('｜') && wk.includes('1. 土曜ディナー'), 'weekly text\n' + wk);
   pushes.length = 0;
   await fetch(B + '/cdn-cgi/mf/scheduled');

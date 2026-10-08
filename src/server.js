@@ -76,8 +76,16 @@ function MONEY_SCHEMA_SQL() {
     'CREATE TABLE IF NOT EXISTS ai_cache (k TEXT PRIMARY KEY, src TEXT, v TEXT NOT NULL, at TEXT NOT NULL)',
     "CREATE TABLE IF NOT EXISTS sq_payments (id TEXT PRIMARY KEY, ts TEXT NOT NULL, date TEXT NOT NULL, amount INTEGER NOT NULL, refunded INTEGER NOT NULL DEFAULT 0, tip INTEGER NOT NULL DEFAULT 0, method TEXT, status TEXT, link TEXT NOT NULL DEFAULT '', res_id TEXT, cust_key TEXT, updated_at TEXT)",
     'CREATE INDEX IF NOT EXISTS idx_sq_date ON sq_payments (date)',
-    'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, date TEXT NOT NULL, amount INTEGER NOT NULL, payee TEXT, account TEXT, tax TEXT, method TEXT, memo TEXT, journal_id TEXT, status TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, date TEXT NOT NULL, amount INTEGER NOT NULL, payee TEXT, account TEXT, tax TEXT, method TEXT, memo TEXT, journal_id TEXT, status TEXT NOT NULL, data TEXT)',
     'CREATE INDEX IF NOT EXISTS idx_receipts_at ON receipts (created_at)'
+  ].concat(MF_SCHEMA_SQL());
+}
+// マネーフォワードの経費の仕訳（月ごとに取り込む）と、口座の明細を待っているレシートの写真（あとから追加した表）
+function MF_SCHEMA_SQL() {
+  return [
+    'CREATE TABLE IF NOT EXISTS mf_lines (jid TEXT, date TEXT NOT NULL, ym TEXT NOT NULL, account TEXT NOT NULL, value INTEGER NOT NULL, remark TEXT)',
+    'CREATE INDEX IF NOT EXISTS idx_mf_lines_ym ON mf_lines (ym)',
+    'CREATE TABLE IF NOT EXISTS receipt_photos (id TEXT PRIMARY KEY, img TEXT NOT NULL)'
   ];
 }
 
@@ -121,7 +129,7 @@ const SEED_COURSES = [
   ['季節の薬膳フレンチ', 9800, 'fixed', '前菜から甘味まで全7皿', 'dinner', 1, 'default', 2, '23:59', 'default', 2, '23:59'],
   ['シェフおまかせ', 14000, 'from', '全9皿・薬膳酒のペアリング付き', 'dinner', 2, 'default', 2, '23:59', 'default', 2, '23:59']
 ];
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 let schemaReady = false;
 
@@ -270,8 +278,10 @@ async function ensureSchema(env) {
   } catch (e) {
     version = 0;
   }
-  if (version > 0 && version < 9) {
+  if (version > 0 && version < 10) {
     await env.DB.batch(MONEY_SCHEMA_SQL().map(sql => env.DB.prepare(sql)));
+    try { await env.DB.prepare('ALTER TABLE receipts ADD COLUMN data TEXT').run(); } catch (e) { /* すでにある */ }
+    await env.DB.prepare("DELETE FROM kv WHERE k LIKE 'mfm:%' OR k = 'aiMoney'").run();
   }
   if (version > 0 && version < 8) {
     try { await env.DB.prepare('ALTER TABLE reservations ADD COLUMN stay INTEGER').run(); } catch (e) { /* すでにある */ }
@@ -968,11 +978,17 @@ const ADMIN_FUNCS = {
   sales: adminSales,
   salesLink: adminSalesLink,
   money: adminMoney,
-  moneyAi: adminMoneyAi,
+  dash: adminDash,
+  analysisAi: adminAnalysisAi,
+  aiNote: adminAiNote,
+  aiAsk: adminAiAsk,
   rcptList: adminRcptList,
   rcptRead: adminRcptRead,
   rcptSave: adminRcptSave,
   rcptUndo: adminRcptUndo,
+  rcptForce: adminRcptForce,
+  mfTx: adminMfTx,
+  mfTxSave: adminMfTxSave,
   igOpenings: adminIgOpenings,
   igDraft: adminIgDraft,
   igSave: adminIgSave
@@ -1901,6 +1917,11 @@ async function runSchedule(env) {
     const today = jstStamp(Date.now()).slice(0, 10);
     await sqEnsure(env, monthsBetween(addDays(today, -3), today), 30 * 60000);
   } catch (e) { console.error('Square取り込みエラー', e && e.message); }
+  try {
+    // 口座の明細が届いたレシートを登録する（1時間に1回まで）
+    const at = await kvGet(env, 'rcptMatchAt');
+    if (!at || Date.now() - at.at > 3600000) { await kvPut(env, 'rcptMatchAt', { at: Date.now() }); await rcptMatchWaiting(env); }
+  } catch (e) { console.error('明細との結びつけのエラー', e && e.message); }
   try { await weeklyReport(env); } catch (e) { console.error('週のまとめのエラー', e && e.message); }
   await env.DB.prepare('DELETE FROM ai_cache WHERE at < ?').bind(addDays(jstStamp(Date.now()).slice(0, 10), -60)).run();
   await env.DB.prepare('DELETE FROM events WHERE date < ?').bind(addDays(jstStamp(Date.now()).slice(0, 10), -180)).run();
