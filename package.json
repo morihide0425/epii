@@ -1,0 +1,8 @@
+{
+  "name": "epii-yoyaku",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "miniflare": "^3.20241205.0"
+  }
+}

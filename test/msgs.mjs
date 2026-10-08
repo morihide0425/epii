@@ -1,0 +1,18 @@
+import { start, pushes } from './env.mjs';
+const B='http://127.0.0.1:8787';
+const env=await start({port:8788, linePort:8791});
+const B2='http://127.0.0.1:8788';
+const post=async (p,b,h={})=>(await fetch(B2+p,{method:'POST',headers:{'content-type':'application/json',...h},body:JSON.stringify(b||{})})).json();
+const add=(s,n)=>{const d=new Date(s+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)};
+const T=new Date(Date.now()+9*3600e3).toISOString().slice(0,10);
+let d=add(T,6); while(new Date(d+'T00:00:00Z').getUTCDay()!==6) d=add(d,1);
+const login=await post('/api/login',{idToken:'msg'});
+const AU={authorization:'Bearer '+login.token};
+const courses=login.data.courses;
+const din=courses.find(c=>c.name==='季節の薬膳フレンチ');
+const r=await post('/api/request',{data:{date:d,time:'18:00',guests:2,courseId:din.id,name:'山田 花子',phone:'09012345678'}},AU);
+const a=await fetch(B2+'/admin/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'pw-test-123'})});
+const A={cookie:a.headers.get('set-cookie').split(';')[0],'x-epii':'1'};
+console.log('--- お店へ ---\n'+pushes.find(p=>p.to==='Uowner').messages[0].text);
+console.log('\n--- お客様へ（受付）---\n'+pushes.find(p=>p.to==='U_msg').messages[0].text);
+await env.stop();

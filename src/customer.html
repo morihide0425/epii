@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>épii ご予約</title>
+<meta name="robots" content="noindex">
+
+<link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="manifest" href="/app.webmanifest">
+<meta name="apple-mobile-web-app-title" content="épii">
+<meta name="theme-color" content="#F3F2EF">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400;1,500&display=swap" rel="stylesheet">
+<link rel="preload" as="image" href="/logo.webp">
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root {
+    --bg: #F3F2EF; --card: #FFFFFF; --ink: #1F1F1F; --sub: #6F6D69; --faint: #BDBAB4; --line: #E4E2DD; --line-strong: #D3CFC6;
+    --red: #AE3F2C; --red-l: #F7E8E4; --blue: #3F7485; --blue-l: #E6EFF2; --green: #3F7D58; --green-l: #E6F1EA;
+    --gothic: "Hiragino Maru Gothic ProN", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    --mincho: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif JP", serif;
+    --latin: "Cormorant Garamond", var(--mincho);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--gothic); font-size: 15px; line-height: 1.7; line-break: strict; word-break: auto-phrase; }
+  .ln { display: block; }
+  .finder { margin-bottom: 10px; }
+  .fchips { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 2px; -webkit-overflow-scrolling: touch; }
+  .fchip { flex-shrink: 0; border: 1px solid var(--line-strong); background: var(--card); border-radius: 999px; padding: 6px 12px; font-size: 13px; white-space: nowrap; }
+  .findhint { margin-top: 6px; background: var(--red-l); color: var(--ink); border-radius: 12px; padding: 8px 12px; font-size: 13px; }
+  .findhint b { color: var(--red); }
+  .fchip.on { background: var(--red); border-color: var(--red); color: #fff; }
+  .namegrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .ln.gap { margin-top: .5em; }
+  .ph { display: inline-block; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; touch-action: manipulation; }
+  a { color: inherit; }
+  .min { font-family: var(--mincho); }
+  .lat { font-family: var(--latin); font-style: italic; }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 0 16px calc(40px + env(safe-area-inset-bottom)); }
+  .hero { text-align: center; padding: 24px 0 18px; }
+  .hero img { width: 140px; height: auto; display: block; margin: 0 auto; }
+  .card { background: var(--card); border-radius: 20px; padding: 18px; margin-bottom: 12px; }
+  .h { font-family: var(--mincho); font-size: 17px; margin: 0 0 10px; display: flex; align-items: baseline; gap: 10px; font-weight: 500; }
+  .h small { font-family: var(--latin); font-style: italic; color: var(--sub); font-size: 15px; font-weight: 400; }
+  .h .num { width: 22px; height: 22px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 12px;
+    display: inline-flex; align-items: center; justify-content: center; font-family: var(--gothic); flex-shrink: 0; }
+  .h .num.done { background: var(--red); }
+  .h { white-space: nowrap; flex-wrap: wrap; row-gap: 2px; }
+  .h small { flex-shrink: 0; }
+  .h .val { margin-left: auto; font-size: 14px; color: var(--red); font-family: var(--gothic);
+    white-space: normal; max-width: 100%; text-align: right; line-height: 1.4; }
+  .h .val > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .addalt { width: 100%; border: 1px dashed var(--line-strong); background: transparent; border-radius: 14px;
+    padding: 12px; color: var(--sub); font-size: 14px; }
+  .sub { color: var(--sub); font-size: 13px; }
+  .note { background: var(--blue-l); color: var(--blue); border-radius: 14px; padding: 10px 14px; font-size: 13px; text-align: center; margin-bottom: 12px; }
+  .alert { background: var(--red-l); color: var(--red); border-radius: 14px; padding: 12px 14px; font-size: 14px; margin-bottom: 12px; }
+  .stale { text-align: center; font-size: 12px; color: var(--sub); margin: -4px 0 10px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-strong); background: var(--card); border-radius: 999px; padding: 10px 16px; text-decoration: none; }
+  .btn.primary { background: var(--red); border-color: var(--red); color: #fff; font-weight: 700; letter-spacing: .06em; }
+  .btn.dark { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .btn.wide { width: 100%; }
+  .btn.big { padding: 15px; font-size: 16px; }
+  .btn[disabled] { opacity: .5; cursor: wait; }
+  .stepper { display: flex; align-items: center; gap: 14px; }
+  .stepper button { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line-strong); background: var(--card); font-size: 20px; line-height: 1; }
+  .stepper .n { font-family: var(--mincho); font-size: 24px; min-width: 28px; text-align: center; }
+  .monthnav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .monthnav button { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line-strong); background: var(--card); }
+  .monthnav button:disabled { visibility: hidden; }
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; text-align: center; }
+  .cal .wd { font-size: 12px; color: var(--sub); padding: 2px 0; }
+  .cal .wd.sun { color: var(--red); }
+  .day { border: none; background: transparent; border-radius: 12px; padding: 6px 0 4px; line-height: 1.25; min-height: 48px; }
+  .day small { display: block; font-size: 12px; color: var(--blue); min-height: 1.25em; }
+  .day.x { color: var(--faint); cursor: default; }
+  .day.x small { color: var(--faint); font-size: 11px; }
+  .day.sel { background: var(--red); color: #fff; box-shadow: 0 0 0 3px var(--red-l); }
+  .day.sel small { color: #fff; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--sub); margin-top: 8px; }
+  .legend span { white-space: nowrap; }
+  .sess { margin: 10px 0 4px; display: flex; align-items: baseline; gap: 8px; }
+  .sess .lat { color: var(--sub); font-size: 16px; }
+  .slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .slot { border: 1px solid var(--line-strong); background: var(--card); border-radius: 14px; padding: 8px 0; line-height: 1.25; }
+  .slot small { display: block; font-size: 11px; color: var(--sub); }
+  .slot.sel { background: var(--red); border-color: var(--red); color: #fff; box-shadow: 0 0 0 3px var(--red-l); }
+  .slot.sel small { color: #fff; }
+  .slot:disabled { background: var(--bg); border-color: transparent; color: var(--faint); cursor: default; }
+  .slot:disabled small { color: var(--faint); }
+  .course { display: block; width: 100%; text-align: left; border: 1px solid var(--line-strong); background: var(--card); border-radius: 16px; padding: 12px 14px; margin-bottom: 8px; }
+  .course.sel { border: 2px solid var(--red); background: var(--red-l); padding: 11px 13px; box-shadow: 0 0 0 3px var(--red-l); }
+  .course:disabled { background: var(--bg); border-color: transparent; color: var(--sub); cursor: default; }
+  .course .name { font-family: var(--mincho); font-size: 16px; }
+  .course .why { color: var(--red); font-size: 12px; }
+  .course .sub, .course .why { display: block; }
+  label.f { display: block; font-size: 13px; color: var(--sub); margin: 12px 0 4px; }
+  input[type=text], input[type=tel], select, textarea { width: 100%; padding: 11px 13px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--card); font-size: 16px; }
+  input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .tag { display: inline-block; padding: 0 10px; border-radius: 999px; font-size: 12px; line-height: 22px; background: var(--blue-l); color: var(--blue); }
+  .tag.red { background: var(--red-l); color: var(--red); }
+  .tag.green { background: var(--green-l); color: var(--green); }
+  .kv { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 2px 10px; margin: 8px 0; font-size: 14px; }
+  .kv dt { color: var(--sub); }
+  .kv dd { margin: 0; }
+  .mine { border-top: 1px solid var(--line); padding: 14px 0 4px; }
+  .mine:first-of-type { border-top: none; padding-top: 4px; }
+  .mine.focus { background: var(--blue-l); margin: 0 -10px; padding: 12px 10px; border-radius: 14px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .actions .btn { flex: 1; }
+  .summary { text-align: center; font-family: var(--mincho); margin: 6px 0 12px; }
+  .err { color: var(--red); font-size: 14px; min-height: 1.2em; margin: 8px 0 0; text-align: center; }
+  .access .row { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .access .btn { white-space: nowrap; padding: 10px 8px; }
+  .loading { text-align: center; padding: 50px 0; color: var(--sub); }
+  .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--red); margin: 0 auto 10px; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 20px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 5; }
+  .toast.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <img src="/logo.webp" alt="épii" width="140" height="212">
+  </div>
+  <div id="app"><div class="loading"><div class="spinner"></div>読み込み中…</div></div>
+  <div id="access"></div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const BOOT = "__BOOT__";
+/*__SHARED__*/
+/*__MOTION__*/
+
+const SHOP = BOOT.shop;
+const SN = key => sessionLabel(st(), key);
+const SEN = key => sessionEn(st(), key);
+
+// 滞在時間中の予約がこの人数以上になったら「残りわずか」と表示する
+const FEW_GUESTS = 2;
+const WD = '日月火水木金土';
+const TOKEN_KEY = 'epiiToken:' + BOOT.liffId;
+const CACHE_KEY = 'epiiCache:' + BOOT.liffId;
+const S = {
+  data: null, idx: null, offset: 0, token: '', friend: true, view: '', focusId: '', stale: false, live: false,
+  month: '', guests: 2, date: '', time: '', session: '', courseId: '', alt: '', altOpen: false, changeFor: '', menuFilter: '',
+  name: '', phone: '', note: '', err: '', confirm: '', busy: false, done: null
+};
+const $ = id => document.getElementById(id);
+
+/* ---------- 共通 ---------- */
+function esc(v) {
+  return String(v === undefined || v === null ? '' : v)
+    .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function jd(date) { if (!date) return ''; const p = date.split('-').map(Number); return p[1] + '月' + p[2] + '日（' + WD[weekday(date)] + '）'; }
+function yen(n) { return '¥' + Number(n || 0).toLocaleString(); }
+function priceText(c) { return yen(c.price) + (c.price_type === 'from' ? '〜' : ''); }
+function nowStr() { return jstStamp(Date.now() + S.offset); }
+function today() { return nowStr().slice(0, 10); }
+function toast(msg) { M.toast($('toast'), msg, 2600); }
+// 意味のまとまりごとに折り返す（parts はHTMLをそのまま受け取る）
+function P() { return Array.prototype.slice.call(arguments).map(x => `<span class="ph">${x}</span>`).join(''); }
+// 1行ずつ改行する。配列はまとまりの並び、'' は1行あける
+function L() {
+  let gap = false;
+  return Array.prototype.slice.call(arguments).filter(line => line !== null && line !== undefined).map(line => {
+    if (line === '') { gap = true; return ''; }
+    const cls = gap ? 'ln gap' : 'ln';
+    gap = false;
+    return `<span class="${cls}">${Array.isArray(line) ? P.apply(null, line) : line}</span>`;
+  }).join('');
+}
+// 文字列を「、」「。」の後ろで区切って折り返す（エラー表示など）
+function autoPh(text) { return P.apply(null, esc(text).replace(/([、。）])/g, '$1\n').split('\n').filter(Boolean)); }
+function telLink(text) { return `<a href="tel:${SHOP.tel}">${text || SHOP.tel}</a>`; }
+// 変更の締切の言い方（当日◯時まで／ご来店の◯日前まで）
+function changeRuleText(rule) {
+  return Number(rule.days) === 0 ? '当日' + rule.time + 'まで' : 'ご来店の' + ruleText(rule);
+}
+
+function ruleText(rule) {
+  const d = Number(rule.days);
+  if (d === 0) return '当日' + rule.time + 'まで';
+  return rule.time === '23:59' ? d + '日前まで' : d + '日前の' + rule.time + 'まで';
+}
+function store(key, value) { try { value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch (e) { /* 保存できない端末 */ } }
+function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+
+/* ---------- 通信 ---------- */
+async function post(path, body, auth) {
+  const headers = { 'content-type': 'application/json' };
+  if (auth) headers.authorization = 'Bearer ' + S.token;
+  let res;
+  try {
+    res = await fetch('/api/' + path, { method: 'POST', headers: headers, body: JSON.stringify(body || {}) });
+  } catch (e) {
+    throw Object.assign(new Error('通信できませんでした。電波の良い場所でもう一度お試しください。'), { detail: 'NETWORK' });
+  }
+  let data;
+  try { data = await res.json(); } catch (e) {
+    throw Object.assign(new Error('予約システムから正しい返事がありませんでした。'), { detail: 'HTTP ' + res.status });
+  }
+  if (!data.ok) throw Object.assign(new Error(data.message), { status: res.status, detail: 'HTTP ' + res.status });
+  return data;
+}
+
+async function login() {
+  const idToken = liff.getIDToken();
+  if (!idToken) throw Object.assign(new Error('LINEの本人確認の情報を受け取れませんでした。LINEアプリから開き直してください。'), { detail: 'NO_ID_TOKEN' });
+  const d = await post('login', { idToken: idToken });
+  S.token = d.token;
+  try { sessionStorage.setItem(TOKEN_KEY, d.token); } catch (e) { /* 保存できない端末 */ }
+  setData(d.data, true);
+}
+
+async function api(path, body) {
+  if (!S.token) await login();
+  try {
+    return await post(path, body, true);
+  } catch (e) {
+    if (e.status !== 401) throw e;
+    S.token = '';
+    await login();
+    return post(path, body, true);
+  }
+}
+
+/* ---------- 利用状況の記録（まとめて送る） ---------- */
+const TRACK = { q: [], timer: null, sid: Math.random().toString(36).slice(2, 10), src: '' , opened: false };
+function track(kind, extra) {
+  if (!S.token) { TRACK.q.push(Object.assign({ kind: kind }, extra || {})); return; }
+  TRACK.q.push(Object.assign({ kind: kind }, extra || {}));
+  clearTimeout(TRACK.timer);
+  TRACK.timer = setTimeout(flushTrack, 1500);
+}
+function flushTrack() {
+  if (!TRACK.q.length || !S.token) return;
+  const events = TRACK.q.splice(0, 20);
+  try {
+    fetch('/api/track', {
+      method: 'POST', keepalive: true,
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token },
+      body: JSON.stringify({ sid: TRACK.sid, src: TRACK.src, events: events })
+    }).catch(() => {});
+  } catch (e) { /* 記録に失敗しても予約には影響させない */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushTrack(); });
+
+function setData(data, live) {
+  S.data = data;
+  S.idx = null;
+  S.offset = data.nowMs - Date.now();
+  if (live) {
+    S.live = true;
+    S.stale = false;
+    store(CACHE_KEY, JSON.stringify({ at: Date.now(), data: data }));
+  }
+  if (!S.month) S.month = today().slice(0, 7);
+  S.guests = Math.max(1, Math.min(S.guests, data.settings.maxGuests));
+}
+
+function showFatal(message, detail) {
+  $('app').innerHTML = `<div class="card" style="text-align:center">
+    <p>${autoPh(message)}</p>
+    ${detail ? `<p class="sub" style="word-break:break-all">詳細：${esc(detail)}</p>` : ''}
+    <button class="btn wide" onclick="location.reload()">もう一度読み込む</button>
+    <p class="sub" style="margin-bottom:0">${P('ご予約はお電話でも', '承ります：' + telLink())}</p></div>`;
+}
+
+/* ---------- 起動 ---------- */
+async function main() {
+  renderAccess();
+  S.sei = load('epiiSei') || '';
+  S.mei = load('epiiMei') || '';
+  if (!S.sei && !S.mei && load('epiiName')) {
+    const parts = load('epiiName').trim().split(/[\s\u3000]+/);
+    S.sei = parts[0] || '';
+    S.mei = parts.slice(1).join('') || '';
+  }
+  S.phone = load('epiiPhone') || '';
+  const cached = JSON.parse(load(CACHE_KEY) || 'null');
+  if (cached && Date.now() - cached.at < 30 * 60 * 1000) {
+    setData(cached.data, false);
+    S.stale = true;
+    render();
+  }
+  if (!BOOT.liffId) { showFatal('予約ページの設定が完了していません。', 'LIFF_ID'); return; }
+  if (typeof liff === 'undefined') { showFatal('LINEの部品を読み込めませんでした。通信状況を確認して、開き直してください。', 'LIFF_SDK'); return; }
+  try {
+    await liff.init({ liffId: BOOT.liffId, withLoginOnExternalBrowser: true });
+  } catch (e) {
+    showFatal('LINEの読み込みに失敗しました。LINEアプリから開き直してください。', 'LIFF_INIT ' + ((e && e.code) || '') + ' ' + ((e && e.message) || e));
+    return;
+  }
+  if (!liff.isLoggedIn()) {
+    showFatal('LINEにログインできませんでした。LINEアプリから開き直してください。', 'NOT_LOGGED_IN');
+    return;
+  }
+  const params = new URLSearchParams(location.search);
+  S.view = params.get('view') || '';
+  TRACK.src = params.get('src') || (S.view ? 'line-message' : (liff.isInClient() ? 'line' : 'web'));
+  S.focusId = params.get('id') || '';
+  try { S.token = sessionStorage.getItem(TOKEN_KEY) || ''; } catch (e) { S.token = ''; }
+
+  const friendP = liff.getFriendship().then(f => f.friendFlag).catch(() => true);
+  const dataP = (S.token
+    ? post('init', {}, true).then(d => setData(d.data, true)).catch(e => { if (e.status === 401) { S.token = ''; return login(); } throw e; })
+    : login());
+  try {
+    const results = await Promise.all([friendP, dataP]);
+    S.friend = results[0];
+  } catch (e) {
+    if (S.data) { S.stale = false; toast('最新の空き状況を取得できませんでした'); render(); }
+    else showFatal(e.message, e.detail);
+    return;
+  }
+  render();
+  if (!TRACK.opened) { TRACK.opened = true; track('open'); flushTrack(); }
+  if (S.view === 'mine' || S.view === 'offer') {
+    const el = document.querySelector('.mine.focus') || $('mineCard');
+    if (el) el.scrollIntoView({ block: 'center' });
+  }
+}
+
+/* ---------- 空き状況 ---------- */
+function st() { return S.data.settings; }
+function index() { return S.idx || (S.idx = buildIndex(S.data.holds, S.data.blocks, st())); }
+function endDate() { return bookingEnd(st(), today()); }
+function inRange(date) { const t = today(); return date >= t && date <= endDate(); }
+function course(id) { return S.data.courses.find(c => c.id === id); }
+
+// 予約の変更中は、いま押さえている自分の席を除いて数える
+function excludeId() { return S.changeFor || null; }
+// 「メニューで探す」で選んだメニュー（なければすべて）
+function searchCourses() { return S.menuFilter ? S.data.courses.filter(c => c.id === S.menuFilter) : S.data.courses; }
+// 選んだメニューで、いちばん早く予約できる日
+function firstOpenDate() {
+  const end = endDate();
+  for (let d = today(); d <= end; d = addDays(d, 1)) {
+    if (!dayState(d).x) return d;
+  }
+  return '';
+}
+function capLeft(c, date, time, k) { return courseLeft(S.data.holds, st(), c, date, time, k, excludeId()); }
+
+// その時刻に重なっている時間帯（ディナーとディナーセットなど）をまとめて見る
+function slotInfo(date, slot) {
+  const now = nowStr();
+  const keys = sessionsAt(date, slot.time, S.data.rules, st());
+  let left = 0;
+  keys.forEach(k => { left = Math.max(left, leftAt(index(), date, slot.time, k, excludeId(), st())); });
+  let open = 0;
+  let afterDeadline = 0;
+  searchCourses().forEach(c => {
+    const k = keys.find(x => c.sessions.indexOf(x) >= 0);
+    if (!k) return;
+    const why = courseCheck(c, date, slot.time, k, S.guests, now, st(), false);
+    const seat = Math.min(leftAt(index(), date, slot.time, k, excludeId(), st()), capLeft(c, date, slot.time, k));
+    if (!why && seat >= S.guests) open++;
+    else if (why === 'deadline' || why === 'past') afterDeadline++;
+  });
+  const past = now >= date + ' ' + slot.time;
+  const few = st().seats - left >= FEW_GUESTS;
+  return { left: left, few: few, seatOk: left >= S.guests, open: open, closed: !open && (afterDeadline > 0 || past), ok: open > 0 };
+}
+
+function dayState(date) {
+  if (!inRange(date)) return { x: true, label: '', none: true };
+  const plan = dayPlan(date, S.data.rules, st());
+  if (plan.kind === 'off') return { x: true, label: '休' };
+  if (plan.kind === 'private') return { x: true, label: '貸切' };
+  const infos = daySlots(date, S.data.rules, st()).map(slot => slotInfo(date, slot));
+  if (!infos.length) return { x: true, label: '休' };
+  const ok = infos.filter(i => i.ok);
+  if (ok.length) return { x: false, label: ok.some(i => !i.few) ? '○' : '△' };
+  if (infos.some(i => i.open > 0)) return { x: true, label: '×' };
+  if (infos.some(i => i.closed)) return { x: true, label: '締切' };
+  return { x: true, label: '—' };
+}
+
+function slotEnabled(date, time) {
+  const keys = sessionsAt(date, time, S.data.rules, st());
+  return keys.length > 0 && slotInfo(date, { time: time, session: keys[0] }).ok;
+}
+
+function altOptions() {
+  const c = course(S.courseId);
+  if (!c || !S.date || !S.time) return [];
+  const out = [];
+  const now = nowStr();
+  const end = endDate();
+  for (let d = S.date; d <= end && out.length < 12; d = addDays(d, 1)) {
+    const times = {};
+    daySlots(d, S.data.rules, st()).forEach(x => {
+      if (out.length >= 12 || times[x.time]) return;
+      if (c.sessions.indexOf(x.session) < 0) return;
+      if (d === S.date && x.time === S.time) return;
+      if (courseCheck(c, d, x.time, x.session, S.guests, now, st(), false)) return;
+      if (leftAt(index(), d, x.time, x.session, excludeId(), st()) < S.guests) return;
+      if (capLeft(c, d, x.time, x.session) < S.guests) return;
+      times[x.time] = true;
+      out.push(d + ' ' + x.time);
+    });
+  }
+  return out;
+}
+
+function fixSelection() {
+  if (S.date && dayState(S.date).x) { S.date = ''; }
+  if (!S.date) { S.time = ''; }
+  if (S.time && !slotEnabled(S.date, S.time)) { S.time = ''; }
+  if (!S.time) { S.session = ''; S.courseId = ''; }
+  const c = course(S.courseId);
+  if (c) {
+    const keys = sessionsAt(S.date, S.time, S.data.rules, st());
+    const k = keys.find(x => c.sessions.indexOf(x) >= 0);
+    if (!k || courseCheck(c, S.date, S.time, k, S.guests, nowStr(), st(), false)) S.courseId = '';
+    else S.session = k;
+  }
+  if (S.menuFilter && S.time && !S.courseId) {
+    const fc = course(S.menuFilter);
+    const keys = sessionsAt(S.date, S.time, S.data.rules, st());
+    const k = fc && keys.find(x => fc.sessions.indexOf(x) >= 0);
+    if (k && !courseCheck(fc, S.date, S.time, k, S.guests, nowStr(), st(), false) && capLeft(fc, S.date, S.time, k) >= S.guests) { S.courseId = fc.id; S.session = k; }
+  }
+  if (!S.courseId) S.alt = '';
+  if (S.alt && altOptions().indexOf(S.alt) < 0) S.alt = '';
+}
+
+/* ---------- 表示 ---------- */
+function render() {
+  if (!S.data) return;
+  if (S.done) { renderDone(); return; }
+  fixSelection();
+  const s = st();
+  let h = '';
+  if (S.stale) h += '<div class="stale">最新の空き状況を確認しています…</div>';
+  if (S.live && !S.friend) {
+    h += `<div class="alert">${L(['ご予約のご連絡は', 'LINEでお送りします。'], ['先に友だち追加を', 'お願いします。'])}
+      <a class="btn wide" style="margin-top:8px;background:#fff" href="https://line.me/R/ti/p/${encodeURIComponent(BOOT.lineId)}">épiiを友だち追加する</a>
+      <button class="btn wide" style="margin-top:6px;background:transparent;border-color:transparent;color:inherit;font-size:13px" data-act="recheck">追加したので確認する</button></div>`;
+  }
+  h += mineHtml();
+  if (S.changeFor) {
+    const r = S.data.mine.find(x => x.id === S.changeFor);
+    if (!r) { S.changeFor = ''; }
+    else {
+      h += `<div class="note" style="background:var(--red-l);color:var(--red)">${L(
+        'ご予約の変更をお申し込みします。',
+        ['今のご予約：' + jd(r.date) + ' ' + esc(r.time), '（' + r.guests + '名・' + esc(r.course) + '）'],
+        '',
+        ['新しい日時・人数・メニューを', 'お選びください。']
+      )}<button class="btn wide" style="margin-top:8px;background:#fff" data-act="stopChange">変更をやめる</button></div>`;
+    }
+  }
+  if (!S.changeFor) h += `<div class="note">${L(
+    'ご予約はリクエスト制です。',
+    ['確認のうえ、' + esc(s.replyHint) + 'に', 'LINEでご連絡いたします。']
+  )}</div>`;
+  h += `<div class="card"><div class="h"><span class="num done">1</span>人数<small>Guests</small></div>
+    <div class="stepper"><button data-act="guests" data-d="-1" aria-label="人数を減らす">−</button><span class="n">${S.guests}</span>名<button data-act="guests" data-d="1" aria-label="人数を増やす">＋</button></div>
+    ${S.guests >= s.maxGuests ? `<div class="sub" style="margin-top:6px">${P((s.maxGuests + 1) + '名以上は', telLink('お電話') + 'で', '承ります。')}</div>` : ''}</div>`;
+  h += `<div class="card"><div class="h"><span class="num ${S.date ? 'done' : ''}">2</span>日付<small>Date</small>${S.date ? `<span class="val">${jd(S.date)}</span>` : ''}</div>${calendarHtml()}</div>`;
+  h += `<div class="card" id="timeCard"><div class="h"><span class="num ${S.time ? 'done' : ''}">3</span>時間<small>Time</small>${S.time ? `<span class="val">${S.time}</span>` : ''}</div><div data-mg="time:${S.date}" data-mgs=".slot.sel">${timesHtml()}</div></div>`;
+  const picked = course(S.courseId);
+  h += `<div class="card" id="menuCard"><div class="h"><span class="num ${S.courseId ? 'done' : ''}">4</span>メニュー<small>Menu</small>${picked ? `<span class="val"><span>${esc(picked.name)}</span></span>` : ''}</div><div data-mg="course:${S.date} ${S.time}" data-mgs=".course.sel">${coursesHtml()}</div></div>`;
+  if (!S.changeFor) h += altCardHtml();
+  if (!S.changeFor) h += `<div class="card"><div class="h"><span class="num ${S.sei.trim() && S.mei.trim() && S.phone ? 'done' : ''}">5</span>お客様情報<small>Your details</small></div>
+    <div class="namegrid">
+      <div><label class="f" for="fSei">姓</label><input id="fSei" type="text" autocomplete="family-name" value="${esc(S.sei)}" placeholder="例）山田"></div>
+      <div><label class="f" for="fMei">名</label><input id="fMei" type="text" autocomplete="given-name" value="${esc(S.mei)}" placeholder="例）花子"></div>
+    </div>
+    <label class="f" for="fPhone">電話番号</label><input id="fPhone" type="tel" autocomplete="tel" inputmode="tel" value="${esc(S.phone)}" placeholder="例）090-1234-5678">
+    <label class="f" for="fNote">ご要望（任意）</label><textarea id="fNote" rows="3" placeholder="アレルギー、苦手な食材、お祝いの内容など">${esc(S.note)}</textarea>
+    <div class="sub" style="margin-top:8px">${P('ご入力いただいた内容は、', 'ご予約の確認と', 'ご連絡にのみ使用します。')}</div></div>`;
+  h += `<div class="summary">${summaryText()}</div>
+    <button class="btn primary wide big" data-act="submit" ${S.busy ? 'disabled' : ''}>${S.busy ? '送信しています…' : S.changeFor ? '変更をリクエストする' : '予約をリクエストする'}</button>
+    <p class="err" id="formErr" role="alert">${autoPh(S.err)}</p>`;
+  M.capture($('app'));
+  M.patch($('app'), h);
+  M.play($('app'));
+}
+
+function summaryText() {
+  if (!S.date || !S.time || !S.courseId) return '';
+  const c = course(S.courseId);
+  let t = `${jd(S.date)} ${S.time}・${S.guests}名`;
+  if (c) t += `<br>${P(esc(c.name), yen(c.price * S.guests) + (c.price_type === 'from' ? '〜' : ''))}`;
+  return t;
+}
+
+function mineHtml() {
+  const list = S.data.mine;
+  if (!list.length) return '';
+  const s = st();
+  return `<div class="card" id="mineCard"><div class="h">ご予約・リクエスト<small>Your reservations</small></div>` +
+    list.map(r => {
+      const focus = r.id === S.focusId ? 'focus' : '';
+      const asking = S.confirm === r.id;
+      const askingChange = !!(r.change && S.confirm === r.change.id);
+      let tag, body = '', actions;
+      if (r.status === '返事待ち') {
+        tag = '<span class="tag">お返事待ち</span>';
+        body = `<div class="sub">${P('確認のうえ、LINEで', 'ご連絡いたします', '（目安：' + esc(s.replyHint) + '）。')}</div>`;
+        actions = asking ? confirmHtml(r, 'リクエストを取り下げますか？', '取り下げる')
+          : `<div class="actions"><button class="btn" data-act="ask" data-id="${esc(r.id)}">リクエストを取り下げる</button></div>`;
+      } else if (r.status === '提案中') {
+        tag = '<span class="tag red">お店からのご提案</span>';
+        body = `<div style="margin-top:6px">${P('ご希望の日時は', 'お席のご用意が難しいため、', 'こちらの日時を', 'ご提案します。')}</div>
+          <div class="min" style="font-size:18px;margin:4px 0">${jd(r.offerDate)} ${esc(r.offerTime)}</div>`;
+        actions = asking ? confirmHtml(r, 'このご提案を見送りますか？', '見送る')
+          : `<div class="actions"><button class="btn primary" data-act="accept" data-id="${esc(r.id)}">この日時で予約する</button>
+             <button class="btn" data-act="ask" data-id="${esc(r.id)}">見送る</button></div>`;
+      } else if (r.change) {
+        tag = '<span class="tag red">変更をお申し込み中</span>';
+        body = `<div class="sub" style="margin-top:6px">${L(
+          ['変更後のご希望：' + jd(r.change.date) + ' ' + esc(r.change.time), '（' + r.change.guests + '名・' + esc(r.change.course) + '）'],
+          ['確認のうえ、LINEで', 'ご連絡いたします。']
+        )}</div>`;
+        actions = askingChange ? confirmHtml({ id: r.change.id }, '変更のお申し込みを取り下げますか？', '取り下げる', 'chg')
+          : `<div class="actions"><button class="btn" data-act="ask" data-id="${esc(r.change.id)}">変更の申し込みを取り下げる</button></div>`;
+      } else {
+        tag = '<span class="tag green">ご予約確定</span>';
+        actions = !r.canCancel
+          ? `<div class="sub">${L(s.cancelDays ? ['ご来店の' + s.cancelDays + '日前を', '過ぎたため、'] : null, ['キャンセル・変更は', telLink('お電話') + 'で', 'お願いいたします。'])}</div>`
+          : asking ? confirmHtml(r, 'ご予約をキャンセルしますか？', 'キャンセルする')
+          : `<div class="actions">${r.canChange ? `<button class="btn" data-act="startChange" data-id="${esc(r.id)}">日時・人数を変更する</button>` : ''}
+             <button class="btn" data-act="ask" data-id="${esc(r.id)}">キャンセルする</button></div>
+             <div class="sub">${r.canChange
+               ? P('変更のお申し込みは', changeRuleText(r.changeRule), '承ります。')
+               : P('変更のお申し込みは受付を終了しました。', telLink('お電話') + 'で', 'ご相談ください。')}</div>`;
+      }
+      return `<div class="mine ${focus}">${tag}
+        <dl class="kv">
+          <dt>${r.status === '確定' ? '日時' : 'ご希望'}</dt><dd>${jd(r.date)} ${esc(r.time)}</dd>
+          ${r.status === '返事待ち' && r.altDate ? `<dt>第2希望</dt><dd>${jd(r.altDate)} ${esc(r.altTime)}</dd>` : ''}
+          <dt>人数</dt><dd>${r.guests}名</dd>
+          <dt>メニュー</dt><dd>${esc(r.course)}</dd>
+        </dl>${body}${actions}</div>`;
+    }).join('') + '</div>';
+}
+
+function confirmHtml(r, question, label, kind) {
+  return `<div style="background:var(--bg);border-radius:14px;padding:12px;margin-top:8px">
+    <div>${question}</div>
+    <div class="actions"><button class="btn" data-act="noask">やめる</button>
+    <button class="btn dark" data-act="cancel" data-id="${esc(r.id)}" data-status="${esc(r.status || '')}" data-kind="${kind || ''}">${label}</button></div></div>`;
+}
+
+function calendarHtml() {
+  const t = today();
+  const firstMonth = t.slice(0, 7);
+  const lastMonth = (endDate() < t ? t : endDate()).slice(0, 7);
+  if (S.month < firstMonth) S.month = firstMonth;
+  const [y, m] = S.month.split('-').map(Number);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  let cells = WD.split('').map((w, i) => `<div class="wd ${i === 0 ? 'sun' : ''}">${w}</div>`).join('');
+  cells += '<div></div>'.repeat(weekday(S.month + '-01'));
+  for (let d = 1; d <= days; d++) {
+    const date = S.month + '-' + pad(d);
+    const ds = dayState(date);
+    cells += `<button class="day ${ds.x ? 'x' : ''} ${S.date === date ? 'sel' : ''}" data-act="date" data-date="${date}" ${ds.x ? 'aria-disabled="true"' : ''} aria-label="${jd(date)} ${ds.label}">${d}<small>${ds.label || '&nbsp;'}</small></button>`;
+  }
+  const finder = S.data.courses.length > 1 ? `<div class="finder"><div class="sub">メニューで探す</div>
+    <div class="fchips" data-mg="mf" data-mgs=".fchip.on"><button class="fchip ${!S.menuFilter ? 'on' : ''}" data-act="menuFilter" data-id="">すべて</button>${S.data.courses.map(c => `<button class="fchip ${S.menuFilter === c.id ? 'on' : ''}" data-act="menuFilter" data-id="${esc(c.id)}">${esc(c.name)}</button>`).join('')}</div>
+    ${S.menuFilter ? (() => {
+      const f = firstOpenDate();
+      const name = esc(course(S.menuFilter) ? course(S.menuFilter).name : '');
+      return f
+        ? `<div class="findhint">${P('「' + name + '」は', 'いちばん早くて', '<b>' + jd(f) + '</b>', 'からご予約いただけます。')}<br><span class="sub">ご予約いただける日に○△が付いています。</span></div>`
+        : `<div class="findhint">${P('「' + name + '」は、', 'ただいまご予約いただける日が', 'ありません。')}</div>`;
+    })() : ''}</div>` : '';
+  return `${finder}<div class="monthnav">
+      <button data-act="month" data-d="-1" ${S.month <= firstMonth ? 'disabled' : ''} aria-label="前の月">‹</button>
+      <span class="min" style="font-size:17px">${y}年 ${m}月</span>
+      <button data-act="month" data-d="1" ${S.month >= lastMonth ? 'disabled' : ''} aria-label="次の月">›</button>
+    </div>
+    <div class="cal" data-mg="cal:${S.month}" data-mgs=".day.sel">${cells}</div>
+    <div class="legend"><span>○ 空きあり</span><span>△ 残りわずか</span><span>× 満席</span><span>休・締切 選べません</span></div>
+    ${endDate() < t
+      ? `<div class="alert" style="margin:10px 0 0">${L(['ただいま次の期間の', 'ご予約の準備中です。'], [telLink('お電話') + 'で', 'お問い合わせください。'])}</div>`
+      : `<div class="sub" style="margin-top:6px">${P(jd(endDate()) + 'までの', 'ご予約を承っています。')}</div>`}`;
+}
+
+function timesHtml() {
+  if (!S.date) return '<div class="sub">日付を選ぶと表示されます。</div>';
+  const s = st();
+  const slots = daySlots(S.date, S.data.rules, s);
+  let h = `<div class="sub">${jd(S.date)}</div>`;
+  const seen = {};
+  const fc = S.menuFilter ? course(S.menuFilter) : null;
+  sessionKeys(s).filter(k => !fc || fc.sessions.indexOf(k) >= 0).forEach(k => {
+    const list = slots.filter(x => x.session === k && !seen[x.time]);
+    list.forEach(x => { seen[x.time] = true; });
+    if (!list.length) return;
+    const en = SEN(k);
+    h += `<div class="sess">${en ? `<span class="lat">${esc(en)}</span>` : ''}<span class="sub">${esc(SN(k))} ${s.sessions[k].open}〜${s.sessions[k].close}</span></div>
+      <div class="slots">${list.map(x => {
+        const i = slotInfo(S.date, x);
+        const label = i.ok ? (i.few ? '残りわずか' : '空きあり') : (i.open && !i.seatOk ? '満席' : '受付終了');
+        return `<button class="slot ${S.time === x.time ? 'sel' : ''}" data-act="time" data-time="${x.time}" data-session="${k}" ${i.ok ? '' : 'disabled'}>${x.time}<small>${label}</small></button>`;
+      }).join('')}</div>`;
+  });
+  return h;
+}
+
+function coursesHtml() {
+  if (!S.time) return '<div class="sub">時間を選ぶと表示されます。</div>';
+  const now = nowStr();
+  const keys = sessionsAt(S.date, S.time, S.data.rules, st());
+  const list = S.data.courses.filter(c => keys.some(k => c.sessions.indexOf(k) >= 0));
+  if (!list.length) return `<div class="sub">${L(['この時間帯にご案内できる', 'メニューがありません。'], [telLink('お電話') + 'で', 'お問い合わせください。'])}</div>`;
+  return list.map(c => {
+    const k = keys.find(x => c.sessions.indexOf(x) >= 0);
+    const seat = leftAt(index(), S.date, S.time, k, excludeId(), st());
+    const cap = capLeft(c, S.date, S.time, k);
+    const why = courseCheck(c, S.date, S.time, k, S.guests, now, st(), false) || (seat < S.guests ? 'seat' : cap < S.guests ? 'cap' : '');
+    const rule = cutoffRule(c, st());
+    const reason = why === 'deadline' ? '受付終了（' + ruleText(rule) + '）'
+      : why === 'weekday' ? 'この曜日はご用意していません'
+      : why === 'guests' ? c.min_guests + '名様から承ります'
+      : why === 'seat' ? 'この時間は満席です'
+      : why === 'cap' ? 'この時間はこのメニューのご予約がいっぱいです'
+      : why ? 'ご予約いただけません' : '';
+    return `<button class="course ${S.courseId === c.id ? 'sel' : ''}" data-act="course" data-id="${esc(c.id)}" ${why ? 'disabled' : ''}>
+      <div class="name">${esc(c.name)}</div>
+      <div>${priceText(c)}<span class="sub"> ／1名</span></div>
+      ${c.description ? `<div class="sub">${esc(c.description)}</div>` : ''}
+      <div class="sub">${P('ご予約は' + ruleText(rule), c.min_guests > 1 ? '・' + c.min_guests + '名様から' : '')}</div>
+      ${reason ? `<div class="why">${reason}</div>` : ''}
+    </button>`;
+  }).join('');
+}
+
+function altCardHtml() {
+  if (!S.courseId) return '';
+  const opts = altOptions();
+  if (!opts.length) return '';
+  if (!S.altOpen && !S.alt) {
+    return `<button class="addalt" data-act="openAlt">＋ 第2希望を追加する（任意）</button>
+      <div class="sub" style="text-align:center;margin:6px 0 12px">${P('第1希望が難しい場合に、', 'こちらでご案内します。')}</div>`;
+  }
+  return `<div class="card"><div class="h">第2希望<small>Second choice</small></div>
+    <select id="fAlt" aria-label="第2希望の日時"><option value="">選ばない</option>${opts.map(o => {
+      const p = o.split(' ');
+      return `<option value="${o}" ${S.alt === o ? 'selected' : ''}>${jd(p[0])} ${p[1]}</option>`;
+    }).join('')}</select>
+    <div class="sub" style="margin-top:6px">${P('第1希望が難しい場合に、', 'こちらでご案内します。')}</div></div>`;
+}
+
+function altHtml() {
+  if (!S.courseId) return `<div class="sub">${P('第1希望の時間とメニューを', '選ぶと選べます。')}</div>`;
+  const opts = altOptions();
+  if (!opts.length) return `<div class="sub">${P('ほかにご案内できる日時が', 'ありません。')}</div>`;
+  return `<select id="fAlt" aria-label="第2希望の日時"><option value="">なし</option>${opts.map(o => {
+    const p = o.split(' ');
+    return `<option value="${o}" ${S.alt === o ? 'selected' : ''}>${jd(p[0])} ${p[1]}</option>`;
+  }).join('')}</select><div class="sub" style="margin-top:6px">${P('第1希望が難しい場合に、', 'こちらでご案内します。')}</div>`;
+}
+
+function renderDone() {
+  const r = S.done;
+  $('app').innerHTML = `<div class="card" style="text-align:center;padding:28px 20px">
+    <div class="lat" style="font-size:30px;color:var(--red)">Thank you</div>
+    <div class="min" style="font-size:19px">リクエストを受け付けました</div>
+    <div class="note" style="margin:14px 0">${L(
+      'まだご予約は確定していません。',
+      '',
+      ['確認のうえ、' + esc(st().replyHint) + 'に', 'LINEでご連絡いたします。']
+    )}</div>
+    <dl class="kv" style="text-align:left">
+      <dt>第1希望</dt><dd>${jd(r.date)} ${esc(r.time)}</dd>
+      ${r.altDate ? `<dt>第2希望</dt><dd>${jd(r.altDate)} ${esc(r.altTime)}</dd>` : ''}
+      <dt>人数</dt><dd>${r.guests}名</dd>
+      <dt>メニュー</dt><dd>${esc(r.course)}</dd>
+      <dt>お名前</dt><dd>${esc(r.name)} 様</dd>
+    </dl>
+    ${liff.isInClient() ? '<button class="btn dark wide" data-act="close" style="margin-top:8px">LINEのトークに戻る</button>' : ''}
+    <button class="btn wide" data-act="back" style="margin-top:8px">予約ページに戻る</button>
+  </div>`;
+  window.scrollTo(0, 0);
+  if (!M.reduce()) {
+    const card = $('app').firstElementChild;
+    card.animate([{ opacity: 0, transform: 'translateY(14px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 420, easing: 'cubic-bezier(.22, 1, .36, 1)' });
+    Array.prototype.forEach.call(card.children, (el, i) => el.animate([{ opacity: 0, filter: 'blur(4px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 220, delay: 120 + i * 50, easing: 'ease-out', fill: 'backwards' }));
+  }
+}
+
+function renderAccess() {
+  const map = SHOP.mapUrl || 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(SHOP.mapQuery);
+  $('access').innerHTML = `<div class="card access" style="margin-top:20px">
+    <div class="h">アクセス<small>Access</small></div>
+    <div class="lat" style="font-size:26px;line-height:1">${esc(SHOP.name)}</div>
+    <div class="sub" style="margin:6px 0 10px">${esc(SHOP.zip)}<br>${esc(SHOP.address)}<br>${esc(SHOP.building)}</div>
+    ${SHOP.access.map((a, i) => `<div class="row"><span style="color:${i ? 'var(--blue)' : 'var(--red)'}">●</span><div><div>${esc(a[0])}</div><div class="sub">${esc(a[1])}</div></div></div>`).join('')}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+      <a class="btn" href="tel:${SHOP.tel}">${SHOP.tel}</a>
+      <a class="btn" href="${map}" target="_blank" rel="noopener">地図を開く</a>
+    </div></div>`;
+}
+
+/* ---------- 操作 ---------- */
+function keepInputs() {
+  if ($('fSei')) {
+    S.sei = $('fSei').value;
+    S.mei = $('fMei').value;
+    S.phone = $('fPhone').value;
+    S.note = $('fNote').value;
+  }
+}
+
+function scrollToCard(id) {
+  const el = $(id);
+  if (el && el.getBoundingClientRect().top > window.innerHeight * 0.7) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (!b || !S.data) return;
+  const a = b.dataset.act;
+  keepInputs();
+  if (a === 'guests') {
+    S.guests = Math.max(1, Math.min(st().maxGuests, S.guests + Number(b.dataset.d)));
+    S.err = '';
+    render();
+  } else if (a === 'month') {
+    const [y, m] = S.month.split('-').map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + Number(b.dataset.d), 1));
+    S.month = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1);
+    render();
+  } else if (a === 'date') {
+    const ds = dayState(b.dataset.date);
+    if (ds.x) { if (ds.label && !ds.none) track('blocked', { date: b.dataset.date, extra: ds.label, courseId: S.menuFilter || '' }); return; }
+    track('date', { date: b.dataset.date, courseId: S.menuFilter || '' });
+    S.date = b.dataset.date; S.time = ''; S.err = '';
+    render();
+    scrollToCard('timeCard');
+  } else if (a === 'time') {
+    S.time = b.dataset.time; S.session = b.dataset.session; S.err = '';
+    track('time', { date: S.date, time: S.time });
+    render();
+    if (S.menuFilter && S.courseId) track('course', { date: S.date, time: S.time, courseId: S.courseId });
+    scrollToCard('menuCard');
+  } else if (a === 'course') {
+    S.courseId = b.dataset.id;
+    track('course', { date: S.date, time: S.time, courseId: S.courseId });
+    const picked = course(S.courseId);
+    const keys = sessionsAt(S.date, S.time, S.data.rules, st());
+    S.session = (picked && keys.find(k => picked.sessions.indexOf(k) >= 0)) || S.session;
+    S.err = '';
+    render();
+  } else if (a === 'menuFilter') {
+    S.menuFilter = b.dataset.id;
+    if (S.menuFilter) track('filter', { courseId: S.menuFilter });
+    S.courseId = S.menuFilter;
+    if (S.date && dayState(S.date).x) { S.date = ''; }
+    S.time = ''; S.alt = '';
+    if (!S.menuFilter) S.courseId = '';
+    // 選んだメニューを予約できる、いちばん早い月を表示する
+    if (S.menuFilter && !S.date) { const f = firstOpenDate(); if (f) S.month = f.slice(0, 7); }
+    render();
+  } else if (a === 'openAlt') {
+    S.altOpen = true;
+    render();
+  } else if (a === 'submit') {
+    await submit();
+  } else if (a === 'ask') {
+    S.confirm = b.dataset.id;
+    render();
+  } else if (a === 'noask') {
+    S.confirm = '';
+    render();
+  } else if (a === 'startChange') {
+    track('change');
+    S.changeFor = b.dataset.id;
+    const r = S.data.mine.find(x => x.id === S.changeFor);
+    S.guests = Math.min(r.guests, st().maxGuests);
+    S.date = ''; S.time = ''; S.session = ''; S.courseId = ''; S.alt = ''; S.err = '';
+    S.month = r.date.slice(0, 7);
+    render();
+    scrollToCard('timeCard');
+    window.scrollTo(0, 0);
+  } else if (a === 'stopChange') {
+    S.changeFor = ''; S.date = ''; S.time = ''; S.courseId = ''; S.err = '';
+    render();
+  } else if (a === 'cancel') {
+    const mo = M.busy(b);
+    try {
+      const d = await api(b.dataset.kind === 'chg' ? 'cancelChange' : b.dataset.status === '提案中' ? 'decline' : 'cancel', { id: b.dataset.id });
+      await mo.ok();
+      setData(d.data, true);
+      S.confirm = '';
+      toast(d.message || (b.dataset.kind === 'chg' ? '変更の申し込みを取り下げました' : 'ご提案を見送りました'));
+      render();
+    } catch (err) { mo.fail(); alert(err.message); }
+  } else if (a === 'accept') {
+    const mo = M.busy(b);
+    try {
+      const d = await api('accept', { id: b.dataset.id });
+      await mo.ok();
+      setData(d.data, true);
+      toast('ご予約が確定しました');
+      render();
+    } catch (err) {
+      mo.fail();
+      alert(err.message);
+      try { setData((await api('init')).data, true); } catch (e2) { /* 表示はそのまま */ }
+      render();
+    }
+  } else if (a === 'recheck') {
+    try { S.friend = (await liff.getFriendship()).friendFlag; } catch (err) { S.friend = true; }
+    if (!S.friend) toast('まだ友だち追加が確認できません');
+    render();
+  } else if (a === 'close') {
+    liff.closeWindow();
+  } else if (a === 'back') {
+    S.done = null;
+    S.date = ''; S.time = ''; S.courseId = ''; S.alt = ''; S.note = '';
+    render();
+    window.scrollTo(0, 0);
+  }
+});
+
+document.addEventListener('change', e => {
+  if (e.target.id === 'fAlt') S.alt = e.target.value;
+});
+
+document.addEventListener('input', e => {
+  if ((e.target.id === 'fSei' || e.target.id === 'fMei' || e.target.id === 'fPhone') && S.err) {
+    S.err = '';
+    const el = $('formErr');
+    if (el) el.textContent = '';
+  }
+});
+
+async function submit() {
+  const err = !S.date ? '日付をお選びください。'
+    : !S.time ? '時間をお選びください。'
+    : !S.courseId ? 'メニューをお選びください。'
+    : S.changeFor ? ''
+    : !S.sei.trim() ? '姓をご入力ください。'
+    : !S.mei.trim() ? '名をご入力ください。'
+    : S.phone.replace(/\D/g, '').length < 10 ? '電話番号を正しくご入力ください。'
+    : !S.friend ? '先にépiiを友だち追加してください（お返事をLINEでお送りするため）。'
+    : '';
+  if (err) {
+    S.err = err;
+    render();
+    $('formErr').scrollIntoView({ block: 'center' });
+    return;
+  }
+  S.busy = true;
+  S.err = '';
+  if ($('formErr')) $('formErr').textContent = '';
+  const mo = M.busy(document.querySelector('[data-act="submit"]'));
+  const alt = S.alt ? S.alt.split(' ') : ['', ''];
+  try {
+    if (S.changeFor) {
+      const d = await api('change', { data: { id: S.changeFor, date: S.date, time: S.time, guests: S.guests, courseId: S.courseId } });
+      await mo.ok();
+      setData(d.data, true);
+      S.changeFor = ''; S.date = ''; S.time = ''; S.courseId = '';
+      S.busy = false;
+      render();
+      window.scrollTo(0, 0);
+      toast('変更をリクエストしました');
+      return;
+    }
+    const d = await api('request', {
+      data: {
+        date: S.date, time: S.time, guests: S.guests, courseId: S.courseId,
+        sei: S.sei.trim(), mei: S.mei.trim(), phone: S.phone, note: S.note, altDate: alt[0], altTime: alt[1]
+      }
+    });
+    await mo.ok();
+    store('epiiSei', S.sei.trim());
+    store('epiiMei', S.mei.trim());
+    store('epiiPhone', S.phone.trim());
+    setData(d.data, true);
+    S.done = d.reservation;
+  } catch (e) {
+    mo.fail();
+    S.err = e.message;
+    try { setData((await api('init')).data, true); } catch (e2) { /* 表示はそのまま */ }
+  }
+  S.busy = false;
+  render();
+  if (S.err) $('formErr').scrollIntoView({ block: 'center' });
+}
+
+window.addEventListener('error', e => {
+  if (!S.data) showFatal('ページの表示中に問題が起きました。', 'JS ' + (e.message || ''));
+});
+window.addEventListener('unhandledrejection', e => {
+  if (!S.data) showFatal('ページの表示中に問題が起きました。', 'PROMISE ' + ((e.reason && e.reason.message) || e.reason || ''));
+});
+
+main();
+</script>
+</body>
+</html>
