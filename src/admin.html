@@ -359,6 +359,10 @@
   .txwhy { margin-top: 6px; }
   .gcalc > div { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 13px; } .gcalc span { color: var(--sub); font-size: 12px; flex-shrink: 0; } .gcalc b { margin-left: auto; text-align: right; }
   .gcalc b small { display: block; font-size: 10px; font-weight: 400; color: var(--sub); }
+  .bk { padding: 10px 0; border-top: 1px solid var(--line); }
+  .bk .top { display: flex; gap: 8px; align-items: baseline; font-size: 13px; } .bk .nm { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .bk .am { font-weight: 700; white-space: nowrap; }
+  .bk .why { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; } .bk .why b { color: var(--amber); font-weight: 600; flex-shrink: 0; } .bk .why span { color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bk .acts { align-items: center; margin-top: 6px; } .bk select { width: auto; flex: 1; min-width: 0; font-size: 14px; padding: 6px 8px; }
   .custlist { margin-top: 8px; } .custrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
   .custrow .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pvnote { font-size: 12px; color: var(--amber); margin-bottom: 6px; white-space: normal; }
@@ -1511,8 +1515,14 @@ ACTIONS.today = async (a, b) => {
     refresh(); window.scrollTo(0, 0);
     loadRcpt();
     loadTx();
+    loadBook();
     return;
   }
+  if (a === 'bookFix') { await bookFix(b); return; }
+  if (a === 'bookIgnore') { await bookCall(b, 'bookIgnore', { key: b.dataset.k }, 'このままにしました'); return; }
+  if (a === 'bookAi') { await bookAi(); return; }
+  if (a === 'bookMore') { S.rcpt.bookAll = true; refresh(); return; }
+  if (a === 'bookDays') { S.rcpt.bookDays = Object.assign({}, S.rcpt.bookDays, { [b.dataset.v]: true }); refresh(); return; }
   if (a === 'rcptForce') {
     if (!confirm('口座の明細を待たずに登録しますか？（あとで明細が届いたら、マネーフォワードで二重になっていないか確かめてください）')) return;
     try { const r = await api('rcptForce', { id: b.dataset.id }); S.rcptInfo.list = r.list; refresh(); toast(r.matched ? '口座の明細が見つかったので、結びつけました' : '登録しました'); } catch (e) { fail(e); }
@@ -3324,7 +3334,8 @@ function rcptButton() {
   const L = S.rcptInfo && S.rcptInfo.list;
   let tag = '';
   if (L) {
-    if (L.txCount) tag = `<span class="tag amber">口座の明細 ${L.txCount}件</span>`;
+    if (L.bookN) tag = `<span class="tag amber">直すところ ${L.bookN}件</span>`;
+    else if (L.txCount) tag = `<span class="tag amber">口座の明細 ${L.txCount}件</span>`;
     else if (L.idle === null || L.idle >= 7) tag = `<span class="tag amber">${L.idle === null ? 'まだ登録なし' : L.idle + '日登録なし'}</span>`;
     else tag = `<span class="tag blue">今月 ${L.count}件</span>`;
   }
@@ -3468,6 +3479,7 @@ function rcptHtml() {
       <div class="sub" style="margin-top:8px">${phr('科目は、これまでにマネーフォワードに登録したお店に合わせて選んでいます。')}</div></div>`;
   }
   h += txHtml();
+  h += bookHtml();
   const L = S.rcptInfo && S.rcptInfo.list;
   if (L) {
     h += `<div class="card rlist" data-key="rlist"><h2>登録したレシート <span class="cnt">今月 ${L.count}件 ${yen(L.total)}</span></h2>
@@ -3481,6 +3493,81 @@ function rcptHtml() {
   return h;
 }
 function rcptItem(id) { return S.rcpt ? S.rcpt.queue.find(q => q.id === id) : null; }
+/* ---------- 帳簿のチェック：登録がおかしい仕訳を見つけて、ここで直す（マネーフォワードを開かなくてよい） ---------- */
+async function loadBook(force) {
+  const R = S.rcpt;
+  try { R.book = await api('book', { force: !!force }); }
+  catch (e) { R.book = { connected: true, err: e.message, issues: [], sales: [] }; }
+  if (R === S.rcpt && S.tab === 'today') renderWhenIdle('today');
+}
+function bookAccounts() {
+  const T = S.rcpt.tx;
+  return (T && T.accounts) || S.rcpt.accounts || [];
+}
+function bookRow(x) {
+  const k = esc(x.key);
+  let acts = '';
+  if (x.kind === 'same') {
+    const list = bookAccounts();
+    acts = `<select data-bk="${k}" aria-label="科目">${x.to ? '' : '<option value="">科目を選ぶ</option>'}${list.map(a => `<option value="${esc(a.name)}" ${a.name === ((S.rcpt.bookSel || {})[x.key] || x.to) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select><button class="btn small primary" data-act="bookFix" data-k="${k}">直す</button>`;
+  } else if (x.kind === 'ap') {
+    acts = `<button class="btn small" data-act="bookFix" data-k="${k}" data-to="現金">現金で払った</button><button class="btn small" data-act="bookFix" data-k="${k}" data-to="普通預金">口座から払った</button>`;
+  } else if (x.kind === 'pair') {
+    acts = `<button class="btn small" data-act="bookFix" data-k="${k}">消す</button>`;
+  } else if (x.fix) {
+    acts = `<button class="btn small primary" data-act="bookFix" data-k="${k}">${esc(x.to)}にする</button>`;
+  }
+  return `<div class="bk" data-key="bk:${k}">
+    <div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.remark || '（摘要なし）')}</span><span class="am">${yen(x.amount)}</span></div>
+    <div class="why">${x.ai ? spark() : ''}<b>${esc(x.title)}</b><span>${esc(x.detail)}</span></div>
+    <div class="acts">${acts}<button class="btn small ghost" data-act="bookIgnore" data-k="${k}">${x.fix ? 'このまま' : 'わかった'}</button></div>
+  </div>`;
+}
+function bookHtml() {
+  const B = S.rcpt.book;
+  if (!B || B.connected === false) return B ? '' : `<div class="card" data-key="book"><h2>${icon('i-check-ink')}帳簿のチェック</h2>${aiThink('マネーフォワードの帳簿を読んでいます')}</div>`;
+  const issues = B.issues || [];
+  const show = S.rcpt.bookAll ? issues : issues.slice(0, 5);
+  let h = `<div class="card" data-key="book"><h2>${icon('i-check-ink')}帳簿のチェック <span class="cnt">${B.from ? Number(B.from.slice(5, 7)) + '月から' : ''}</span></h2>`;
+  if (B.err) h += `<div class="warn">${phr(B.err)}</div>`;
+  if (!issues.length) h += '<div class="okbar">' + icon('i-check-ink') + 'おかしいところはありません</div>';
+  else h += `<div class="sub" style="margin-bottom:4px">${phr('直すと、マネーフォワードの仕訳も直ります。')}</div>` + show.map(bookRow).join('') + (issues.length > show.length ? `<button class="more2" data-act="bookMore">ほか ${issues.length - show.length}件を見る</button>` : '');
+  if (S.features.ai) h += `<div class="acts" style="margin-top:10px">${S.rcpt.bookWait ? aiThink('Claudeが科目を見ています', true) : `<button class="btn small" data-act="bookAi">${spark()}Claudeに科目も見てもらう</button>${B.aiAt ? `<span class="sub">${esc(B.aiAt.slice(5, 10).replace('-', '/'))}に確認</span>` : ''}`}</div>`;
+  const sales = B.sales || [];
+  if (sales.length) {
+    const open = S.rcpt.bookDays || {};
+    h += `<h3>売上の照らし合わせ</h3><div class="sub">Square ／ マネーフォワード（おとといまで）</div><div class="gcalc">${sales.map(m => `<div><span>${Number(m.ym.slice(5))}月</span><b>${m.diffN ? `<span class="neg">差 ${yen(Math.abs(m.sq - m.mf))}</span>` : '一致'}<small>${yen(m.sq)} ／ ${yen(m.mf)}${m.other ? '（ほかに振込などの売上 ' + yen(m.other) + '）' : ''}</small>${m.diffN ? (open[m.ym] ? `<small>${m.diff.map(d => jdShort(d.date) + ' ' + yen(d.sq) + '／' + yen(d.mf)).join('<br>')}</small>` : `<button class="more2" data-act="bookDays" data-v="${m.ym}" style="padding:2px 0 0">合わない${m.diffN}日を見る</button>`) : ''}</b></div>`).join('')}</div>`;
+    if (sales.some(m => m.diffN)) h += `<div class="sub" style="margin-top:4px">${phr('合わない日は、マネーフォワードでSquareの明細の登録漏れや二重登録がないか見てください。')}</div>`;
+  }
+  return h + '</div>';
+}
+async function bookCall(b, name, body, msg) {
+  const mo = M.busy(b);
+  try {
+    const r = await api(name, body);
+    await mo.ok();
+    const el = body.key && document.querySelector(`[data-key="bk:${CSS.escape(body.key)}"]`);
+    if (el) await M.collapse(el);
+    S.rcpt.book = r;
+    if (S.rcptInfo && S.rcptInfo.list) S.rcptInfo.list.bookN = r.issues.filter(x => x.fix).length;
+    refresh();
+    if (msg) toast(msg);
+  } catch (e) { mo.fail(); fail(e); }
+}
+async function bookFix(b) {
+  const x = (S.rcpt.book.issues || []).find(i => i.key === b.dataset.k);
+  if (!x) return;
+  let to = b.dataset.to || x.to || '';
+  if (x.kind === 'same') { const sel = document.querySelector(`[data-bk="${CSS.escape(x.key)}"]`); to = sel ? sel.value : to; if (!to) { toast('科目を選んでください'); return; } }
+  if (x.kind === 'pair' && !confirm('この仕訳をマネーフォワードから消します。よろしいですか？')) return;
+  await bookCall(b, 'bookFix', { id: x.id, bi: x.bi, kind: x.kind, to: to, date: x.date, key: x.key }, x.kind === 'pair' ? '消しました' : '直しました');
+}
+async function bookAi() {
+  S.rcpt.bookWait = true; refresh();
+  try { S.rcpt.book = await api('bookAi'); } catch (e) { fail(e); }
+  S.rcpt.bookWait = false;
+  refresh();
+}
 async function loadTx() {
   const R = S.rcpt;
   try {
@@ -4073,6 +4160,7 @@ $('view').addEventListener('change', e => {
   if (e.target.id === 'rcptCam' || e.target.id === 'rcptLib') { rcptFiles(e.target); return; }
   if (e.target.id === 'igPhoto') { igPhoto(e.target); return; }
   if (S.tab === 'today') {
+    if (e.target.dataset.bk && S.rcpt) { S.rcpt.bookSel = S.rcpt.bookSel || {}; S.rcpt.bookSel[e.target.dataset.bk] = e.target.value; return; }
     if (e.target.dataset.txpick && S.rcpt) {
       S.rcpt.txOff = S.rcpt.txOff || {};
       if (e.target.checked) delete S.rcpt.txOff[e.target.dataset.txpick]; else S.rcpt.txOff[e.target.dataset.txpick] = true;

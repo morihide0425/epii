@@ -11,6 +11,7 @@ const add = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.get
 const wd = s => new Date(s + 'T00:00:00Z').getUTCDay();
 const T = jst();
 const post = async (path, body, headers = {}) => { const r = await fetch(B + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body || {}) }); return { status: r.status, body: await r.json() }; };
+const bkOf0 = (r, k) => r.body.issues.find(x => x.id === k);
 const wait = async (fn, ms = 4000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 50)); } return false; };
 let ok = 0; const check = (c, m) => { assert(c, m); ok++; };
 try {
@@ -249,6 +250,33 @@ try {
   const dup = res.body.list.find(t => t.id === 'TX%3D7');
   check(dup && dup.dupe && dup.dupe.payee === '阿倍野青果', 'possible duplicate warned ' + JSON.stringify(dup));
   txs.splice(txs.findIndex(t => t.id === 'TX%3D7'), 1);
+  // 帳簿のチェック：まちがいを見つけて、この画面から直す（既に登録してある仕訳も）
+  res = await post('/admin/api/book', {}, A);
+  const bkOf = k => res.body.issues.find(x => x.id === k);
+  check(res.body.connected && bkOf('BK1') && bkOf('BK1').kind === 'same' && bkOf('BK1').to === '仕入高' && bkOf('BK2').to === '事業主貸', 'same-account entries found ' + JSON.stringify(res.body.issues.map(x => [x.id, x.kind, x.to])));
+  check(bkOf('BK3').kind === 'pair' && bkOf('BK5').kind === 'vs' && bkOf('BK5').to === '通信費' && bkOf('BK6').kind === 'ap' && res.body.issues.some(x => x.kind === 'ar' && x.amount === 3410) && bkOf('BK9').kind === 'big', 'other checks');
+  check(res.body.sales.length >= 1 && res.body.sales.some(m => m.diffN > 0), 'sales comparison ' + JSON.stringify(res.body.sales.slice(-1)));
+  check(!String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text).includes('タキグチ'), 'transfer names not sent');
+  res = await post('/admin/api/rcptList', {}, A);
+  check(res.body.list.bookN > 0, 'count on the expense button');
+  const jOf = k => journals.find(x => x.id === k);
+  res = await post('/admin/api/bookFix', { id: 'BK1', bi: 0, kind: 'same', to: '仕入高', date: T }, A);
+  check(jOf('BK1').branches[0].debitor.account_id === 'A%3D1' && jOf('BK1').branches[0].creditor.account_id === 'A%3D5' && !res.body.issues.some(x => x.id === 'BK1'), 'fixed cash/cash to 仕入高');
+  res = await post('/admin/api/bookFix', { id: 'BK6', bi: 0, kind: 'ap', to: '現金', date: add(T, -20) }, A);
+  check(jOf('BK6').branches[0].creditor.account_id === 'A%3D5', 'paid in cash');
+  res = await post('/admin/api/bookFix', { id: 'BK5', bi: 0, kind: 'vs', to: '通信費', date: T }, A);
+  check(jOf('BK5').branches[0].creditor.account_id === 'A%3D10', 'refund to 通信費');
+  res = await post('/admin/api/bookFix', { id: 'BK3', kind: 'pair', date: T }, A);
+  check(!jOf('BK3') && !res.body.issues.some(x => x.id === 'BK3'), 'meaningless pair deleted');
+  res = await post('/admin/api/bookIgnore', { key: bkOf0(res, 'BK9').key }, A);
+  check(!res.body.issues.some(x => x.id === 'BK9'), 'ignore');
+  res = await post('/admin/api/bookAi', {}, A);
+  const ai1 = res.body.issues.find(x => x.kind === 'acct' && x.id === 'BK8');
+  const bkText = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
+  check(ai1 && ai1.to === '仕入高' && ai1.ai && !bkText.includes('タキグチ') && bkText.includes('振込（相手）'), 'Claude review ' + JSON.stringify(ai1));
+  res = await post('/admin/api/bookFix', { id: 'BK8', bi: 0, kind: 'acct', to: '仕入高', date: T }, A);
+  check(jOf('BK8').branches[0].debitor.account_id === 'A%3D1' && !res.body.issues.some(x => x.id === 'BK8'), 'Claude suggestion applied');
+
   // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
   res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);
   check(res.body.answer.includes('売上') && res.body.remember === '', 'chat ' + JSON.stringify(res.body));

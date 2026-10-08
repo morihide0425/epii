@@ -706,8 +706,14 @@ async function mfMonth(env, ym, maxAge) {
     m.accounts.forEach(a => { acc[a.id] = a; });
     const gross = m.method !== 'TAX_EXCLUDED';
     const lines = [];
+    const comp = [];
+    const nm = side => (side && side.account_id && acc[side.account_id] ? acc[side.account_id].name : '');
+    const amt = side => (side ? (Number(side.value) || 0) + (Number(side.tax_value) || 0) : 0);
     for (let page = 1; page <= 20; page++) {
       const j = await mfApi(env, 'GET', '/journals', { start_date: ym + '-01', end_date: monthLast(ym), per_page: 1000, page: page });
+      // 帳簿のチェック用に、仕訳を小さくして手元に置く（科目名・金額・摘要だけ）
+      (j.journals || []).forEach(jr => comp.push({ i: String(jr.id || ''), d: jr.transaction_date, t: jr.transaction_id ? 1 : 0, m: clean(jr.memo || '', 60),
+        b: (jr.branches || []).map(br => [nm(br.debitor), amt(br.debitor), nm(br.creditor), amt(br.creditor), clean(br.remark || '', 60)]) }));
       (j.journals || []).forEach(jr => (jr.branches || []).forEach(br => {
         [['debitor', 1], ['creditor', -1]].forEach(x => {
           const side = br[x[0]];
@@ -725,6 +731,8 @@ async function mfMonth(env, ym, maxAge) {
     lines.forEach(l => stmts.push(env.DB.prepare('INSERT INTO mf_lines (jid, date, ym, account, value, remark) VALUES (?, ?, ?, ?, ?, ?)').bind(l[0], l[1], ym, l[2], l[3], l[4])));
     for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));
     await kvPut(env, 'mfs:' + ym, { at: Date.now(), n: lines.length });
+    const cj = JSON.stringify(comp);
+    if (cj.length < 1500000) await env.DB.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)").bind('mfj:' + ym, cj).run();
   }
   const rows = (await env.DB.prepare('SELECT date, account, value, remark FROM mf_lines WHERE ym = ?').bind(ym).all()).results;
   return { rows: rows.map(r => [r.date, r.account, r.value, r.remark]) };
@@ -865,7 +873,9 @@ async function rcptList(env) {
   ]);
   const last = rs[2].results[0].last || '';
   const tx = await kvGet(env, 'mfTxCount');
+  const bk = await kvGet(env, 'bookCount');
   return {
+    bookN: bk ? bk.n : 0,
     count: rs[0].results[0].n, total: rs[0].results[0].total, waiting: rs[3].results[0].n,
     last: last, idle: last ? diffDays(last.slice(0, 10), now.slice(0, 10)) : null,
     txCount: tx ? tx.n : 0,
@@ -1711,6 +1721,9 @@ async function weeklyReport(env, force) {
       const tx = await adminMfTx(env, { suggest: false });
       if (tx.list && tx.list.length) exp.push('口座から出たお金で、まだ登録していないものが' + tx.list.length + '件あります');
       if (L.items.some(x => x.old)) exp.push('口座の明細が見つからないレシートがあります（今日の画面＞レシートを登録）');
+      const bk = await adminBook(env, {}).catch(() => null);
+      const bn = bk && bk.issues ? bk.issues.filter(x => x.fix).length + (bk.sales || []).filter(x => x.diffN).length : 0;
+      if (bn) exp.push('帳簿で直したほうがよいところが' + bn + '件あります（今日の画面＞経費を登録で直せます）');
     } catch (e) { console.error('週のまとめ：経費', e.message); }
     if (exp.length) lines.push('', '【経費の登録】', ...exp.map(x => '・' + x));
   }
@@ -2280,4 +2293,205 @@ async function adminPrep(env, b) {
     return { cfg: cfg, preview: { date: memo.date, next: next ? next.date : '', text: text, sent: !!b.send, sample: !!memo.sample, note: why } };
   }
   return { cfg: cfg, parts: PREP_PARTS };
+}
+
+/* ---------- (6) 帳簿のチェック：登録がおかしい仕訳を見つけて、この画面から直す ----------
+ * 確定申告の年の仕訳（1〜3月は前の年の分も）を対象に、決まったルールで見つける。直すのは店主が押したときだけ。
+ * Square の売上とマネーフォワードの売上も、月ごと・日ごとに照らし合わせる */
+function bookMonths(today) {
+  const y = Number(today.slice(0, 4)) - (Number(today.slice(5, 7)) <= 3 ? 1 : 0);
+  return monthsBetween(y + '-01-01', today);
+}
+async function bookJournals(env, months, force) {
+  const cur = jstStamp(Date.now()).slice(0, 7);
+  await eachLimit(months, 3, async ym => { await mfMonth(env, ym, mfAge(ym, cur, force)); });
+  const out = [];
+  for (const ym of months) {
+    const r = await env.DB.prepare('SELECT v FROM kv WHERE k = ?').bind('mfj:' + ym).first();
+    if (!r) { await env.DB.prepare('DELETE FROM kv WHERE k = ?').bind('mfs:' + ym).run(); continue; }
+    try { JSON.parse(r.v).forEach(j => out.push(j)); } catch (e) { /* 読めない月は飛ばす */ }
+  }
+  return out.sort((a, b) => (a.d + a.i).localeCompare(b.d + b.i));
+}
+const BOOK_EXPENSE = /仕入|費|料|家賃|賃|税|手当|給|消耗|雑損/;
+function bookRemark(j, bi) {
+  const own = j.b[bi] && j.b[bi][4];
+  return own || j.b.map(x => x[4]).find(Boolean) || j.m || '';
+}
+// 振込の相手（個人名）は Claude に送らない
+function maskRemark(v) {
+  return noPrivate(String(v || ''), 80).replace(/(振込|ﾌﾘｺﾐ|フリコミ)\s*[ｦ-ﾟァ-ヶー･・ 　]+/g, '$1（相手）');
+}
+async function bookIssues(env, force) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const months = bookMonths(today);
+  const js = await bookJournals(env, months, force);
+  const ign = (await kvGet(env, 'bookIgnore')) || {};
+  const issues = [];
+  const add = x => { if (!ign[x.key]) issues.push(x); };
+  // 前に登録した摘要と科目（科目の提案に使う）
+  const pastAcc = {};
+  js.forEach(j => j.b.forEach(br => { if (br[0] && BOOK_EXPENSE.test(br[0]) && br[4]) pastAcc[txKey(br[4])] = br[0]; }));
+  js.forEach(j => {
+    // (1) 借方と貸方が同じ科目：何も記録されていないのと同じ
+    j.b.forEach((br, bi) => {
+      if (br[0] && br[0] === br[2]) {
+        const rm = bookRemark(j, bi);
+        const guess = /生計|生活|家族|個人|私用/.test(rm) ? '事業主貸' : pastAcc[txKey(rm)] || '';
+        add({ key: 'same:' + j.i + ':' + bi, kind: 'same', id: j.i, bi: bi, date: j.d, amount: br[1], remark: rm, title: '中身が空の仕訳', detail: br[0] + '／' + br[2], side: 'debit', to: guess, fix: true });
+      }
+    });
+    // (2) 事業主貸と事業主借だけの仕訳：意味がない（消してよい）
+    if (j.b.length && j.b.every(br => (br[0] === '事業主貸' || !br[0]) && (br[2] === '事業主借' || !br[2]))) {
+      add({ key: 'pair:' + j.i, kind: 'pair', id: j.i, date: j.d, amount: j.b.reduce((a, br) => a + br[1], 0), remark: bookRemark(j, 0), title: '意味のない仕訳', detail: '事業主貸／事業主借', fix: true });
+    }
+    // (3) デビットの差額の返金（Vサガク）が雑収入：元の支払いの科目のマイナスにする
+    j.b.forEach((br, bi) => {
+      const rm = bookRemark(j, bi);
+      const m = rm.normalize('NFKC').match(/Vサガク\s*(\d{5,})/i) || rm.match(/Vｻｶﾞｸ\s*(\d{5,})/i);
+      if (br[2] === '雑収入' && m) {
+        const orig = js.find(o => o.b.some(x => x[0] && BOOK_EXPENSE.test(x[0]) && String(x[4]).normalize('NFKC').indexOf('V' + m[1]) >= 0));
+        const acc = orig ? orig.b.find(x => x[0] && BOOK_EXPENSE.test(x[0]))[0] : '';
+        if (acc) add({ key: 'vs:' + j.i + ':' + bi, kind: 'vs', id: j.i, bi: bi, date: j.d, amount: br[3], remark: rm, title: 'デビットの返金が雑収入', detail: acc + 'の返金にできます', side: 'credit', to: acc, fix: true });
+      }
+    });
+  });
+  // (4) 買掛金・未払金が14日以上残っている（払ったのに記録がないかも）
+  ['買掛金', '未払金'].forEach(an => {
+    const open = [];
+    js.forEach(j => j.b.forEach((br, bi) => {
+      if (br[2] === an) open.push({ j: j, bi: bi, v: br[3] });
+      if (br[0] === an) { let v = br[1]; while (v > 0 && open.length) { const o = open[0]; const use = Math.min(v, o.v); o.v -= use; v -= use; if (o.v <= 0) open.shift(); } }
+    }));
+    open.filter(o => o.v > 0 && diffDays(o.j.d, today) >= 14).forEach(o => add({ key: 'ap:' + o.j.i + ':' + o.bi, kind: 'ap', id: o.j.i, bi: o.bi, date: o.j.d, amount: o.v, remark: bookRemark(o.j, o.bi), title: 'まだ払っていないことに', detail: an + 'のまま', side: 'credit', from: an, fix: true }));
+  });
+  // (5) 未収金（Squareのカード売上）が10日以上入金されていない
+  let ar = 0, arSince = '';
+  js.forEach(j => j.b.forEach(br => { if (br[0] === '未収金') { if (!ar) arSince = j.d; ar += br[1]; } if (br[2] === '未収金') { ar -= br[3]; if (ar <= 0) { ar = 0; arSince = ''; } } }));
+  if (ar > 0 && arSince && diffDays(arSince, today) >= 10) add({ key: 'ar:' + arSince, kind: 'ar', date: arSince, amount: ar, remark: '', title: 'Squareの入金が来ていないかも', detail: '未収金が' + jdShort(arSince) + 'から残っています', fix: false });
+  // (6) 10万円以上の消耗品：まとめて経費にできないことがある
+  js.forEach(j => j.b.forEach((br, bi) => { if (br[0] === '消耗品費' && br[1] >= 100000) add({ key: 'big:' + j.i + ':' + bi, kind: 'big', id: j.i, date: j.d, amount: br[1], remark: bookRemark(j, bi), title: '10万円以上の消耗品', detail: '固定資産になることがあります', fix: false }); }));
+  // Claude に見てもらった結果（押したときだけ作る）
+  const ai = await kvGet(env, 'bookAi');
+  if (ai && ai.items) ai.items.forEach(x => { const j = js.find(o => o.i === x.id); if (j && j.b[x.bi] && j.b[x.bi][0] === x.from) add(Object.assign({ key: 'ai:' + x.id + ':' + x.bi + ':' + x.to, kind: 'acct', date: j.d, amount: j.b[x.bi][1], remark: bookRemark(j, x.bi), title: x.why, detail: x.from + ' → ' + x.to, side: 'debit', fix: true, ai: true }, x)); });
+  // 科目の見当がつかない「中身が空の仕訳」は Claude にすすめてもらう（摘要だけ送る）
+  const unknown = issues.filter(x => x.kind === 'same' && !x.to);
+  if (unknown.length && env.ANTHROPIC_API_KEY) {
+    try {
+      const m = await mfMaster(env);
+      const opts = txOptions(m, await expenseOptions(env, m));
+      const text = unknown.map((x, i) => i + '｜' + x.date + '｜' + maskRemark(x.remark) + '｜¥' + x.amount).join('\n');
+      const src = await hashOf(text);
+      const hit = await aiCacheGet(env, 'booksame');
+      let got = hit && hit.src === src ? hit.v : null;
+      if (!got) {
+        const out = await claude(env, { system: TX_SYSTEM, effort: 'low', maxTokens: 4000,
+          content: [{ type: 'text', text: '勘定科目の一覧：' + accountList(opts) + '\n\n現金で払ったものの摘要（番号｜日付｜摘要｜金額）：\n' + text }],
+          schema: strSchema({ items: { type: 'array', items: strSchema({ id: { type: 'string' }, account: { type: 'string' }, rate: { type: 'string', enum: ['8', '10', 'none'] }, reason: { type: 'string' }, unsure: { type: 'boolean' }, sure: { type: 'boolean' } }) } }) });
+        got = {};
+        (out.items || []).forEach(o => { if (opts.some(a => a.name === o.account)) got[String(o.id)] = o.account; });
+        await aiCachePut(env, 'booksame', src, got);
+      }
+      unknown.forEach((x, i) => { if (got[String(i)]) { x.to = got[String(i)]; x.ai = true; } });
+    } catch (e) { console.error('帳簿のチェック：科目', e && e.message); }
+  }
+  issues.sort((a, b) => (b.fix ? 1 : 0) - (a.fix ? 1 : 0) || String(a.date).localeCompare(String(b.date)));
+  return { issues: issues, js: js, months: months };
+}
+// Square の売上と、マネーフォワードの売上（Square連携の仕訳）を月ごとに照らし合わせる
+async function bookSales(env, js, months) {
+  if (!features(env).square) return [];
+  try { await sqEnsure(env, months, 6 * 3600000); } catch (e) { return []; }
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const mfDay = {}, other = {};
+  js.forEach(j => {
+    let v = 0;
+    j.b.forEach(br => { if (br[2] === '売上高') v += br[3]; if (br[0] === '売上高' || br[0] === '売上値引・返品') v -= br[1]; });
+    if (!v) return;
+    const sq = j.b.some(br => /お取引/.test(br[4])) || /お取引/.test(j.m);
+    if (sq) mfDay[j.d] = (mfDay[j.d] || 0) + v; else other[j.d.slice(0, 7)] = (other[j.d.slice(0, 7)] || 0) + v;
+  });
+  // マネーフォワードのSquare連携は1日ほど遅れて届くので、おとといまでで比べる
+  const until = addDays(today, -2);
+  const rows = (await env.DB.prepare("SELECT date, SUM(amount - refunded) AS v FROM sq_payments WHERE status = 'COMPLETED' AND date BETWEEN ? AND ? GROUP BY date").bind(months[0] + '-01', until).all()).results;
+  const sqDay = {};
+  rows.forEach(r => { sqDay[r.date] = r.v; });
+  return months.map(ym => {
+    const days = Object.keys(Object.assign({}, sqDay, mfDay)).filter(d => d.slice(0, 7) === ym && d <= until).sort();
+    const sq = days.reduce((a, d) => a + (sqDay[d] || 0), 0);
+    const mf = days.reduce((a, d) => a + (mfDay[d] || 0), 0);
+    const diff = days.filter(d => (sqDay[d] || 0) !== (mfDay[d] || 0)).map(d => ({ date: d, sq: sqDay[d] || 0, mf: mfDay[d] || 0 }));
+    return { ym: ym, sq: sq, mf: mf, other: other[ym] || 0, diff: diff.slice(0, 31), diffN: diff.length };
+  }).filter(x => x.sq || x.mf);
+}
+async function adminBook(env, b) {
+  if (!env.MF_API_KEY) return { connected: false };
+  const r = await bookIssues(env, b && b.force);
+  const sales = await bookSales(env, r.js, r.months).catch(() => []);
+  const n = r.issues.filter(x => x.fix).length + sales.filter(x => x.diffN).length;
+  await kvPut(env, 'bookCount', { n: n, at: Date.now() });
+  return { connected: true, issues: r.issues.map(x => { const y = Object.assign({}, x); delete y.js; return y; }), sales: sales, from: r.months[0], aiAt: ((await kvGet(env, 'bookAi')) || {}).at || '' };
+}
+// 直す（店主が押したときだけ）：マネーフォワードの仕訳を書き換える／消す
+async function adminBookFix(env, b) {
+  const id = String(b.id || '');
+  if (!id) fail('仕訳が見つかりません。');
+  const m = await mfMaster(env);
+  const byName = n => m.accounts.find(a => a.name === n);
+  if (b.kind === 'pair') {
+    await mfApi(env, 'DELETE', '/journals/' + encodeURIComponent(id));
+  } else {
+    const g = await mfApi(env, 'GET', '/journals/' + encodeURIComponent(id));
+    const jr = g.journal || {};
+    const bi = Number(b.bi) || 0;
+    if (!jr.branches || !jr.branches[bi]) fail('仕訳が見つかりません。マネーフォワードで変わったかもしれません。画面を更新してください。');
+    const to = byName(String(b.to || ''));
+    if (!to) fail('科目を選んでください。');
+    const side = b.kind === 'ap' || b.kind === 'vs' ? 'creditor' : 'debitor';
+    const pick = sd => { if (!sd) return sd; const o = { account_id: sd.account_id, value: (Number(sd.value) || 0) + (Number(sd.tax_value) || 0) }; if (sd.sub_account_id) o.sub_account_id = sd.sub_account_id; if (sd.tax_id) o.tax_id = sd.tax_id; if (sd.invoice_kind) o.invoice_kind = sd.invoice_kind; return o; };
+    const branches = jr.branches.map((br, i) => {
+      const nb = { debitor: pick(br.debitor), creditor: pick(br.creditor), remark: br.remark || '' };
+      if (i === bi) {
+        nb[side] = Object.assign({}, nb[side], { account_id: to.id });
+        delete nb[side].sub_account_id;
+        // 自分のために使ったお金・現金・預金は消費税なし
+        if (to.name === '事業主貸' || to.group === 'ASSET' || to.group === 'LIABILITY') { const t = pickTax(m.taxes, 'none'); if (t) nb[side].tax_id = t; else delete nb[side].tax_id; }
+      }
+      return nb;
+    });
+    await mfApi(env, 'PUT', '/journals/' + encodeURIComponent(id), null, { journal: { transaction_date: jr.transaction_date, journal_type: jr.journal_type || 'journal_entry', memo: jr.memo || '', branches: branches } });
+  }
+  const d = String(b.date || '');
+  if (d) await mfTouched(env, d);
+  return await adminBook(env, {});
+}
+async function adminBookIgnore(env, b) {
+  const ign = (await kvGet(env, 'bookIgnore')) || {};
+  ign[String(b.key || '').slice(0, 120)] = jstStamp(Date.now());
+  await kvPut(env, 'bookIgnore', ign);
+  return await adminBook(env, {});
+}
+// Claude に、経費の科目がおかしいものがないか見てもらう（押したときだけ。結果はとっておく）
+const BOOK_SYSTEM = [
+  'あなたは、小さな飲食店（薬膳レストラン）の帳簿を確定申告の前に見直す手伝いをしています。店主は会計に詳しくありません。',
+  '経費の仕訳（摘要と科目）の一覧から、科目がまちがっていそうなものだけを選びます。自信があるものだけ。少なくてよい。',
+  '- id と bi は、渡したものをそのまま返す。from は今の科目、to は直したほうがよい科目（必ず渡した一覧の中から）。',
+  '- why：何がおかしいかを、ごく短く（15文字以内）。例「食材なので仕入高」「個人の支払いかも」。',
+  '- 例：食材・飲み物を消耗品費にしている → 仕入高。生活費・個人の税金や保険を経費にしている → 事業主貸。お店で使う道具・洗剤を仕入高にしている → 消耗品費。'
+].join('\n');
+async function adminBookAi(env) {
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const js = await bookJournals(env, bookMonths(today), false);
+  const m = await mfMaster(env);
+  const opts = txOptions(m, await expenseOptions(env, m));
+  const lines = [];
+  js.forEach(j => j.b.forEach((br, bi) => { if (br[0] && (BOOK_EXPENSE.test(br[0]) || br[0] === '事業主貸') && lines.length < 400) lines.push(j.i + '｜' + bi + '｜' + j.d + '｜' + br[0] + '｜' + maskRemark(bookRemark(j, bi)) + '｜¥' + br[1]); }));
+  if (!lines.length) return await adminBook(env, {});
+  const out = await claude(env, { system: BOOK_SYSTEM, effort: 'medium', maxTokens: 16000, timeout: 180000,
+    content: [{ type: 'text', text: '勘定科目の一覧：' + accountList(opts) + '\n\n経費の仕訳（id｜bi｜日付｜科目｜摘要｜金額）：\n' + lines.join('\n') }],
+    schema: strSchema({ items: { type: 'array', items: strSchema({ id: { type: 'string' }, bi: { type: 'integer' }, from: { type: 'string' }, to: { type: 'string' }, why: { type: 'string' } }) } }) });
+  const items = (out.items || []).filter(x => opts.some(a => a.name === x.to) && x.to !== x.from).slice(0, 40)
+    .map(x => ({ id: String(x.id), bi: Number(x.bi) || 0, from: String(x.from), to: String(x.to), why: plain(clean(x.why, 40)) }));
+  await kvPut(env, 'bookAi', { at: jstStamp(Date.now()), items: items });
+  return await adminBook(env, {});
 }

@@ -931,6 +931,10 @@ const ADMIN_FUNCS = {
   goalAdvice: adminGoalAdvice,
   prep: adminPrep,
   mfTxSaveAll: adminMfTxSaveAll,
+  book: adminBook,
+  bookFix: adminBookFix,
+  bookIgnore: adminBookIgnore,
+  bookAi: adminBookAi,
   saveCustomer: async (env, b) => {
     const key = String(b.key || normPhone(b.phone) || '').slice(0, 60);
     if (!key) fail('お客様が見つかりません。');
