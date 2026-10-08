@@ -73,7 +73,7 @@ async function claude(env, o) {
     model: AI_MODEL,
     max_tokens: o.maxTokens || 8000,
     system: o.system,
-    messages: [{ role: 'user', content: o.content }],
+    messages: o.messages || [{ role: 'user', content: o.content }],
     output_config: { effort: o.effort || 'low' },
     // 安全のための判定で断られたときは、Anthropic がすすめる別のモデルで書き直す
     fallbacks: 'default'
@@ -403,7 +403,7 @@ async function sqMatch(env, from, to) {
   const s = await getSettings(env);
   const rs = await env.DB.batch([
     env.DB.prepare("SELECT id, ts, date, link, res_id FROM sq_payments WHERE date BETWEEN ? AND ? AND status = 'COMPLETED' AND amount > refunded AND link IN ('', 'auto') ORDER BY ts").bind(from, to),
-    env.DB.prepare("SELECT id, date, time, session, stay, arrived FROM reservations WHERE date BETWEEN ? AND ? AND status = '確定' AND (arrived IS NULL OR arrived != 'no')").bind(from, to)
+    env.DB.prepare("SELECT id, date, time, session, stay, arrived, guests FROM reservations WHERE date BETWEEN ? AND ? AND status = '確定' AND (arrived IS NULL OR arrived != 'no')").bind(from, to)
   ]);
   const byDate = {};
   rs[0].results.forEach(p => { (byDate[p.date] = byDate[p.date] || { pays: [], res: [] }).pays.push(p); });
@@ -411,33 +411,44 @@ async function sqMatch(env, from, to) {
   const updates = [];
   Object.values(byDate).forEach(d => {
     const owner = {};
-    d.res.map(r => {
+    const tOf = p => toMin(p.ts.slice(11, 16));
+    const res = d.res.map(r => {
       const start = toMin(r.time);
       const stay = Number(r.stay) || (s.sessions[r.session] ? Number(s.sessions[r.session].stay) : 120) || 120;
-      return { id: r.id, start: start, end: start + stay };
-    }).sort((a, b) => a.end - b.end).forEach(r => {
+      return { id: r.id, start: start, end: start + stay, guests: Number(r.guests) || 1 };
+    }).sort((a, b) => a.end - b.end);
+    // 1. 予約ごとに、終わりの時刻にいちばん近い会計を1つ
+    res.forEach(r => {
       let best = null;
       d.pays.forEach(p => {
         if (owner[p.id]) return;
-        const t = toMin(p.ts.slice(11, 16));
+        const t = tOf(p);
         if (t < r.start + 20 || t > r.end + 90) return;
         const score = Math.abs(t - r.end);
-        if (!best || score < best.score) best = { id: p.id, score: score };
+        if (!best || score < best.score) best = { id: p.id, score: score, t: t };
       });
-      if (best) owner[best.id] = r.id;
+      if (best) { owner[best.id] = r.id; r.paidAt = best.t; }
+    });
+    // 2. 別々の会計（割り勘）：その予約の会計の前後5分の会計は、人数－1件まで同じ予約の会計にする
+    res.forEach(r => {
+      if (r.paidAt === undefined || r.guests < 2) return;
+      let extra = 0;
+      d.pays.filter(p => !owner[p.id] && Math.abs(tOf(p) - r.paidAt) <= 5)
+        .sort((a, b) => Math.abs(tOf(a) - r.paidAt) - Math.abs(tOf(b) - r.paidAt))
+        .forEach(p => { if (extra < r.guests - 1) { owner[p.id] = r.id; extra++; } });
     });
     d.pays.forEach(p => {
       const link = owner[p.id] ? 'auto' : '';
-      const res = owner[p.id] || null;
-      if (p.link !== link || (p.res_id || null) !== res) {
-        updates.push(env.DB.prepare('UPDATE sq_payments SET link = ?, res_id = ? WHERE id = ? AND link IN (\'\', \'auto\')').bind(link, res, p.id));
+      const rid = owner[p.id] || null;
+      if (p.link !== link || (p.res_id || null) !== rid) {
+        updates.push(env.DB.prepare('UPDATE sq_payments SET link = ?, res_id = ? WHERE id = ? AND link IN (\'\', \'auto\')').bind(link, rid, p.id));
       }
     });
   });
   for (let i = 0; i < updates.length; i += 50) await env.DB.batch(updates.slice(i, i + 50));
 }
 
-// 今日の画面：今日（会計がまだなければ昨日）の売上と、予約のない会計
+// 今日の画面：今日（会計がまだなければ昨日）の売上、その日の会計すべて（直せるように）、その日の予約（会計を結びつける候補）
 async function adminSales(env, b) {
   if (!env.SQUARE_ACCESS_TOKEN) return { connected: false };
   const today = jstStamp(Date.now()).slice(0, 10);
@@ -454,56 +465,78 @@ async function adminSales(env, b) {
   const net = p => Math.max(0, (Number(p.amount) || 0) - (Number(p.refunded) || 0));
   const day = rows.some(p => p.date === today) || !rows.length ? today : rows[0].date;
   const list = rows.filter(p => p.date === day && net(p) > 0);
-  const withRes = list.filter(p => p.link === 'auto' || p.link === 'res');
+  const isRes = p => p.link === 'auto' || p.link === 'res';
+  const withRes = list.filter(isRes);
+  // その日の予約（予約した人を、会計を結びつける候補の先頭に出す）
+  const s = await getSettings(env);
+  const resRows = (await env.DB.prepare("SELECT id, time, name, guests, course_name, stay, session, arrived FROM reservations WHERE date = ? AND status = '確定' ORDER BY time").bind(day).all()).results;
+  const paid = {};
+  withRes.forEach(p => { if (p.res_id) paid[p.res_id] = (paid[p.res_id] || 0) + net(p); });
+  const resv = resRows.map(r => {
+    const stay = Number(r.stay) || (s.sessions[r.session] ? Number(s.sessions[r.session].stay) : 120) || 120;
+    return { id: r.id, time: r.time, until: toHM(toMin(r.time) + stay), name: r.name, guests: r.guests, course: r.course_name || '', paid: paid[r.id] || 0, noShow: r.arrived === 'no' };
+  });
+  const resName = {};
+  resv.forEach(r => { resName[r.id] = r.name; });
+  // お客様に結びつけた会計の名前
+  const custKeys = list.filter(p => p.link === 'cust' && p.cust_key).map(p => p.cust_key);
+  const custName = {};
+  if (custKeys.length) {
+    const info = await customerInfo(env);
+    const groups = groupCustomers(await allCustomerRows(env), info).groups;
+    custKeys.forEach(k => { const t = mergedTarget(info, k); custName[k] = (info[t] && info[t].name) || (groups[t] && groups[t].name) || ''; });
+  }
   const st = (await kvGet(env, 'sqMonths')) || {};
   return {
     connected: true, error: error, today: today, day: day,
     total: list.reduce((a, p) => a + net(p), 0), count: list.length,
     withRes: withRes.reduce((a, p) => a + net(p), 0), resCount: withRes.length,
-    walkIn: list.filter(p => !(p.link === 'auto' || p.link === 'res')).reduce((a, p) => a + net(p), 0),
+    resGroups: Object.keys(paid).length + withRes.filter(p => !p.res_id).length,
+    walkIn: list.filter(p => !isRes(p)).reduce((a, p) => a + net(p), 0),
     walkCount: list.length - withRes.length,
     syncedAt: st[today.slice(0, 7)] ? jstStamp(st[today.slice(0, 7)]) : '',
-    open: rows.filter(p => p.link === '' && net(p) > 0).slice(0, 30)
-      .map(p => ({ id: p.id, date: p.date, time: p.ts.slice(11, 16), amount: net(p), method: p.method || '' }))
+    pays: list.map(p => ({ id: p.id, date: p.date, time: p.ts.slice(11, 16), amount: net(p), method: p.method || '', link: p.link || '',
+      resId: p.res_id || '', resName: p.res_id ? resName[p.res_id] || '' : '', custName: p.cust_key ? custName[p.cust_key] || '' : '' })),
+    resv: resv
   };
 }
 
-// 予約のない会計を、お客様に結びつける・予約の会計にする・そのままにする
+// 会計を、予約・お客様に結びつける／予約なしのままにする／自動に戻す（何度でも直せる。Squareのデータは変えない）
 async function adminSalesLink(env, b) {
   const p = await env.DB.prepare('SELECT * FROM sq_payments WHERE id = ?').bind(String(b.id || '')).first();
   if (!p) fail('会計が見つかりません。画面を更新してください。');
   const act = String(b.action || '');
-  const set = (link, key) => env.DB.prepare('UPDATE sq_payments SET link = ?, cust_key = ? WHERE id = ?').bind(link, key || null, p.id).run();
-  if (act === 'undo') {
-    if (p.link === 'cust' && p.cust_key) {
-      const info = await customerInfo(env);
-      const k = mergedTarget(info, p.cust_key);
-      await upsertCustomer(env, k, { extra: Math.max(0, (info[k] ? info[k].extra : 0) - 1) });
-    }
-    await set('', null);
-    return { sales: await adminSales(env, {}) };
+  if (['res', 'cust', 'new', 'skip', 'undo'].indexOf(act) < 0) fail('操作を選び直してください。');
+  let rid = null;
+  if (act === 'res') {
+    const r = await env.DB.prepare("SELECT id FROM reservations WHERE id = ? AND date = ? AND status = '確定'").bind(String(b.resId || ''), p.date).first();
+    if (!r) fail('予約が見つかりません。画面を更新してください。');
+    rid = r.id;
   }
-  if (p.link !== '') fail('この会計はもう選び終わっています。画面を更新してください。');
+  let key = '';
   if (act === 'cust' || act === 'new') {
-    let key = String(b.key || '').slice(0, 60);
-    if (act === 'new') {
-      const added = await adminAddCustomer(env, { name: b.name, tel: b.tel, extra: 0 });
-      key = added.key;
-    }
+    key = String(b.key || '').slice(0, 60);
+    if (act === 'new') key = (await adminAddCustomer(env, { name: b.name, tel: b.tel, extra: 0 })).key;
+    const info0 = await customerInfo(env);
+    const k = mergedTarget(info0, key);
+    const groups = groupCustomers(await allCustomerRows(env), info0).groups;
+    if (!k || (!groups[k] && !info0[k])) fail('お客様が見つかりません。');
+    key = k;
+  }
+  // 前に結びつけたお客様の「予約なしの来店」を1回戻す
+  if (p.link === 'cust' && p.cust_key) {
     const info = await customerInfo(env);
-    const k = mergedTarget(info, key);
-    if (!k) fail('お客様を選んでください。');
-    const groups = groupCustomers(await allCustomerRows(env), info).groups;
-    if (!groups[k] && !info[k]) fail('お客様が見つかりません。');
-    await upsertCustomer(env, k, { extra: (info[k] ? info[k].extra : 0) + 1 });
-    await set('cust', k);
-    return { sales: await adminSales(env, {}), key: k };
+    const k = mergedTarget(info, p.cust_key);
+    await upsertCustomer(env, k, { extra: Math.max(0, (info[k] ? info[k].extra : 0) - 1) });
   }
-  if (act === 'res' || act === 'skip') {
-    await set(act, null);
-    return { sales: await adminSales(env, {}) };
+  if (act === 'cust' || act === 'new') {
+    const info = await customerInfo(env);
+    await upsertCustomer(env, key, { extra: (info[key] ? info[key].extra : 0) + 1 });
   }
-  return fail('操作を選び直してください。');
+  const link = act === 'undo' ? '' : act === 'new' ? 'cust' : act;
+  await env.DB.prepare('UPDATE sq_payments SET link = ?, res_id = ?, cust_key = ? WHERE id = ?').bind(link, rid, key || null, p.id).run();
+  if (act === 'undo') await sqMatch(env, p.date, p.date);
+  return { sales: await adminSales(env, {}), key: key };
 }
 
 /* ---------- マネーフォワード クラウド（経費・レシートの登録） ---------- */
@@ -1123,12 +1156,12 @@ function moneyPeriod(key, today) {
 async function salesSums(env, from, to) {
   const r = await env.DB.prepare(
     "SELECT COALESCE(SUM(amount - refunded), 0) AS sales, COALESCE(SUM(CASE WHEN link IN ('auto','res') THEN amount - refunded ELSE 0 END), 0) AS res, " +
-    "COUNT(*) AS n, COALESCE(SUM(CASE WHEN link IN ('auto','res') THEN 0 ELSE 1 END), 0) AS walkN FROM sq_payments WHERE status = 'COMPLETED' AND amount > refunded AND date BETWEEN ? AND ?"
+    "COUNT(*) AS n, COALESCE(SUM(CASE WHEN link IN ('auto','res') THEN 0 ELSE 1 END), 0) AS walkN, COUNT(DISTINCT CASE WHEN link IN ('auto','res') THEN res_id END) AS resGroups FROM sq_payments WHERE status = 'COMPLETED' AND amount > refunded AND date BETWEEN ? AND ?"
   ).bind(from, to).first();
   const g = await env.DB.prepare(
     "SELECT COALESCE(SUM(guests), 0) AS guests, COUNT(*) AS groups FROM reservations WHERE status = '確定' AND (arrived IS NULL OR arrived != 'no') AND date BETWEEN ? AND ? AND date <= ?"
   ).bind(from, to, jstStamp(Date.now()).slice(0, 10)).first();
-  return { sales: r.sales, res: r.res, walk: r.sales - r.res, payments: r.n, walkN: r.walkN, guests: g.guests, groups: g.groups };
+  return { sales: r.sales, res: r.res, walk: r.sales - r.res, payments: r.n, walkN: r.walkN, resGroups: r.resGroups || 0, guests: g.guests, groups: g.groups };
 }
 function expenseSums(monthsData, from, to) {
   const by = {};
@@ -1227,7 +1260,7 @@ async function factsMoney(env) {
     const e = D.mf[ym] ? expenseSums([D.mf[ym]], ym + '-01', monthLast(ym)) : null;
     const parts = [ym];
     if (D.hasSales) parts.push('売上 ¥' + x.sales.toLocaleString() + '（会計 ' + x.payments + '件、1会計あたり ¥' + (x.payments ? Math.round(x.sales / x.payments) : 0).toLocaleString() +
-      '、予約の会計 ¥' + x.res.toLocaleString() + '、予約なしの会計 ' + x.walkN + '件 ¥' + x.walk.toLocaleString() + '）');
+      '、予約の会計 ¥' + x.res.toLocaleString() + (x.resGroups ? '（' + x.resGroups + '組、1組あたり ¥' + Math.round(x.res / x.resGroups).toLocaleString() + '。割り勘など1組で複数の会計も1組として数える）' : '') + '、予約なしの会計 ' + x.walkN + '件 ¥' + x.walk.toLocaleString() + '）');
     parts.push('予約の来店 ' + x.groups + '組 ' + x.guests + '名' + (D.hasSales && x.guests ? '（予約の1人あたり ¥' + Math.round(x.res / x.guests).toLocaleString() + '）' : ''));
     if (e) parts.push('経費 ¥' + e.total.toLocaleString() + '（食材の仕入れ ¥' + e.food.toLocaleString() + (D.hasSales && x.sales ? '、食材費の割合 ' + Math.round(e.food / x.sales * 100) + '%' : '') + '）、科目別：' +
       e.accounts.slice(0, 8).map(a => a.name + ' ¥' + a.value.toLocaleString()).join('・'));
@@ -1422,11 +1455,56 @@ async function adminDash(env) {
   for (const sec of Object.keys(SECTION)) out.ai[sec] = await kvGet(env, 'ai:' + sec);
   const note = await kvGet(env, 'aiNote');
   out.note = note ? note.text : '';
+  out.noteAt = note ? note.at : '';
   return out;
 }
 async function adminAiNote(env, b) {
-  await kvPut(env, 'aiNote', { text: clean(b.text, 1000), at: jstStamp(Date.now()) });
-  return {};
+  const text = clean(b.text, 1000);
+  if (text) await kvPut(env, 'aiNote', { text: text, at: jstStamp(Date.now()) });
+  else await env.DB.prepare("DELETE FROM kv WHERE k = 'aiNote'").run();
+  await env.DB.prepare("DELETE FROM kv WHERE k = 'aiChatFacts'").run();
+  return { at: text ? jstStamp(Date.now()) : '' };
+}
+
+/* ---------- 分析のところで Claude と話す ----------
+ * お店の数字は30分ごとにまとめ直し、Claude側でも5分間とっておいてもらう（続けて聞くと速い）。やりとりは画面の中だけで覚える
+ */
+const CHAT_SYSTEM = [
+  'あなたは、大阪・阿倍野の小さな薬膳レストラン「épii」（店主ひとりで営業）の経営の相談役です。店主は数字や会計の言葉が得意ではありません。',
+  '次に渡す「お店の数字」をもとに、店主の質問に答えます。',
+  '- やさしい言葉で、3〜5文。根拠の数字を入れる。専門用語は使わない。',
+  '- データにないことは「この数字からは分かりません」と言う。推測するときは「〜かもしれません」。',
+  '- できることがあれば1つすすめる（管理画面でできることなら場所も）。',
+  '- 店主が、お店の方針や事情（仕入れ先、続けたい工夫、営業の都合など）を話したら、これからも覚えておくとよいことを remember に40文字以内で入れる。なければ空の文字列。',
+  '- ' + AI_BREAK_RULE
+].join('\n');
+async function chatFacts(env) {
+  const saved = await kvGet(env, 'aiChatFacts');
+  if (saved && Date.now() - saved.at < 1800000) return saved.text;
+  const parts = [await factsHead(env), await factsMoney(env), await factsBooking(env), await factsIg(env)];
+  const secs = [];
+  for (const sec of Object.keys(SECTION)) {
+    const x = await kvGet(env, 'ai:' + sec);
+    if (x && x.items && x.items.length) secs.push(SECTION[sec].label + '（' + x.at.slice(5, 10).replace('-', '/') + '）：' + x.items.map(i => plain(i.title) + ' → ' + plain(i.todo)).join('／'));
+  }
+  if (secs.length) parts.push('【これまでのClaudeの気づき】\n' + secs.join('\n'));
+  const text = 'お店の数字：\n' + parts.join('\n\n');
+  await kvPut(env, 'aiChatFacts', { at: Date.now(), text: text });
+  return text;
+}
+async function adminAiChat(env, b) {
+  const list = (Array.isArray(b.messages) ? b.messages : []).slice(-12)
+    .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.role === 'assistant' ? plain(clean(m.text, 1200)) : clean(m.text, 500) }))
+    .filter(m => m.content);
+  while (list.length && list[0].role !== 'user') list.shift();
+  if (!list.length || list[list.length - 1].role !== 'user') fail('聞きたいことを入れてください。');
+  const facts = await chatFacts(env);
+  const out = await claude(env, {
+    system: [{ type: 'text', text: CHAT_SYSTEM }, { type: 'text', text: facts, cache_control: { type: 'ephemeral' } }],
+    effort: 'medium', maxTokens: 16000, messages: list,
+    schema: strSchema({ answer: { type: 'string' }, remember: { type: 'string' } })
+  });
+  return { answer: aiText(out.answer, 800), remember: plain(clean(out.remember, 80)) };
 }
 
 /* ---------- (2) 週1回のまとめ（月曜 9:00 にお店のLINEへ） ---------- */

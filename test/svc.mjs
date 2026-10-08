@@ -62,26 +62,36 @@ try {
   check(res.body.total === 9600 + 4800 + 9600, 'total ' + res.body.total);
   // 11:30〜13:00 の予約（RT1）には 12:55 の会計が結びつく
   check(res.body.resCount === 1 && res.body.withRes === 9600, 'matched to reservation ' + res.body.resCount);
-  const open = res.body.open;
-  check(open.length >= 2 && open.every(p => p.amount > 0), 'open list ' + open.length);
+  const openOf = x => x.pays.filter(p => p.link === '');
+  const open = openOf(res.body);
+  check(open.length === 2 && open.every(p => p.amount > 0) && res.body.pays.length === 3, 'open list ' + open.length);
+  check(res.body.resv.length === 1 && res.body.resv[0].name === '佐藤 恵' && res.body.resv[0].paid === 9600 && res.body.pays.find(p => p.link === 'auto').resName === '佐藤 恵', 'reservations as candidates');
   const sqCalls = calls.sq.length;
   res = await post('/admin/api/sales', {}, A);
   check(calls.sq.length === sqCalls, 'sales cached for 2 min');
-  const today2 = open.filter(p => p.date === T);
+  const today2 = open;
   res = await post('/admin/api/salesLink', { id: today2[0].id, action: 'new', name: '田中 美咲' }, A);
-  check(res.body.key && !res.body.sales.open.some(p => p.id === today2[0].id), 'linked new customer');
+  check(res.body.key && !openOf(res.body.sales).some(p => p.id === today2[0].id) && res.body.sales.pays.find(p => p.id === today2[0].id).custName === '田中 美咲', 'linked new customer');
   let cust = await post('/admin/api/customer', { key: res.body.key }, A);
   check(cust.body.extra === 1 && cust.body.name === '田中 美咲', 'new customer visit ' + JSON.stringify([cust.body.extra, cust.body.name]));
   const custKey = res.body.key;
-  res = await post('/admin/api/salesLink', { id: today2[0].id, action: 'undo' }, A);
+  // 間違えたら直せる：予約の会計に付け替えると、お客様の来店は1回戻る
+  res = await post('/admin/api/salesLink', { id: today2[0].id, action: 'res', resId: 'RT1' }, A);
   cust = await post('/admin/api/customer', { key: custKey }, A);
-  check(cust.body.extra === 0 && res.body.sales.open.some(p => p.id === today2[0].id), 'undo');
-  res = await post('/admin/api/salesLink', { id: today2[0].id, action: 'res' }, A);
-  check(res.body.sales.resCount === 2, 'marked as reservation payment');
+  check(cust.body.extra === 0 && res.body.sales.resCount === 2 && res.body.sales.resGroups === 1 && res.body.sales.resv[0].paid > 9600, 're-link to reservation (split bill = 1 group)');
+  res = await post('/admin/api/salesLink', { id: today2[0].id, action: 'res', resId: 'nope' }, A);
+  check(res.status === 400, 'reservation required');
+  res = await post('/admin/api/salesLink', { id: today2[0].id, action: 'undo' }, A);
+  check(openOf(res.body.sales).some(p => p.id === today2[0].id), 'undo back to automatic');
   res = await post('/admin/api/salesLink', { id: today2[1].id, action: 'skip' }, A);
-  check(!res.body.sales.open.some(p => p.id === today2[1].id) && res.body.sales.walkCount === 1, 'skip keeps walk-in');
-  res = await post('/admin/api/salesLink', { id: today2[1].id, action: 'skip' }, A);
-  check(res.status === 400, 'cannot link twice');
+  check(!openOf(res.body.sales).some(p => p.id === today2[1].id) && res.body.sales.walkCount === 2 && res.body.sales.pays.find(p => p.id === today2[1].id).link === 'skip', 'skip keeps walk-in');
+  // 割り勘：予約の会計の前後5分の会計は、同じ組にまとめる
+  const db1 = await env.mf.getD1Database('DB');
+  await db1.prepare("INSERT INTO sq_payments (id, ts, date, amount, refunded, tip, method, status, link) VALUES ('PX1', ?, ?, 3000, 0, 0, 'カード', 'COMPLETED', '')").bind(T + ' 12:57', T).run();
+  await db1.prepare("DELETE FROM kv WHERE k = 'sqMonths'").run();
+  res = await post('/admin/api/sales', {}, A);
+  const px = res.body.pays.find(p => p.id === 'PX1');
+  check(px && px.link === 'auto' && px.resName === '佐藤 恵' && res.body.resGroups === 1 && res.body.resCount === 2, 'split bill auto ' + JSON.stringify(px));
 
   // 売上・経費の分析
   res = await post('/admin/api/money', { period: 'last' }, A);
@@ -166,6 +176,18 @@ try {
   check(calls.ai.length === nAi, 'suggestions cached');
   res = await post('/admin/api/mfTxSave', { id: nt.id, date: nt.date, content: nt.content, accountId: nt.ai.accountId, rate: nt.ai.rate }, A);
   check(txs.find(t => t.id === 'TX%3D2').journalizing_status === 'registered', 'bank line registered');
+  // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
+  res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);
+  check(res.body.answer.includes('売上') && res.body.remember === '', 'chat ' + JSON.stringify(res.body));
+  const chatBody = calls.ai[calls.ai.length - 1].body;
+  check(chatBody.system[1].cache_control && chatBody.system[1].text.includes('【売上と経費】') && chatBody.messages.length === 1, 'chat facts cached');
+  res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }, { role: 'assistant', text: '前の答え' }, { role: 'user', text: '仕入れは市場で、毎週火曜にまとめて買っています' }] }, A);
+  const chat2 = calls.ai[calls.ai.length - 1].body;
+  check(chat2.messages.length === 3 && chat2.messages[1].role === 'assistant' && chat2.system[1].text === chatBody.system[1].text && res.body.remember.includes('火曜'), 'chat thread + remember');
+  res = await post('/admin/api/aiNote', { text: '' }, A);
+  res = await post('/admin/api/dash', {}, A);
+  check(res.body.note === '' && res.body.noteAt === '', 'note cleared');
+
   // Claude に相談
   res = await post('/admin/api/aiAsk', { question: '洗剤は何の科目？', history: [{ q: '前の質問', a: '前の答え' }], context: { payee: 'ホームセンター', amount: 1100 } }, A);
   check(res.body.answer.includes('消耗品費') && res.body.account === '消耗品費' && res.body.accountId, 'ask');

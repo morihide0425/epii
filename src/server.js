@@ -982,6 +982,7 @@ const ADMIN_FUNCS = {
   analysisAi: adminAnalysisAi,
   aiNote: adminAiNote,
   aiAsk: adminAiAsk,
+  aiChat: adminAiChat,
   rcptList: adminRcptList,
   rcptRead: adminRcptRead,
   rcptSave: adminRcptSave,

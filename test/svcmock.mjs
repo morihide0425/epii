@@ -82,6 +82,10 @@ function aiAnswer(body) {
     const n = calls.ai.filter(c => (c.body.system || '').includes('レシート')).length;
     return { readable: true, date: jst(), total: 6480 + (n - 1) * 100, payee: '阿倍野青果', items: 'にんじん・れんこん他', invoice_no: 'T1234567890123', rate: '8', amount8: 0, amount10: 0, payment: n === 1 ? 'cash' : 'card', account: '仕入高', reason: '料理に使う｜野菜なので', unsure: n === 1 ? ['date'] : [], note: n === 1 ? '日付の数字がかすれています' : '' };
   }
+  if (sys.includes('質問に答えます')) {
+    const last = body.messages[body.messages.length - 1].content;
+    return { answer: '今月の｜売上は｜先月の｜同じ期間より｜少し｜減っています。', remember: String(last).includes('火曜') ? '仕入れは毎週火曜にまとめて市場で' : '' };
+  }
   if (sys.includes('相談役') && !text.includes('今週いちばん大事なこと')) {
     const sec = text.includes('売上と経費だけ') ? '売上' : text.includes('予約と予約ページだけ') ? '予約' : 'Instagram';
     return { items: [

@@ -284,7 +284,11 @@
   .picker .search { background: var(--bg); margin-bottom: 4px; }
   .picker .cust { padding: 8px 0; }
   .picker .av { width: 32px; height: 32px; font-size: 14px; }
-  .kpis.money .v { font-size: 17px; } .kpi .c { font-size: 10px; margin-top: 2px; color: var(--sub); } .kpi .c.up { color: var(--green); } .kpi .c.down { color: var(--red); }
+  .picker .plbl { font-size: 11px; color: var(--sub); font-weight: 700; margin: 10px 0 2px; }
+  .picker .rtm { width: 44px; flex-shrink: 0; font-weight: 700; font-size: 14px; }
+  .picker .resc.sel { background: var(--green-l); border-radius: 10px; }
+  .pay .pst { margin-top: 4px; }
+  .kpis.money .v { font-size: 17px; } .kpi .c2 { font-size: 10px; color: var(--sub); margin-top: 1px; line-height: 1.35; } .kpi .c { font-size: 10px; margin-top: 2px; color: var(--sub); } .kpi .c.up { color: var(--green); } .kpi .c.down { color: var(--red); }
   .pchart { display: flex; align-items: flex-end; gap: 10px; height: 150px; padding-top: 8px; }
   .pchart .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
   .pchart .pair { display: flex; align-items: flex-end; gap: 3px; height: 120px; width: 100%; justify-content: center; }
@@ -312,15 +316,15 @@
   .ask-q { margin: 8px 0 4px auto; width: fit-content; max-width: 85%; background: var(--ink); color: #fff; border-radius: 12px 12px 4px 12px; padding: 6px 10px; font-size: 13px; }
   .ask-a { background: #fff; border-radius: 12px 12px 12px 4px; padding: 8px 10px; font-size: 13px; line-height: 1.7; max-width: 92%; }
   .ask-a .btn { margin-top: 6px; }
+  .remember { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
   .txr { padding: 10px 0; border-top: 1px solid var(--line); }
   .txr .top { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
   .txr .nm { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .txr .am { font-weight: 700; white-space: nowrap; }
   .txr select { font-size: 14px; padding: 7px 9px; }
   .anseg button { font-size: 13px; padding: 8px 2px; }
-  .secfoot { display: flex; gap: 10px; align-items: flex-end; margin-top: 8px; }
-  .secfoot .sub { flex: 1; min-width: 0; }
-  .secfoot .btn { flex-shrink: 0; white-space: nowrap; }
+  .secfoot { margin-top: 8px; }
+  .secfoot .btn { display: flex; margin: 8px 0 0 auto; white-space: nowrap; }
   .dtiles { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-bottom: 12px; }
   .dtile { background: var(--card); border: 0; border-radius: 16px; padding: 10px 12px; text-align: left; display: flex; flex-direction: column; gap: 1px; }
   .dtile .k { font-size: 11px; color: var(--sub); } .dtile .v { font-size: 20px; font-weight: 700; line-height: 1.25; } .dtile .v small { font-size: 12px; font-weight: 400; }
@@ -329,7 +333,12 @@
   .secrow:first-of-type { border-top: 0; }
   .secrow b { font-size: 14px; } .secrow .chev { color: var(--faint); font-size: 22px; }
   .stylebox { background: var(--bg); border-radius: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.7; }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  body { overscroll-behavior-y: contain; }
+  .ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 52px); z-index: 30; width: 38px; height: 38px; border-radius: 50%; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.14); display: flex; align-items: center; justify-content: center; opacity: 0; transform: translate(-50%, -46px); pointer-events: none; }
+  .ptr svg { width: 20px; height: 20px; }
+  .ptr.spin svg { animation: ptr-spin .8s linear infinite; }
+  @keyframes ptr-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .ptr.spin svg { animation: none; } }
 </style>
 </head>
 <body>
@@ -412,7 +421,7 @@ const S = {
   // Claude・Square・マネーフォワード（つながっているものだけ画面に出す）
   features: {}, memoWait: {}, sales: null, salesAt: 0, salesPick: null, salesQ: '', salesHits: null,
   rcpt: null, rcptInfo: null, money: null, moneyPeriod: 'month', igd: null, ask: {},
-  dash: null, ai: {}, aiWait: {}, aiErr: {}, noteText: '', noteDirty: false,
+  dash: null, ai: {}, aiWait: {}, aiErr: {}, noteText: '', noteDirty: false, chat: { thread: [], input: '', wait: false },
   // 一度読み込んだものは手元に置いておき、すぐ表示してから裏で最新にする
   dayCache: {}, monthCache: {}, monthFresh: {}, custCache: {}, scroll: {}
 };
@@ -1479,10 +1488,17 @@ ACTIONS.today = async (a, b) => {
   // 予約のない会計
   if (a === 'payPick') { S.salesPick = b.dataset.id; S.salesQ = ''; S.salesHits = null; refresh(); const q = $('payQ'); if (q) q.focus(); return; }
   if (a === 'payAll') { S.salesAll = true; refresh(); return; }
+  if (a === 'payList') { S.salesList = !S.salesList; S.salesPick = null; refresh(); return; }
   if (a === 'payCancel') { S.salesPick = null; S.salesQ = ''; S.salesHits = null; refresh(); return; }
+  if (a === 'payToRes') {
+    const r = (S.sales.resv || []).find(x => x.id === b.dataset.res);
+    await linkPay(b.dataset.id, 'res', { resId: b.dataset.res }, '予約の会計にしました（' + (r ? r.name + ' 様' : '') + '）');
+    return;
+  }
   if (a === 'payCust') { await linkPay(b.dataset.id, 'cust', { key: b.dataset.ck }); return; }
   if (a === 'payNew') { await linkPay(b.dataset.id, 'new', { name: (S.salesQ || '').trim() }); return; }
-  if (a === 'payRes' || a === 'paySkip') { await linkPay(b.dataset.id, a === 'payRes' ? 'res' : 'skip'); return; }
+  if (a === 'paySkip') { await linkPay(b.dataset.id, 'skip'); return; }
+  if (a === 'payUndo') { await linkPay(b.dataset.id, 'undo'); return; }
   if (a === 'goOpen') { S.setPart = 'rules'; showTab('set'); setTimeout(() => { const el = $('openBox'); if (el) el.scrollIntoView({ block: 'start' }); }, 300); return; }
   if (a === 'goDay') goDay(b.dataset.date);
   else if (a === 'arrive') {
@@ -2604,10 +2620,17 @@ ACTIONS.set = async (a, b) => {
   if (a === 'igCopy') { const ta = $('igTa'); const dr = S.igd.drafts[S.igd.sel]; if (dr) await copyText(ta ? ta.value : plainJa(dr[S.igd.kind])); return; }
   if (a === 'secAi') { loadSection(b.dataset.v); return; }
   if (a === 'dashReload') { loadDash(b); return; }
-  if (a === 'noteSave') {
-    const mo = M.busy(b);
-    try { await api('aiNote', { text: S.noteText }); S.noteDirty = false; await mo.ok(); toast('Claudeに伝えることを保存しました'); refresh(); }
-    catch (e) { mo.fail(); fail(e); }
+  if (a === 'noteSave') { await noteSave(S.noteText, b, 'メモを保存しました'); return; }
+  if (a === 'noteClear') { if (confirm('Claudeへのメモを消しますか？')) await noteSave('', null, 'メモを消しました'); return; }
+  if (a === 'chatSend') { await chatSend($('chatIn') ? $('chatIn').value : ''); return; }
+  if (a === 'chatPreset') { await chatSend(b.dataset.v); return; }
+  if (a === 'chatReset') { S.chat = { thread: [], input: '', wait: false }; refresh(); return; }
+  if (a === 'chatRemember') {
+    const t = S.chat.thread[Number(b.dataset.i)];
+    if (!t || t.saved) return;
+    const next = (S.noteText ? S.noteText.replace(/\s+$/, '') + '\n' : '') + t.remember;
+    if (await noteSave(next, null, 'メモに足しました')) t.saved = true;
+    renderSet();
     return;
   }
   if (a === 'anView') {
@@ -2677,7 +2700,7 @@ function segJa(s) {
     const c = ch[i], p = ch[i - 1], n = ch[i + 1];
     let cut = false;
     if (i > 0 && cur) {
-      if (/[、。，．！？!?）」』】〉》]/.test(p) && !/[、。，．！？!?）」』】〉》]/.test(c)) cut = true;
+      if (/[、。，．！？!?）」』】〉》・：／]/.test(p) && !/[、。，．！？!?）」』】〉》・：／]/.test(c)) cut = true;
       else if (/[ぁ-ゟ]/.test(p) && /[㐀-鿿々ァ-ヺA-Za-z0-9０-９¥￥（「『【〈《#＃]/.test(c) && !/^[おご]$/.test(cur)) cut = true;
       else if (/[ぁ-ゟ]/.test(p) && /[おご]/.test(c) && n && /[㐀-鿿]/.test(n)) cut = true;
     }
@@ -2859,48 +2882,76 @@ function memoHtml(d, r) {
   return '';
 }
 
-/* ---------- 売上（Square） ---------- */
+/* ---------- 売上（Square） ----------
+ * 会計は、予約の時間と会計の時刻から自動で「予約の会計」にする（割り勘は、同じ予約の会計の前後5分を同じ組にまとめる）
+ * 予約のない会計は、その日の予約→ほかのお客様の順に選べる。選んだあとも「この日の会計をすべて見る・直す」から何度でも直せる
+ * ここで選んだ内容は予約システムの中だけのもので、Squareのデータは変えない
+ */
 function salesHtml() {
   const s = S.sales;
   if (!s) return `<div class="card" data-key="sales"><h2>${icon('i-coin')}今日の売上 <span class="tag amber">Square</span></h2>${WAIT}</div>`;
   if (!s.connected) return '';
   const label = s.day === today() ? '今日の売上' : s.day === addDays(today(), -1) ? '昨日の売上' : jd(s.day) + 'の売上';
   const pr = s.total ? Math.round(s.withRes / s.total * 100) : 0;
+  const pays = s.pays || [];
   let h = `<div class="card" data-key="sales"><h2>${icon('i-coin')}${label} <span class="tag amber">Square</span><span class="cnt" style="margin-left:auto">${s.syncedAt ? esc(s.syncedAt.slice(11)) + ' に取り込み' : ''}</span></h2>`;
   if (s.error) h += `<div class="warn" style="margin-bottom:8px">${phr(s.error)}</div>`;
-  h += `<div class="sum3"><div><b>${yen(s.total)}</b><span>合計 ${s.count}件</span></div><div><b>${yen(s.withRes)}</b><span>予約あり</span></div><div><b>${yen(s.walkIn)}</b><span>予約なし ${s.walkCount}件</span></div></div>`;
+  h += `<div class="sum3"><div><b>${yen(s.total)}</b><span>合計 ${s.count}件</span></div><div><b>${yen(s.withRes)}</b><span>予約あり ${s.resGroups || 0}組</span></div><div><b>${yen(s.walkIn)}</b><span>予約なし ${s.walkCount}件</span></div></div>`;
   if (s.total) h += `<div class="split" data-grow="split:${s.day}:${s.total}:${s.withRes}"><div data-g="x"><i class="a" style="width:${pr}%"></i><i class="b" style="width:${100 - pr}%"></i></div></div>`;
-  const open = (s.open || []).filter(p => p.date === s.day);
-  if (open.length) {
-    const shown = S.salesAll ? open : open.slice(0, 3);
-    h += `<h3>予約のない会計 <span class="cnt">${open.length}件</span></h3>
-      <div class="sub">${phr('お客様を選ぶと、その方の来店回数に1回足します。分からない会計は「このまま」で大丈夫です（売上にはそのまま入ります）。')}</div>`;
-    h += shown.map(payRow).join('');
-    if (open.length > shown.length) h += `<button class="more2" data-act="payAll">ほか ${open.length - shown.length}件を見る</button>`;
+  if (!S.salesList) {
+    const open = pays.filter(p => p.link === '');
+    if (open.length) {
+      const shown = S.salesAll ? open : open.slice(0, 3);
+      h += `<h3>予約のない会計 <span class="cnt">${open.length}件</span></h3>
+        <div class="sub">${phr('だれの会計かを選ぶと、予約の会計にしたり、そのお客様の来店回数に1回足したりできます。分からない会計は「このまま」で大丈夫です（売上にはそのまま入ります）。')}</div>`;
+      h += shown.map(p => payRow(p, false)).join('');
+      if (open.length > shown.length) h += `<button class="more2" data-act="payAll">ほか ${open.length - shown.length}件を見る</button>`;
+    }
+  } else {
+    h += `<h3>この日の会計 <span class="cnt">${pays.length}件</span></h3>` + pays.map(p => payRow(p, true)).join('');
   }
-  h += `<div class="sub" style="margin-top:8px">${phr('会計の時刻と予約の時間から、予約のお客様の会計かを見分けています。')}</div></div>`;
+  if (pays.length) h += `<button class="more2" data-act="payList">${S.salesList ? '閉じる' : 'この日の会計をすべて見る・直す（' + pays.length + '件）'}</button>`;
+  h += `<div class="sub" style="margin-top:8px">${phr('会計の時刻と予約の時間から、予約のお客様の会計かを自動で見分けています。割り勘のように1組で何回かに分けた会計は、1組としてまとめます。ここで選んだ内容は予約システムの中だけのもので、Squareのデータは変わりません。')}</div></div>`;
   return h;
 }
-function payRow(p) {
+function payStatus(p) {
+  if (p.link === 'auto') return `<span class="tag green">予約：${p.resName ? esc(p.resName) + ' 様' : '予約の会計'}（自動）</span>`;
+  if (p.link === 'res') return `<span class="tag green">予約：${p.resName ? esc(p.resName) + ' 様' : '予約の会計'}</span>`;
+  if (p.link === 'cust') return `<span class="tag blue">予約なし：${esc(p.custName || 'お客様')} 様</span>`;
+  if (p.link === 'skip') return '<span class="tag gray">予約なし</span>';
+  return '<span class="tag amber">まだ選んでいません</span>';
+}
+function payRow(p, inList) {
   const pick = S.salesPick === p.id;
-  return `<div class="pay" data-key="pay:${esc(p.id)}">
-    <div class="top"><span class="tm">${esc(p.time)}</span>${p.date !== S.sales.day ? `<span class="sub">${jd(p.date)}</span>` : ''}<span class="tag gray">${esc(p.method || '—')}</span><span class="am">${yen(p.amount)}</span></div>
-    ${pick ? payPicker(p) : `<div class="acts"><button class="btn small" data-act="payPick" data-id="${esc(p.id)}">お客様を選ぶ</button><button class="btn small" data-act="payRes" data-id="${esc(p.id)}">予約の会計</button><button class="btn small ghost" data-act="paySkip" data-id="${esc(p.id)}">このまま</button></div>`}
+  return `<div class="pay" data-key="${inList ? 'payl:' : 'pay:'}${esc(p.id)}">
+    <div class="top"><span class="tm">${esc(p.time)}</span><span class="tag gray">${esc(p.method || '—')}</span><span class="am">${yen(p.amount)}</span></div>
+    ${inList ? `<div class="pst">${payStatus(p)}</div>` : ''}
+    ${pick ? payPicker(p) : `<div class="acts"><button class="btn small" data-act="payPick" data-id="${esc(p.id)}">${inList ? '直す' : 'だれの会計か選ぶ'}</button>${inList ? '' : `<button class="btn small ghost" data-act="paySkip" data-id="${esc(p.id)}">このまま</button>`}</div>`}
   </div>`;
 }
 function payPicker(p) {
+  const s = S.sales;
+  const t = toMin(p.time);
+  // その日の予約を、予約の終わりの時刻が会計の時刻に近い順に
+  const resv = (s.resv || []).filter(r => !r.noShow).slice().sort((a, b) => Math.abs(toMin(a.until) - t) - Math.abs(toMin(b.until) - t));
   const q = (S.salesQ || '').trim();
   const hits = S.salesHits || [];
   return `<div class="picker" data-appear="pick:${esc(p.id)}">
+    <div class="plbl">${s.day === today() ? '今日' : jd(s.day)}の予約（会計の時刻に近い順）</div>
+    ${resv.length ? resv.map(r => `<button class="cust resc${p.resId === r.id ? ' sel' : ''}" data-act="payToRes" data-id="${esc(p.id)}" data-res="${esc(r.id)}"><span class="rtm">${esc(r.time)}</span><div style="min-width:0"><div class="n">${esc(r.name)} 様 <span class="g">${r.guests}名</span></div><div class="m">${esc(r.time)}〜${esc(r.until)}${r.course ? '・' + esc(r.course) : ''}${r.paid ? '・会計 ' + yen(r.paid) : ''}</div></div></button>`).join('') : '<div class="sub">この日の予約はありません。</div>'}
+    <div class="plbl">予約なしで来たお客様</div>
     <div class="search"><svg class="ink"><use href="#i-search"/></svg><input type="text" id="payQ" placeholder="お名前・電話番号で探す" value="${esc(S.salesQ || '')}" autocomplete="off"></div>
     ${hits.map(c => `<button class="cust" data-act="payCust" data-id="${esc(p.id)}" data-ck="${esc(c.key)}"><div class="av ${c.total >= 3 ? 'vip' : ''}">${esc((c.name || '?').slice(0, 1))}</div><div style="min-width:0"><div class="n">${esc(c.name)}</div><div class="m">${c.total ? c.total + '回来店' : 'まだ来店なし'}${c.last ? '・最後 ' + jd(c.last) : ''}</div></div></button>`).join('')}
     ${q && S.salesHits && !hits.length ? '<div class="sub">見つかりませんでした。</div>' : ''}
-    <div class="acts">${q ? `<button class="btn small" data-act="payNew" data-id="${esc(p.id)}">＋「${esc(q)}」様を新しく追加</button>` : ''}<button class="btn small ghost" data-act="payCancel">やめる</button></div>
+    <div class="acts">${q ? `<button class="btn small" data-act="payNew" data-id="${esc(p.id)}">＋「${esc(q)}」様を新しく追加</button>` : ''}
+      ${p.link !== 'skip' ? `<button class="btn small" data-act="paySkip" data-id="${esc(p.id)}">予約なし（名前なし）</button>` : ''}
+      ${p.link === 'res' || p.link === 'cust' || p.link === 'skip' ? `<button class="btn small" data-act="payUndo" data-id="${esc(p.id)}">自動に戻す</button>` : ''}
+      <button class="btn small ghost" data-act="payCancel">やめる</button></div>
   </div>`;
 }
-// 会計を片付ける：押したらすぐ縮めて消し、裏で保存する
-async function linkPay(id, action, extra) {
-  const el = document.querySelector(`[data-key="pay:${CSS.escape(id)}"]`);
+// 会計を結びつける：一覧から消えるものは縮めて消し、裏で保存する
+async function linkPay(id, action, extra, label) {
+  const el = S.salesList ? null : document.querySelector(`[data-key="pay:${CSS.escape(id)}"]`);
   const prev = S.sales;
   const anim = M.collapse(el);
   try {
@@ -2909,7 +2960,7 @@ async function linkPay(id, action, extra) {
     S.sales = res.sales;
     S.salesPick = null; S.salesQ = ''; S.salesHits = null;
     refresh();
-    toast(action === 'res' ? '予約の会計にしました' : action === 'skip' ? 'このままにしました' : '来店を1回足しました');
+    toast(label || (action === 'skip' ? '予約なしにしました' : action === 'undo' ? '自動に戻しました' : '来店を1回足しました'));
   } catch (e) {
     await anim;
     S.sales = prev;
@@ -2984,6 +3035,7 @@ async function askSend(key, text) {
   const q = String(text || '').trim();
   if (!k || !q || k.wait) return;
   k.wait = true; k.input = '';
+  if ($('askIn-' + key)) $('askIn-' + key).value = '';
   k.thread.push({ q: q, a: '', accountId: '', account: '' });
   const t = k.thread[k.thread.length - 1];
   refresh();
@@ -3265,18 +3317,58 @@ function aiSectionHtml(sec, title) {
   h += `<div class="secfoot"><div class="sub">${phr(SEC_NOTE[sec])}${x ? '（' + esc(x.at.slice(5).replace('-', '/')) + ' 時点）' : ''}</div><button class="btn small" data-act="secAi" data-v="${sec}">${icon('i-refresh')}読み直す</button></div></div>`;
   return h;
 }
+// 分析のところで Claude と話す（やりとりはこの画面を開いているあいだだけ覚える）
+function chatHtml() {
+  const c = S.chat;
+  let h = `<div class="card" data-key="chat"><h2>${icon('i-leaf')}Claudeと話す <span class="aitag">Claude</span></h2>
+    <div class="sub" style="margin-bottom:4px">${phr('売上・経費・予約・Instagramの数字について、ふだんの言葉で聞けます。やりとりは、この画面を開いているあいだだけ覚えています。')}</div>`;
+  h += c.thread.map((t, i) => `<div class="ask-q">${esc(t.q)}</div><div class="ask-a" data-appear="chat:${i}:${hashStr(t.a)}">${t.a ? phr(t.a) : WAIT}${t.remember ? `<div class="remember"><span class="sub">${phr('覚えておくとよいこと：' + t.remember)}</span><button class="btn small" data-act="chatRemember" data-i="${i}" ${t.saved ? 'disabled' : ''}>${t.saved ? 'メモに足しました' : 'メモに足す'}</button></div>` : ''}</div>`).join('');
+  h += `<div class="row" style="margin-top:8px"><input type="text" id="chatIn" value="${esc(c.input)}" placeholder="例）先月より売上が落ちたのはなぜ？"><button class="btn small primary" data-act="chatSend" style="flex-shrink:0">聞く</button></div>`;
+  if (!c.thread.length) h += `<div class="acts">${['先月と比べてどう？', '空いている席を埋めるには？', '食材費を下げるには？'].map(x => `<button class="chip" data-act="chatPreset" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+  else h += '<button class="btn small ghost" data-act="chatReset" style="margin-top:6px">新しく話す</button>';
+  return h + '</div>';
+}
+async function chatSend(text) {
+  const c = S.chat;
+  const q = String(text || '').trim();
+  if (!q || c.wait) return;
+  c.wait = true; c.input = '';
+  if ($('chatIn')) $('chatIn').value = '';
+  const t = { q: q, a: '', remember: '' };
+  c.thread.push(t);
+  renderSet();
+  const messages = [];
+  c.thread.filter(x => !x.err).forEach(x => { messages.push({ role: 'user', text: x.q }); if (x !== t) messages.push({ role: 'assistant', text: x.a }); });
+  try { const r = await api('aiChat', { messages: messages }); t.a = r.answer; t.remember = r.remember; }
+  catch (e) { t.a = e.message; t.err = true; }
+  c.wait = false;
+  renderSet();
+}
+async function noteSave(text, btn, msg) {
+  const mo = btn ? M.busy(btn) : null;
+  try {
+    const r = await api('aiNote', { text: text });
+    S.noteText = text; S.noteDirty = false;
+    if (S.dash) S.dash.noteAt = r.at;
+    if (mo) await mo.ok();
+    toast(msg);
+    renderSet();
+    return true;
+  } catch (e) { if (mo) mo.fail(); fail(e); return false; }
+}
 function dtile(label, value, sub, view, cls) {
   return `<button class="dtile" data-act="anView" data-v="${view}"><span class="k">${esc(label)}</span><span class="v">${value}</span><span class="c ${cls || ''}">${sub || '&nbsp;'}</span></button>`;
 }
 function dashHtml() {
   const d = S.dash;
-  let h = `<div class="row" style="margin-bottom:8px"><span class="sub">${esc(d ? d.period.label : '')}・予約ページとInstagramは直近30日</span><button class="btn small" data-act="dashReload" style="margin-left:auto;flex-shrink:0">${icon('i-refresh')}最新にする</button></div>`;
+  let h = `<div class="row" style="margin-bottom:8px"><span class="sub">${d ? phr('売上は' + spanText(d.period.from, d.period.to) + '、予約ページとInstagramは直近30日') : ''}</span><button class="btn small" data-act="dashReload" style="margin-left:auto;flex-shrink:0">${icon('i-refresh')}最新にする</button></div>`;
   if (!d) return h + '<div class="card"><div class="loading">集計しています…</div></div>';
   const tiles = [];
+  const was = spanText(d.period.prevFrom, d.period.prevTo);
   const pc = (a, b, goodUp) => {
     if (!(b > 0)) return ['', ''];
     const c = Math.round((a - b) / b * 100);
-    return ['先月より ' + (c > 0 ? '+' : '') + c + '%', c === 0 ? '' : (c > 0) === goodUp ? 'up' : 'down'];
+    return [was + 'は' + yen(b) + '（' + (c > 0 ? '+' : '') + c + '%）', c === 0 ? '' : (c > 0) === goodUp ? 'up' : 'down'];
   };
   const m = d.money;
   if (m && m.hasSales) { const x = pc(m.sales, m.salesPrev, true); tiles.push(dtile('売上', yen(m.sales), x[0], 'money', x[1])); }
@@ -3289,16 +3381,17 @@ function dashHtml() {
   if (m && m.err) h += `<div class="warn" style="margin-bottom:10px">${phr(m.err)}</div>`;
   h += aiSectionHtml('summary', '今週の大事なこと');
   if (S.features.ai) {
+    h += chatHtml();
     const secs = ['booking', 'ig'].concat(S.features.square || S.features.mf ? ['money'] : []);
     h += `<div class="card"><h2>${icon('i-leaf')}分野ごとの気づき</h2>${secs.map(sec => {
       const x = S.ai[sec];
       const it = x && x.items && x.items[0];
       return `<button class="secrow" data-act="anView" data-v="${sec === 'booking' ? 'site' : sec}"><div style="flex:1;min-width:0"><b>${SEC_LABEL[sec]}</b><div class="sub">${it ? phr(plainJa(it.title)) : '開くと、Claudeが数字を読みます'}</div></div><span class="chev">›</span></button>`;
     }).join('')}</div>`;
-    h += `<div class="card" data-key="note"><h2>${icon('i-pen')}Claudeに伝えておくこと</h2>
-      <div class="sub" style="margin-bottom:6px">${phr('ここに書いたことは、返事の下書き・分析・Instagramの文案・経費の相談のたびにClaudeに伝えます。お客様の名前や電話番号は書かないでください。')}</div>
+    h += `<div class="card" data-key="note"><h2>${icon('i-pen')}Claudeへのメモ（お店のこと）</h2>
+      <div class="sub" style="margin-bottom:6px"><span class="hl">${phr('ここに書いたことは、Claudeが返事の下書き・分析・Instagramの文案・経費の相談をするたびに読みます。')}</span><span class="hl">${phr('一度書けば、書き換えるか消すまでずっと使います。「Claudeと話す」で出てくる「メモに足す」からも足せます。')}</span><span class="hl">${phr('書くとよいこと：仕入れ先、お店の方針、続けている工夫など。お客様の名前や電話番号は書かないでください。')}</span></div>
       <textarea id="aiNote" rows="4" data-auto="1" placeholder="例）食材は主に阿倍野青果と中央市場で買う。記念日のお客様には、デザートにひとことメッセージを添えている。">${esc(S.noteText || '')}</textarea>
-      <button class="btn small primary" data-act="noteSave" style="margin-top:8px">保存</button></div>`;
+      <div class="acts"><button class="btn small primary" data-act="noteSave">保存</button>${S.noteText ? '<button class="btn small ghost" data-act="noteClear">消す</button>' : ''}<span class="sub" style="margin-left:auto;align-self:center">${S.noteDirty ? 'まだ保存していません' : S.dash && S.dash.noteAt ? esc(S.dash.noteAt.slice(5, 10).replace('-', '/')) + ' に保存' : ''}</span></div></div>`;
   }
   return h;
 }
@@ -3320,6 +3413,13 @@ async function loadMoney(force, btn) {
     fail(e);
   }
 }
+// 「10/1〜10/8」「9月」「7〜9月」のように期間を書く
+function spanText(from, to) {
+  const f = from.split('-').map(Number), t = to.split('-').map(Number);
+  const monthEnd = new Date(Date.UTC(t[0], t[1], 0)).getUTCDate() === t[2];
+  if (f[2] === 1 && monthEnd) return f[1] === t[1] ? f[1] + '月' : f[1] + '〜' + t[1] + '月';
+  return f[1] + '/' + f[2] + '〜' + t[1] + '/' + t[2];
+}
 function moneyKpi(v, k, c) { return `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div>${c || '<div class="c">&nbsp;</div>'}</div>`; }
 function moneyHtml() {
   const m = S.money;
@@ -3328,18 +3428,19 @@ function moneyHtml() {
     <button class="btn small" data-act="moneyReload" style="margin-left:auto;margin-bottom:6px">${icon('i-refresh')}最新にする</button></div>`;
   if (!m) return h + '<div class="card"><div class="loading">集計しています…</div></div>';
   const n = m.now, p = m.prev, key = m.period.key;
-  const vs = { month: '先月より', last: '前の月より', '3m': '前の3か月より' }[key];
-  const was = { month: '先月', last: '前の月', '3m': '前の3か月' }[key];
-  const ch = (a, b, goodUp) => {
+  // 比べる期間は日付で書く（「先月より」だけだと、先月のいつと比べているか分かりにくい）
+  const was = spanText(m.period.prevFrom, m.period.prevTo);
+  const pctTxt = (a, b, goodUp) => {
     if (!(b > 0)) return '';
     const c = Math.round((a - b) / b * 100);
-    return `<div class="c ${c === 0 ? '' : (c > 0) === goodUp ? 'up' : 'down'}">${vs} ${c > 0 ? '+' : ''}${c}%</div>`;
+    return `<div class="c ${c === 0 ? '' : (c > 0) === goodUp ? 'up' : 'down'}">${c > 0 ? '+' : ''}${c}%</div>`;
   };
+  const ch = (a, b, goodUp) => (b > 0 ? pctTxt(a, b, goodUp) + `<div class="c2">${esc(was)}：${yen(b)}</div>` : '');
   const pct = (a, b) => (b > 0 ? Math.round(a / b * 100) : null);
   const food = m.hasExpense ? pct(n.food, n.sales) : null, foodP = m.hasExpense ? pct(p.food, p.sales) : null;
   const one = n.guests ? Math.round(n.res / n.guests) : null, oneP = p.guests ? Math.round(p.res / p.guests) : null;
   const walk = pct(n.walk, n.sales), walkP = pct(p.walk, p.sales);
-  h += `<div class="sub" style="margin:-4px 0 8px;text-align:right">${esc(m.period.label)}${m.syncedAt ? '・' + esc(m.syncedAt.slice(5).replace('-', '/')) + ' に取り込み' : ''}</div>`;
+  h += `<div class="sub" style="margin:-4px 0 8px">${phr(spanText(m.period.from, m.period.to) + 'を、' + was + 'と比べています。')}${m.syncedAt ? '<span class="hl" style="text-align:right">' + esc(m.syncedAt.slice(5).replace('-', '/')) + ' に取り込み</span>' : ''}</div>`;
   if (m.sqErr) h += `<div class="warn" style="margin-bottom:10px">${phr(m.sqErr)}</div>`;
   if (m.mfErr) h += `<div class="warn" style="margin-bottom:10px">${phr(m.mfErr)}</div>`;
   h += `<div class="kpis money">
@@ -3347,9 +3448,9 @@ function moneyHtml() {
     ${moneyKpi(m.hasExpense ? yen(n.expense) : '–', '経費', m.hasExpense ? ch(n.expense, p.expense, false) : '')}
     ${moneyKpi(m.hasSales && m.hasExpense ? yen(n.sales - n.expense) : '–', '残り', m.hasSales && m.hasExpense ? ch(n.sales - n.expense, p.sales - p.expense, true) : '')}
   </div><div class="kpis money">
-    ${moneyKpi(food !== null ? food + '%' : '–', '食材費の割合', foodP !== null ? `<div class="c ${food > foodP ? 'down' : food < foodP ? 'up' : ''}">${was} ${foodP}%</div>` : '')}
-    ${moneyKpi(m.hasSales && one !== null ? yen(one) : '–', '1人あたり（予約）', m.hasSales && oneP !== null ? `<div class="c ${one > oneP ? 'up' : one < oneP ? 'down' : ''}">${was} ${yen(oneP)}</div>` : '')}
-    ${moneyKpi(m.hasSales && walk !== null ? walk + '%' : '–', '予約なしの売上', m.hasSales && walkP !== null ? `<div class="c">${was} ${walkP}%</div>` : '')}
+    ${moneyKpi(food !== null ? food + '%' : '–', '食材費の割合', foodP !== null ? `<div class="c2">${esc(was)}：${foodP}%</div>` : '')}
+    ${moneyKpi(m.hasSales && one !== null ? yen(one) : '–', '1人あたり（予約）', m.hasSales && oneP !== null ? `<div class="c2">${esc(was)}：${yen(oneP)}</div>` : '')}
+    ${moneyKpi(m.hasSales && walk !== null ? walk + '%' : '–', '予約なしの売上', m.hasSales && walkP !== null ? `<div class="c2">${esc(was)}：${walkP}%</div>` : '')}
   </div>`;
   h += aiSectionHtml('money');
   const mx = Math.max(1, ...m.months.map(x => Math.max(x.sales || 0, x.expense || 0)));
@@ -3524,7 +3625,8 @@ $('view').addEventListener('input', e => {
     return;
   }
   if (S.tab === 'set' && e.target.id === 'igTa' && S.igd) { igTyped(e.target.value); fitAreas(); return; }
-  if (S.tab === 'set' && e.target.id === 'aiNote') { S.noteText = e.target.value; S.noteDirty = true; fitAreas(); return; }
+  if (S.tab === 'set' && e.target.id === 'aiNote') { S.noteText = e.target.value; if (!S.noteDirty) { S.noteDirty = true; refresh(); } fitAreas(); return; }
+  if (S.tab === 'set' && e.target.id === 'chatIn') { S.chat.input = e.target.value; return; }
   if (S.tab === 'today' && e.target.dataset.ask && S.ask[e.target.dataset.ask]) { S.ask[e.target.dataset.ask].input = e.target.value; return; }
   if (S.tab !== 'today') return;
   if (e.target.id === 'payQ') { S.salesQ = e.target.value; payQuery(); return; }
@@ -3592,6 +3694,7 @@ $('view').addEventListener('change', e => {
 // 相談の欄でEnterを押したら送る
 $('view').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.isComposing && e.target.dataset && e.target.dataset.ask) { e.preventDefault(); askSend(e.target.dataset.ask, e.target.value); }
+  if (e.key === 'Enter' && !e.isComposing && e.target.id === 'chatIn') { e.preventDefault(); chatSend(e.target.value); }
 });
 
 $('tabs').addEventListener('click', e => {
@@ -3609,6 +3712,65 @@ $('tabs').addEventListener('click', e => {
   if (tab === 'cust' && S.custSel) { S.custSel = null; S.scroll.cust = S.scroll.custList || 0; }
   showTab(tab);
 });
+/* ---------- 引っぱって更新：画面のいちばん上で下に引くと、最新にする ---------- */
+(function () {
+  const ind = document.createElement('div');
+  ind.className = 'ptr';
+  ind.setAttribute('aria-hidden', 'true');
+  ind.innerHTML = '<svg class="ink"><use href="#i-refresh"/></svg>';
+  document.body.appendChild(ind);
+  const GO = 64, MAX = 96;
+  let y0 = null, pull = 0, busy = false;
+  const place = p => { ind.style.transform = 'translate(-50%,' + (p - 46) + 'px) rotate(' + Math.round(p * 3.2) + 'deg)'; ind.style.opacity = String(Math.min(1, p / GO)); };
+  const hide = () => {
+    const from = ind.style.transform;
+    place(0);
+    if (!M.reduce() && ind.animate) ind.animate([{ transform: from, opacity: 1 }, { transform: ind.style.transform, opacity: 0 }], { duration: 260, easing: 'cubic-bezier(.3,.7,.2,1)' });
+  };
+  window.addEventListener('touchstart', e => {
+    y0 = null;
+    if (busy || window.scrollY > 0 || e.touches.length !== 1 || $('appView').classList.contains('hidden')) return;
+    if (e.target.closest('input, textarea, select, [data-tip], .filters, .m-tipping')) return;
+    y0 = e.touches[0].clientY; pull = 0;
+  }, { passive: true });
+  window.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    const dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || window.scrollY > 0) { if (pull) { pull = 0; place(0); } return; }
+    // 引いた長さの半分だけ動かし、だんだん重くする
+    pull = Math.min(MAX, dy * 0.5);
+    place(pull);
+  }, { passive: true });
+  window.addEventListener('touchend', async () => {
+    if (y0 === null) return;
+    y0 = null;
+    if (pull < GO) { if (pull) hide(); pull = 0; return; }
+    busy = true; pull = 0;
+    place(GO);
+    ind.classList.add('spin');
+    try {
+      const p = reload();
+      if (S.tab === 'today' && S.features.square) loadSales(true);
+      if (S.tab === 'set' && S.setPart === 'stats') loadDash();
+      await p;
+      toast('最新にしました');
+    } finally {
+      ind.classList.remove('spin');
+      hide();
+      busy = false;
+    }
+  });
+})();
+
+// 開いたままでも、新しいリクエストが届いたら気づけるように2分ごとに確かめる（入力中・保存中は待つ）
+setInterval(() => {
+  if (document.visibilityState !== 'visible' || $('appView').classList.contains('hidden') || saves) return;
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+  if (S.tab === 'today' && !(S.rcpt && S.rcpt.open)) { reload(); return; }
+  api('requests').then(r => { S.req = r.requests; prepareDrafts(); }).catch(() => {});
+}, 120000);
+
 $('loginBtn').onclick = login;
 $('pw').onkeydown = e => { if (e.key === 'Enter') login(); };
 $('pw').oninput = () => { $('loginErr').textContent = ''; };
