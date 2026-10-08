@@ -1573,9 +1573,10 @@ async function adminAddBlock(env, b) {
     seats = Math.round(Number(b.seats));
     if (!(seats >= 1 && seats <= 200)) fail('押さえる席数を入力してください。');
   }
+  const id = newId('B');
   await env.DB.prepare('INSERT INTO blocks (id, date, type, start, end, seats, memo, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(newId('B'), date, type, b.start, b.end, seats, clean(b.memo, 100), jstStamp(Date.now())).run();
-  return {};
+    .bind(id, date, type, b.start, b.end, seats, clean(b.memo, 100), jstStamp(Date.now())).run();
+  return { id: id };
 }
 
 async function adminMonth(env, b) {

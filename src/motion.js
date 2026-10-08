@@ -480,17 +480,20 @@ const M = (() => {
 
   /* 画面の描き直し：まるごと作り直さず、変わったところだけ書き換える。
    * 要素がそのまま残るので、横スクロールの位置・動いている途中の形・押した場所がずれない。
+   * id か data-key が付いた要素は、前後に要素が増えたり減ったりしても同じ要素として残す（入力中の欄が作り直されない）。
    */
   function patch(root, html) {
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
     patchChildren(root, tpl.content);
   }
+  function keyOf(n) { return n.nodeType === 1 ? (n.id || n.getAttribute('data-key') || '') : ''; }
+  function findKey(n, k) { for (; n; n = n.nextSibling) if (keyOf(n) === k) return n; return null; }
   function sameNode(a, b) {
     if (a.nodeType !== b.nodeType) return false;
     if (a.nodeType !== 1) return true;
     if (a.tagName !== b.tagName) return false;
-    if ((a.id || '') !== (b.id || '')) return false;
+    if (keyOf(a) !== keyOf(b)) return false;
     if ((a.getAttribute('data-mg') || '') !== (b.getAttribute('data-mg') || '')) return false;
     if (a.tagName === 'INPUT' && a.type !== b.type) return false;
     // 送信中の形になったボタンは、新しく作り直す
@@ -501,16 +504,32 @@ const M = (() => {
     let ac = a.firstChild, bc = b.firstChild;
     while (bc) {
       const next = bc.nextSibling;
-      if (!ac) a.appendChild(bc);
-      else if (sameNode(ac, bc)) { patchNode(ac, bc); ac = ac.nextSibling; }
-      else { a.insertBefore(bc, ac); a.removeChild(ac); ac = bc.nextSibling; }
-      bc = next;
+      if (!ac) { a.appendChild(bc); bc = next; continue; }
+      if (sameNode(ac, bc)) { patchNode(ac, bc); ac = ac.nextSibling; bc = next; continue; }
+      // 目印のある要素が後ろにずれただけなら、その前に新しい要素を足す
+      const ka = keyOf(ac);
+      if (ka && findKey(next, ka)) { a.insertBefore(bc, ac); bc = next; continue; }
+      // 目印のある要素が前に詰まっただけなら、あいだの消えた要素を取り除く
+      const kb = keyOf(bc);
+      const m = kb && findKey(ac.nextSibling, kb);
+      if (m && sameNode(m, bc)) { while (ac !== m) { const n = ac.nextSibling; a.removeChild(ac); ac = n; } continue; }
+      a.insertBefore(bc, ac); a.removeChild(ac); ac = bc.nextSibling; bc = next;
     }
     while (ac) { const n = ac.nextSibling; a.removeChild(ac); ac = n; }
+  }
+  // 選択肢のうち、HTMLで選ばれているもの
+  function selectedOf(sel) {
+    const o = sel.querySelector('option[selected]') || sel.querySelector('option');
+    return o ? (o.getAttribute('value') !== null ? o.getAttribute('value') : o.textContent) : '';
   }
   const KEEP_VARS = ['--m-bg', '--m-fg', '--m-bd'];
   function patchNode(a, b) {
     if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+    const tag = a.tagName;
+    const check = tag === 'INPUT' && (a.type === 'checkbox' || a.type === 'radio');
+    // 入力欄は、描き直す内容の値が変わったときだけ書き換える（打ちかけの文字や、選びかけの値を消さない）
+    const before = check ? a.hasAttribute('checked') : tag === 'INPUT' ? (a.getAttribute('value') || '')
+      : tag === 'TEXTAREA' ? a.textContent : tag === 'SELECT' ? selectedOf(a) : null;
     // 動きのために付けている印（m-…）は残す
     const keepCls = Array.prototype.filter.call(a.classList, c => c.indexOf('m-') === 0);
     const keepVars = KEEP_VARS.map(v => [v, a.style.getPropertyValue(v)]).filter(x => x[1]);
@@ -522,22 +541,22 @@ const M = (() => {
     });
     keepCls.forEach(c => a.classList.add(c));
     keepVars.forEach(x => a.style.setProperty(x[0], x[1]));
-    const tag = a.tagName;
     if (tag === 'INPUT') {
-      if (a.type === 'checkbox' || a.type === 'radio') a.checked = b.hasAttribute('checked');
-      else if (a !== document.activeElement && a.value !== (b.getAttribute('value') || '')) a.value = b.getAttribute('value') || '';
+      if (check) { const now = b.hasAttribute('checked'); if (now !== before) a.checked = now; }
+      else {
+        const now = b.getAttribute('value') || '';
+        if (now !== before && a !== document.activeElement && a.value !== now) a.value = now;
+      }
       return;
     }
     if (tag === 'TEXTAREA') {
-      if (a !== document.activeElement && a.value !== b.textContent) { a.textContent = b.textContent; a.value = b.textContent; }
+      const now = b.textContent;
+      if (now !== before) { a.textContent = now; if (a !== document.activeElement) a.value = now; }
       return;
     }
+    const nowSel = tag === 'SELECT' ? selectedOf(b) : null;
     patchChildren(a, b);
-    if (tag === 'SELECT') {
-      const o = b.querySelector('option[selected]');
-      const v = o ? (o.getAttribute('value') !== null ? o.getAttribute('value') : o.textContent) : (a.options[0] ? a.options[0].value : '');
-      if (a.value !== v) a.value = v;
-    }
+    if (tag === 'SELECT' && nowSel !== before && a.value !== nowSel) a.value = nowSel;
   }
 
   return { capture: capture, play: play, patch: patch, busy: busy, toast: toast, indicator: indicator, reduce: reduce };

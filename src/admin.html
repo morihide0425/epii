@@ -23,7 +23,8 @@
     --gothic: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
+  /* 描き直しで画面がずれないよう、ブラウザが自動でスクロールを合わせる動きは使わない */
+  html { -webkit-text-size-adjust: 100%; overflow-anchor: none; }
   body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--gothic); font-size: 15px; line-height: 1.6;
     padding-top: env(safe-area-inset-top, 0px); }
   button, input, select, textarea { font: inherit; color: inherit; }
@@ -305,12 +306,29 @@ const TAB_TITLE = { today: '今日', book: '予約', cust: 'お客様', set: '�
 const S = {
   tab: 'today', now: '', settings: null, courses: [], liffUrl: '',
   req: null, drafts: {},
-  day: '', dayData: null, cancelFor: '', edit: null, addOpen: false, blockOpen: false, blockType: 'seats', upcoming: null,
-  month: '', monthData: null, calOpen: false, planOpen: false, calWarn: '',
-  custQ: '', custList: null, custSel: null, custDetail: null, memoEdit: false,
+  day: '', cancelFor: '', edit: null, addOpen: false, blockOpen: false, blockType: 'seats', upcoming: null,
+  month: '', calOpen: false, planOpen: false, calWarn: '',
+  custQ: '', custList: null, custSel: null, memoEdit: false,
   custFilter: 'all', custAdd: null, mergeOpen: false, mergeQ: '', dupes: [],
-  editCourse: null, quota: null, setPart: 'rules', an: null, anDays: 30, anView: 'site', ig: null
+  editCourse: null, quota: null, setPart: 'rules', an: null, anDays: 30, anView: 'site', ig: null,
+  // 一度読み込んだものは手元に置いておき、すぐ表示してから裏で最新にする
+  dayCache: {}, monthCache: {}, monthFresh: {}, custCache: {}, scroll: {}
 };
+// 予約タブで選んでいる日・月のデータ、開いているお客様
+Object.defineProperty(S, 'dayData', { get: () => S.dayCache[S.day] || null });
+Object.defineProperty(S, 'monthData', { get: () => S.monthCache[S.day.slice(0, 7)] || null });
+Object.defineProperty(S, 'custDetail', { get: () => (S.custSel ? S.custCache[S.custSel] || null : null) });
+function putDay(d) { S.dayCache[d.date] = d; }
+function putMonth(ym, m) { m.ym = ym; S.monthCache[ym] = m; S.monthFresh[ym] = true; setNow(m.now); }
+// 予約の人数が変わったので、月の一覧は次に開いたときに取り直す
+function staleMonths() { S.monthFresh = {}; }
+// 日付が変わったら、予約タブも今日に合わせる
+function setNow(now) {
+  if (!now) return;
+  const was = S.now.slice(0, 10);
+  S.now = now;
+  if (was && was !== now.slice(0, 10) && S.day === was) S.day = now.slice(0, 10);
+}
 
 /* ---------- 共通 ---------- */
 function esc(v) {
@@ -323,11 +341,15 @@ function yen(n) { return '¥' + Number(n || 0).toLocaleString(); }
 function priceText(c) { return yen(c.price) + (c.price_type === 'from' ? '〜' : ''); }
 function today() { return S.now.slice(0, 10); }
 function toast(msg) { M.toast($('toast'), msg, 2400); }
-// 画面の描き替え：前後で選択の印やスイッチ、バーを動かす
+// 画面の描き替え：作り直さず変わったところだけ書き換え、前後で選択の印やスイッチ、バーを動かす
+// （内容が前と同じなら何もしない。スクロールの位置や入力中の文字はそのまま残る）
+let lastView = null;
 function setView(h) {
   const v = $('view');
+  if (h === lastView && !v.querySelector('.m-busy')) return;
+  lastView = h;
   M.capture(v);
-  v.innerHTML = h;
+  M.patch(v, h);
   M.play(v);
 }
 function ruleText(rule) {
@@ -395,7 +417,7 @@ async function login() {
 async function boot() {
   try {
     const d = await api('boot');
-    S.now = d.now;
+    setNow(d.now);
     S.settings = d.settings;
     S.courses = d.courses;
     S.liffUrl = d.liffUrl;
@@ -419,24 +441,60 @@ function setBadge() {
   $('reqBadge').innerHTML = n ? '<span class="badge">' + n + '</span>' : '';
 }
 
-// 手元のデータですぐ表示し、裏で最新にする
-async function showTab(tab) {
+// タブを切り替える。手元のデータですぐ表示し、裏で最新にする
+// 前に見ていた位置を覚えておき、戻ったときはそこから表示する（top のときは一番上から）
+async function showTab(tab, top) {
+  const from = S.tab;
+  if (from !== tab) { S.scroll[from] = window.scrollY; $('view').style.minHeight = ''; }
   S.tab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === tab));
   M.indicator($('tabind'), document.querySelector('.tab.on'), 28);
   $('ttl').textContent = TAB_TITLE[tab] || '';
-  window.scrollTo(0, 0);
   const view = VIEWS[tab];
   if (view.ready()) view.render(); else setView('<div class="loading">読み込み中…</div>');
+  const y = top ? 0 : from !== tab ? (S.scroll[tab] || 0) : null;
+  if (y !== null) window.scrollTo(0, y);
+  const y1 = window.scrollY;
+  await reload();
+  // 読み込む前は画面が短くて戻しきれなかったときは、読み込んだあとにもう一度戻す（自分で動かしていなければ）
+  if (y && S.tab === tab && window.scrollY === y1 && y1 < y) window.scrollTo(0, y);
+}
+
+// 今のタブを裏で取り直して、変わったところだけ描き直す（スクロールの位置はそのまま）
+let gen = 0, saves = 0, reloadAfterSave = false;
+async function reload() {
+  const tab = S.tab, g = gen;
   setSync('更新中…');
   try {
-    await view.load();
-    if (S.tab === tab) view.render();
+    const apply = await VIEWS[tab].load();
+    // 取り直しているあいだに手元を先に書き換えたときは、古い結果で上書きせず、保存が終わってから取り直す
+    if (g !== gen || saves) { if (saves) reloadAfterSave = true; else reload(); return; }
+    if (apply) apply();
+    renderWhenIdle(tab);
     setSync('');
   } catch (e) {
     setSync('');
     fail(e);
   }
+}
+
+// 送信中の動き（丸→チェック）の途中は描き直さず、動きが終わってから描き直す
+function renderWhenIdle(tab) {
+  if (S.tab !== tab) return;
+  if ($('view').querySelector('.m-busy')) setTimeout(() => renderWhenIdle(tab), 300);
+  else VIEWS[tab].render();
+}
+
+// 保存は送った順に1つずつ行う（続けて押しても、あとの操作が先に届いて食い違わないように）
+let saveChain = Promise.resolve();
+function save(fn) {
+  gen++; saves++;
+  const p = saveChain.then(fn);
+  saveChain = p.catch(() => {});
+  return p.finally(() => {
+    saves--; gen++;
+    if (!saves && reloadAfterSave) { reloadAfterSave = false; reload(); }
+  });
 }
 
 function refresh() { VIEWS[S.tab].render(); }
@@ -527,10 +585,11 @@ async function sendChangeReply(c, d, btn, force, skipLine) {
     delete S.drafts['g' + c.id];
     S.req = res.requests;
     prepareDrafts();
-    S.dayData = null;
     await mo.ok();
     toast('LINEで返事を送りました');
     refresh();
+    staleMonths();
+    reload();
   } catch (e) {
     mo.fail();
     const handled = await offerSkipLine(e, () => sendChangeReply(c, d, btn, true, true));
@@ -559,6 +618,8 @@ async function sendReply(r, d, btn, force, skipLine) {
     await mo.ok();
     toast('LINEで返事を送りました');
     refresh();
+    staleMonths();
+    reload();
   } catch (e) {
     mo.fail();
     const handled = await offerSkipLine(e, () => sendReply(r, d, btn, true, true));
@@ -588,7 +649,7 @@ function requestCards() {
     const modes = [['ok', '承認する']];
     if (r.altDate) modes.push(['ok2', '第2希望で承認']);
     modes.push(['offer', '別の日時を提案'], ['ng', 'お断りする']);
-    h += `<div class="card alert" data-rid="${esc(r.id)}">
+    h += `<div class="card alert" data-rid="${esc(r.id)}" data-key="r:${esc(r.id)}">
       <div class="res" style="padding-top:0">
         <div class="t">${jd(r.date).replace('（', '<small>').replace('）', ' ' + esc(r.time) + '</small>')}</div>
         <div><div class="n">${esc(r.name)} <span class="g">${r.guests}名</span></div>
@@ -613,7 +674,7 @@ function requestCards() {
   });
   chgs.forEach(c => {
     const d = S.drafts['g' + c.id];
-    h += `<div class="card alert" data-cid="${esc(c.id)}">
+    h += `<div class="card alert" data-cid="${esc(c.id)}" data-key="g:${esc(c.id)}">
       <div class="res" style="padding-top:0">
         <div class="t">${jd(c.date).replace('（', '<small>').replace('）', ' ' + esc(c.time) + '</small>')}</div>
         <div><div class="n">${esc(c.name)} <span class="g">${c.guests}名</span></div>
@@ -647,19 +708,24 @@ function requestCards() {
  * ========================================================= */
 const VIEWS = {};
 VIEWS.today = {
-  ready: () => !!(S.req && S.dayData && S.dayData.date === today()),
+  ready: () => !!(S.req && S.dayCache[today()]),
   load: async () => {
-    const [req, day, month] = await Promise.all([api('requests'), api('day', { date: today() }), api('month', { ym: today().slice(0, 7) })]);
-    S.req = req.requests; prepareDrafts();
-    S.dayData = day; S.day = today();
-    month.ym = today().slice(0, 7); S.monthData = month; S.now = month.now;
+    const t = today();
+    const [req, day, month] = await Promise.all([api('requests'), api('day', { date: t }), api('month', { ym: t.slice(0, 7) })]);
+    return () => {
+      S.req = req.requests; prepareDrafts();
+      putDay(day);
+      putMonth(t.slice(0, 7), month);
+    };
   },
   render: () => {
-    const d = S.dayData;
+    const d = S.dayCache[today()];
+    if (!d) { setView('<div class="loading">読み込み中…</div>'); return; }
     const active = d.reservations.filter(r => r.status !== 'キャンセル');
     const total = active.reduce((a, r) => a + r.guests, 0);
     const pending = S.req.waiting.length + (S.req.changes || []).length;
-    const tmr = S.monthData && S.monthData.days.find(x => x.date === addDays(today(), 1));
+    const tm = S.monthCache[addDays(today(), 1).slice(0, 7)];
+    const tmr = tm && tm.days.find(x => x.date === addDays(today(), 1));
     let h = `<div class="kpis">
       <button class="kpi ${pending ? 'alert' : ''}"><div class="v">${pending}</div><div class="k">未返信</div></button>
       <button class="kpi" data-act="goDay" data-date="${today()}"><div class="v">${active.length}<small>組</small></div><div class="k">今日 ${total}名</div></button>
@@ -761,29 +827,40 @@ function todayList(d) {
  * 予約（週 → 日）
  * ========================================================= */
 VIEWS.book = {
-  ready: () => !!(S.dayData && S.dayData.date === S.day && S.monthData && S.monthData.ym === S.day.slice(0, 7)),
+  // 選んだ日のデータがまだ手元になくても、週・月の表示はすぐ切り替える
+  ready: () => true,
   load: async () => {
-    const jobs = [api('day', { date: S.day })];
-    if (!(S.monthData && S.monthData.ym === S.day.slice(0, 7))) jobs.push(api('month', { ym: S.day.slice(0, 7) }));
+    const date = S.day, ym = date.slice(0, 7);
+    const jobs = [api('day', { date: date })];
+    if (!S.monthFresh[ym]) jobs.push(api('month', { ym: ym }));
     const res = await Promise.all(jobs);
-    S.dayData = res[0];
-    if (res[1]) { res[1].ym = S.day.slice(0, 7); S.monthData = res[1]; S.now = res[1].now; }
+    return () => {
+      putDay(res[0]);
+      if (res[1]) putMonth(ym, res[1]);
+    };
   },
   render: () => {
-    const d = S.dayData;
-    const active = d.reservations.filter(r => r.status !== 'キャンセル');
-    const total = active.reduce((a, r) => a + r.guests, 0);
-    let h = `<div class="card">${S.calOpen ? monthHtml() : weekHtml()}</div>`;
-    h += `<div class="card">
+    const d = curDay();
+    let h = `<div class="card" data-key="cal">${S.calOpen ? monthHtml() : weekHtml()}</div>`;
+    h += `<div class="card" data-key="dayhead">
       <div class="row" style="justify-content:space-between"><b style="font-size:17px">${jdLong(d.date)}</b>
-        <span class="sub">${esc(planText(d.plan))}${d.date !== today() ? ` <button class="btn small" data-act="goDay" data-date="${today()}">今日へ</button>` : ''}</span></div>
+        <span class="sub">${d.pending ? '' : esc(planText(d.plan))}${d.date !== today() ? ` <button class="btn small" data-act="goDay" data-date="${today()}">今日へ</button>` : ''}</span></div>
       <div class="quick" style="margin:10px 0">
         <button class="qbtn ${S.addOpen ? 'on' : ''}" data-act="addToggle">${icon('i-phone')}<div><b>席を押さえる</b><span>電話・DM・店頭の予約</span></div></button>
         <button class="qbtn ${S.planOpen ? 'on' : ''}" data-act="planToggle">${icon('i-moon')}<div><b>営業を変える</b><span>早じまい・休み・貸切</span></div></button>
       </div>
       ${S.addOpen ? holdForm() : ''}
-      ${S.planOpen ? planForm(d) : ''}
+      ${S.planOpen && !d.pending ? planForm(d) : ''}
     </div>`;
+    // 読み込み中は画面の高さを保つ（短くなってスクロールが上に戻らないように）
+    const v = $('view');
+    if (d.pending) {
+      if (!v.style.minHeight) v.style.minHeight = v.offsetHeight + 'px';
+      setView(h + '<div class="card" data-key="dayload"><div class="loading">読み込み中…</div></div>');
+      return;
+    }
+    const active = d.reservations.filter(r => r.status !== 'キャンセル');
+    const total = active.reduce((a, r) => a + r.guests, 0);
     h += `<div class="card bars"><h2>${icon('i-clock')}混み具合 <span class="cnt">${d.seats}席・${active.length}組 ${total}名</span></h2>${barsHtml(d)}</div>`;
     h += `<div class="card"><h2>${icon('i-cal')}この日の予約</h2>${dayList(d)}</div>`;
     if (d.blocks.length) {
@@ -796,18 +873,25 @@ VIEWS.book = {
     }
     h += `<div class="card"><button class="btn wide" data-act="upcoming">${S.upcoming ? '今後の確定予約を閉じる' : '今後の確定予約をすべて見る'}</button>${S.upcoming ? upcomingHtml() : ''}</div>`;
     setView(h);
+    v.style.minHeight = '';
   }
 };
 
+// 予約タブで選んでいる日のデータ（まだ届いていなければ、いつもの営業から作った仮のもの）
+function curDay() {
+  if (S.dayData) return S.dayData;
+  return { date: S.day, plan: dayPlan(S.day, {}, S.settings), slots: [], seats: S.settings.seats, reservations: [], blocks: [], changes: [], pending: true };
+}
+
 function weekHtml() {
-  const m = S.monthData;
   const base = S.day;
   const start = addDays(base, -weekday(base));
   let h = `<div class="row" style="justify-content:space-between"><b>${base.slice(0, 4)}年${Number(base.slice(5, 7))}月</b><button class="btn ghost small" data-act="calToggle">月で見る ›</button></div><div class="week" data-mg="week" data-mgs=".wd.sel">
     <button class="nav" data-act="week" data-d="-7" aria-label="前の週">${icon('i-left')}</button>`;
   for (let i = 0; i < 7; i++) {
     const date = addDays(start, i);
-    const info = (m && m.ym === date.slice(0, 7)) ? m.days.find(x => x.date === date) : null;
+    const m = S.monthCache[date.slice(0, 7)];
+    const info = m ? m.days.find(x => x.date === date) : null;
     const cls = !info ? '' : info.plan.kind !== 'open' ? 'off' : info.guests >= Math.ceil(S.settings.seats * 0.7) ? 'busy' : info.guests ? 'has' : '';
     h += `<button class="wd ${cls} ${date === S.day ? 'sel' : ''} ${date < today() ? 'past' : ''}" data-act="goDay" data-date="${date}">
       <div class="dn">${WD[i]}</div><div class="dd">${Number(date.slice(8))}</div><div class="pp">${!info ? '' : info.plan.kind !== 'open' ? '休' : date > bookingEnd(S.settings, today()) ? '受付前' : info.guests ? info.guests + '名' : '—'}</div></button>`;
@@ -820,7 +904,12 @@ function monthHtml() {
   const m = S.monthData;
   const [y, mo] = S.day.slice(0, 7).split('-').map(Number);
   let cells = WD.split('').map(w => `<div class="wdh">${w}</div>`).join('') + '<div></div>'.repeat(weekday(S.day.slice(0, 7) + '-01'));
-  m.days.forEach(d => {
+  const days = m ? m.days : Array.from({ length: new Date(Date.UTC(y, mo, 0)).getUTCDate() }, (_, i) => ({ date: S.day.slice(0, 7) + '-' + pad(i + 1), loading: true }));
+  days.forEach(d => {
+    if (d.loading) {
+      cells += `<button class="day ${d.date < today() ? 'past' : ''} ${S.day === d.date ? 'sel' : ''}" data-act="goDay" data-date="${d.date}">${Number(d.date.slice(8))}<small></small><span class="n"></span></button>`;
+      return;
+    }
     const past = d.date < today();
     const closed = d.plan.kind !== 'open';
     const label = d.plan.kind === 'off' ? '休' : d.plan.kind === 'private' ? '貸切' : KEYS().filter(k => d.plan.sessions.indexOf(k) >= 0).map(k => esc(SHORT(k))).join('');
@@ -865,8 +954,9 @@ function holdForm() {
   const H = S.hold || (S.hold = { time: list[0] ? list[0].time : '18:00', guests: 2, source: '電話', name: '', note: '', all: false });
   const seen = {};
   const times = list.filter(x => !seen[x.time] && (seen[x.time] = true));
-  const info = S.dayData.slots.find(x => x.time === H.time);
-  const left = info ? Math.max(0, S.dayData.seats - info.used) : S.dayData.seats;
+  const d = curDay();
+  const info = d.slots.find(x => x.time === H.time);
+  const left = d.pending ? '確認中…' : (info ? Math.max(0, d.seats - info.used) : d.seats) + '席';
   const quick = [today(), addDays(today(), 1)];
   return `<div class="panel" id="holdForm">
     <label class="f" style="margin-top:0">日付</label>
@@ -875,7 +965,7 @@ function holdForm() {
       <input type="date" id="hDate" value="${S.day}" style="width:auto;padding:5px 8px;font-size:14px;margin-bottom:6px" aria-label="ほかの日付"></div>
     <label class="f">時間</label>
     <div data-mg="htime:${S.day}" data-mgs=".chip.on">${times.map(x => `<button class="chip ${H.time === x.time ? 'on' : ''}" data-act="holdTime" data-v="${x.time}">${x.time}</button>`).join('')}</div>
-    <div class="sub">${jd(S.day)} ${H.time}の空き：${left}席</div>
+    <div class="sub">${jd(S.day)} ${H.time}の空き：${left}</div>
     ${(() => {
       const k = sessionFor(S.day, H.time, {}, S.settings) || KEYS()[0];
       const base = S.settings.sessions[k] ? Number(S.settings.sessions[k].stay) : 120;
@@ -985,7 +1075,7 @@ function earlyCloseHtml(d) {
 
 /* ---------- 予約の変更・取消・追加（流用） ---------- */
 function openSlotsOfDay() {
-  const d = S.dayData;
+  const d = curDay();
   return KEYS().map(k => sessionSlots(S.settings, k)).flat().filter(x => d.plan.sessions.indexOf(x.session) >= 0);
 }
 
@@ -1091,18 +1181,9 @@ function softUpdateEdit() {
   }
 }
 
-// 入力中の内容を保ったまま、文面とボタンだけ作り直す
+// 入力中の内容を保ったまま、文面とボタンだけ書き換える
 function updateEditView() {
-  const r = S.dayData.reservations.find(x => x.id === S.edit.id);
-  const panel = $('editPanel');
-  if (!panel) return;
-  const active = document.activeElement && document.activeElement.id;
-  const caret = active && document.activeElement.selectionStart;
-  panel.outerHTML = editPanel(r);
-  if (active && $(active)) {
-    $(active).focus();
-    try { if (caret !== null && caret !== undefined) $(active).setSelectionRange(caret, caret); } catch (x) { /* 数値入力などは位置を戻せない */ }
-  }
+  if ($('editPanel')) refresh();
 }
 
 function cancelPanel(r) {
@@ -1130,14 +1211,18 @@ function upcomingHtml() {
 }
 
 
-function goDay(date) {
+// 予約タブで日を選ぶ。ほかのタブからは一番上から、予約タブの中ではスクロールの位置はそのまま
+function goDay(date, top) {
   S.day = date;
   S.cancelFor = '';
   S.edit = null;
   S.addOpen = false;
   S.planOpen = false;
   S.calWarn = '';
-  if (S.tab !== 'book') showTab('book'); else showTab('book');
+  if (S.tab !== 'book') { showTab('book', true); return; }
+  refresh();
+  if (top) window.scrollTo(0, 0);
+  reload();
 }
 
 async function saveEdit(b, force) {
@@ -1164,7 +1249,8 @@ async function saveEdit(b, force) {
     await mo.ok();
     S.edit = null;
     toast(res.sent ? '変更して、LINEでお知らせしました' : '変更しました');
-    if (res.date !== S.day) goDay(res.date); else showTab('book');
+    staleMonths();
+    if (res.date !== S.day) goDay(res.date, true); else { refresh(); reload(); }
   } catch (ex) {
     mo.fail();
     err.textContent = ex.message;
@@ -1190,7 +1276,9 @@ async function addDirect(b, force) {
     }
     S.addOpen = false;
     toast('予約を追加しました');
-    showTab('book');
+    staleMonths();
+    refresh();
+    reload();
   } catch (e) { $('addErr').textContent = e.message; b.disabled = false; }
 }
 
@@ -1200,8 +1288,15 @@ async function addDirect(b, force) {
 
 const ACTIONS = {};
 function openCustFrom(key) {
-  S.custSel = key; S.custDetail = null; S.memoEdit = false; S.custList = null;
-  showTab('cust');
+  S.custSel = key; S.memoEdit = false; S.mergeOpen = false;
+  showTab('cust', true);
+}
+
+// 保存のあと：取り直しとボタンのチェックの動きを同時に進め、両方終わってから描き直す
+async function afterSave(mo) {
+  const p = reload();
+  await mo.ok();
+  await p;
 }
 
 ACTIONS.today = async (a, b) => {
@@ -1209,14 +1304,54 @@ ACTIONS.today = async (a, b) => {
   if (a === 'goOpen') { S.setPart = 'rules'; showTab('set'); setTimeout(() => { const el = $('openBox'); if (el) el.scrollIntoView({ block: 'start' }); }, 300); return; }
   if (a === 'goDay') goDay(b.dataset.date);
   else if (a === 'arrive') {
-    try {
-      await api('arrive', { id: b.dataset.id, state: b.dataset.state });
-      const r = S.dayData.reservations.find(x => x.id === b.dataset.id);
-      if (r) r.arrived = b.dataset.state;
-      refresh();
-    } catch (e) { fail(e); }
+    // 来店のチェックは押したらすぐ表示を変える（保存できなかったら元に戻す）
+    const r = S.dayCache[today()].reservations.find(x => x.id === b.dataset.id);
+    if (!r) return;
+    const prev = r.arrived;
+    r.arrived = b.dataset.state;
+    refresh();
+    try { await save(() => api('arrive', { id: r.id, state: r.arrived })); }
+    catch (e) { r.arrived = prev; refresh(); fail(e); }
   }
 };
+
+// 受付停止・押さえを、保存を待たずに手元の表示へ反映する（保存が終わったら取り直して正しい数字にする）
+function markStops(d) {
+  const stops = d.blocks.filter(x => x.type === 'stop');
+  d.slots.forEach(x => { x.stopped = stops.some(s => s.start <= x.time && x.time < s.end); });
+}
+function addLocalStop(d, start, end, memo) {
+  const blk = { id: 'new-' + Date.now(), date: d.date, type: 'stop', start: start, end: end, seats: null, memo: memo };
+  d.blocks = d.blocks.concat(blk).sort((x, y) => x.start.localeCompare(y.start));
+  markStops(d);
+  return blk;
+}
+function removeLocalBlock(d, blk) {
+  d.blocks = d.blocks.filter(x => x !== blk);
+  markStops(d);
+}
+// 受付停止を足す（保存が終わったら、本当の番号に置き換える）
+async function stopLocal(d, start, end, memo, done) {
+  const blk = addLocalStop(d, start, end, memo);
+  S.planOpen = true;
+  refresh();
+  try {
+    await save(() => api('addBlock', { date: d.date, type: 'stop', start: start, end: end, memo: memo }).then(r => { if (r.id) blk.id = r.id; }));
+    toast(done);
+  } catch (e) { fail(e); }
+  staleMonths();
+  reload();
+}
+async function unblockLocal(d, id, done) {
+  const blk = d.blocks.find(x => x.id === id);
+  if (!blk) return;
+  removeLocalBlock(d, blk);
+  refresh();
+  // 足したばかりの停止は、保存が終わって番号が決まってから消す
+  try { await save(() => api('deleteBlock', { id: blk.id })); toast(done); } catch (e) { fail(e); }
+  staleMonths();
+  reload();
+}
 
 ACTIONS.book = async (a, b) => {
   const d = S.dayData;
@@ -1244,7 +1379,14 @@ ACTIONS.book = async (a, b) => {
     if (notify && !text) { $('cErr').textContent = 'お知らせする文面を入力してください。'; return; }
     if (!confirm(notify ? '取り消して、お客様にLINEでお知らせします。よろしいですか？' : '取り消します。よろしいですか？')) return;
     const mo = M.busy(b);
-    try { await api('cancel', { id: b.dataset.id, text: text }); await mo.ok(); S.cancelFor = ''; toast('取り消しました'); showTab('book'); }
+    try {
+      await api('cancel', { id: b.dataset.id, text: text });
+      staleMonths();
+      await afterSave(mo);
+      S.cancelFor = '';
+      toast('取り消しました');
+      refresh();
+    }
     catch (e) { mo.fail(); $('cErr').textContent = e.message; }
   }
   else if (a === 'edit') {
@@ -1257,20 +1399,8 @@ ACTIONS.book = async (a, b) => {
   else if (a === 'editClose') { S.edit = null; refresh(); }
   else if (a === 'editResetText') { S.edit.edited = false; refresh(); }
   else if (a === 'editSave') await saveEdit(b, false);
-  else if (a === 'stopSlot' || a === 'unstopSlot') {
-    try {
-      if (a === 'stopSlot') {
-        await api('addBlock', { date: S.day, type: 'stop', start: b.dataset.v, end: b.dataset.end, memo: '時間指定で停止' });
-        toast(b.dataset.v + ' の受付を止めました');
-      } else {
-        await api('deleteBlock', { id: b.dataset.id });
-        toast('受付を再開しました');
-      }
-      S.dayData = await api('day', { date: S.day });
-      S.planOpen = true;
-      refresh();
-    } catch (e) { fail(e); }
-  }
+  else if (a === 'stopSlot') await stopLocal(d, b.dataset.v, b.dataset.end, '時間指定で停止', b.dataset.v + ' の受付を止めました');
+  else if (a === 'unstopSlot') await unblockLocal(d, b.dataset.id, '受付を再開しました');
   else if (a === 'stopFrom') {
     const t = b.dataset.v;
     const end = b.dataset.end || '23:59';
@@ -1278,17 +1408,11 @@ ACTIONS.book = async (a, b) => {
     const msg = end === '23:59' ? (t === S.now.slice(11, 16) ? '今' : t) + 'から、この日の残りのネット予約をすべて止めます。'
       : who + 'の ' + (t === S.now.slice(11, 16) ? '今' : t) + '〜' + end + ' のネット予約を止めます。ほかの時間帯はそのまま受け付けます。';
     if (!confirm(msg + 'よろしいですか？')) return;
-    try {
-      await api('addBlock', { date: S.day, type: 'stop', start: t, end: end, memo: '早じまい' + (who && end !== '23:59' ? '（' + who + '）' : '') });
-      toast('受付を止めました');
-      S.dayData = await api('day', { date: S.day });
-      S.planOpen = true;
-      refresh();
-    } catch (e) { fail(e); }
+    await stopLocal(d, t, end, '早じまい' + (who && end !== '23:59' ? '（' + who + '）' : ''), '受付を止めました');
   }
   else if (a === 'delBlock') {
     if (!confirm('この押さえ（停止）を解除しますか？')) return;
-    try { await api('deleteBlock', { id: b.dataset.id }); toast('解除しました'); S.dayData = await api('day', { date: S.day }); refresh(); } catch (e) { fail(e); }
+    await unblockLocal(d, b.dataset.id, '解除しました');
   }
   else if (a === 'upcoming') {
     if (S.upcoming) { S.upcoming = null; refresh(); return; }
@@ -1304,17 +1428,20 @@ ACTIONS.book = async (a, b) => {
       const next = cur.indexOf(k) >= 0 ? cur.filter(x => x !== k) : cur.concat(k);
       body = { date: d.date, kind: next.length ? 'open' : 'off', sessions: next };
     }
+    // 営業の切り替えは押したらすぐ表示を変え、裏で保存する
+    d.plan = body.revert ? dayPlan(d.date, {}, S.settings)
+      : { kind: body.kind, sessions: body.kind === 'open' ? KEYS().filter(k => body.sessions.indexOf(k) >= 0) : [], custom: true };
+    const md = S.monthData && S.monthData.days.find(x => x.date === d.date);
+    if (md) md.plan = d.plan;
+    S.planOpen = true;
+    refresh();
     try {
-      const res = await api('setDay', body);
+      const res = await save(() => api('setDay', body));
       S.calWarn = res.warning || '';
       toast('営業日を変更しました');
-      S.monthData = null;
-      const keepPlan = true;
-      S.dayData = await api('day', { date: d.date });
-      S.monthData = await api('month', { ym: d.date.slice(0, 7) }); S.monthData.ym = d.date.slice(0, 7);
-      S.planOpen = keepPlan;
-      refresh();
     } catch (e) { fail(e); }
+    staleMonths();
+    reload();
   }
 };
 
@@ -1323,7 +1450,8 @@ async function goDayKeep(date, H) {
   S.day = date; S.cancelFor = ''; S.edit = null; S.planOpen = false;
   S.addOpen = true;
   S.hold = Object.assign({}, H);
-  await showTab('book');
+  refresh();
+  await reload();
   const slots = openSlotsOfDay();
   if (S.hold && !slots.some(x => x.time === S.hold.time)) { S.hold.time = slots[0] ? slots[0].time : S.hold.time; refresh(); }
 }
@@ -1366,9 +1494,10 @@ async function saveHold(b, force) {
       if (res.full) { mo.fail(); if (confirm(res.message)) await saveHold(b, true); return; }
       toast('席を押さえました');
     }
-    await mo.ok();
+    staleMonths();
+    await afterSave(mo);
     S.addOpen = false; S.hold = null;
-    showTab('book');
+    refresh();
   } catch (e) { mo.fail(); err.textContent = e.message; }
 }
 
@@ -1386,14 +1515,24 @@ const CUST_FILTERS = [
 ];
 
 VIEWS.cust = {
-  ready: () => !!S.custList,
+  ready: () => (S.custSel ? !!S.custDetail : !!S.custList),
+  // 開いている画面の分だけ取り直す（お客様を開いているときは、そのお客様だけ）
   load: async () => {
-    const r = await api('customers', { q: S.custQ });
-    S.custList = r.customers; S.custTotal = r.total; S.dupes = r.dupes || [];
-    if (S.custSel) S.custDetail = await api('customer', { key: S.custSel });
+    const key = S.custSel;
+    if (key) {
+      const d = await api('customer', { key: key });
+      return () => { S.custCache[key] = d; };
+    }
+    const q = S.custQ;
+    const r = await api('customers', { q: q });
+    return () => {
+      if (S.custQ !== q) return;
+      S.custList = r.customers; S.custTotal = r.total; S.dupes = r.dupes || [];
+    };
   },
   render: () => {
-    if (S.custSel && S.custDetail) { setView(custDetailHtml()); return; }
+    if (S.custSel) { setView(S.custDetail ? custDetailHtml() : '<div class="loading">読み込み中…</div>'); return; }
+    if (!S.custList) { setView('<div class="loading">読み込み中…</div>'); return; }
     const all = S.custList || [];
     const f = CUST_FILTERS.find(x => x[0] === S.custFilter) || CUST_FILTERS[0];
     const list = all.filter(f[2]);
@@ -1510,10 +1649,25 @@ function foldName(v) {
     .replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60)).toLowerCase();
 }
 
+// お客様を開く（一覧の位置は覚えておき、一覧に戻ったときに戻す）
+function openCust(key) {
+  if (!S.custSel) S.scroll.custList = window.scrollY;
+  S.custSel = key; S.memoEdit = false; S.mergeOpen = false;
+  refresh();
+  window.scrollTo(0, 0);
+  return reload();
+}
+function closeCust() {
+  S.custSel = null; S.mergeOpen = false; S.memoEdit = false;
+  refresh();
+  window.scrollTo(0, S.scroll.custList || 0);
+  return reload();
+}
+
 ACTIONS.cust = async (a, b) => {
   if (a === 'custFilter') { S.custFilter = b.dataset.v; refresh(); }
-  else if (a === 'openCust') { S.custSel = b.dataset.key; S.custDetail = null; S.memoEdit = false; S.mergeOpen = false; showTab('cust'); }
-  else if (a === 'closeCust') { S.custSel = null; S.custDetail = null; S.mergeOpen = false; refresh(); }
+  else if (a === 'openCust') openCust(b.dataset.key);
+  else if (a === 'closeCust') closeCust();
   else if (a === 'custAddOpen') { S.custAdd = { name: '', tel: '', memo: '', extra: 0 }; refresh(); setTimeout(() => $('caName') && $('caName').focus(), 50); }
   else if (a === 'custAddClose') { S.custAdd = null; refresh(); }
   else if (a === 'caExtra') { readCustAdd(); S.custAdd.extra = Math.max(0, S.custAdd.extra + Number(b.dataset.d)); refresh(); }
@@ -1526,11 +1680,11 @@ ACTIONS.cust = async (a, b) => {
       const res = await api('addCustomer', f);
       if (res.exists) {
         mo.fail();
-        if (confirm(res.message + '\n登録済みのお客様を開きますか？')) { S.custAdd = null; S.custSel = res.key; S.custList = null; showTab('cust'); }
+        if (confirm(res.message + '\n登録済みのお客様を開きますか？')) { S.custAdd = null; openCust(res.key); }
         return;
       }
       await mo.ok();
-      S.custAdd = null; toast('追加しました'); S.custSel = res.key; S.custList = null; showTab('cust');
+      S.custAdd = null; toast('追加しました'); openCust(res.key);
     } catch (e) { mo.fail(); $('caErr').textContent = e.message; }
   }
   else if (a === 'extra') {
@@ -1552,12 +1706,21 @@ ACTIONS.cust = async (a, b) => {
   else if (a === 'memoCancel') { S.memoEdit = false; refresh(); }
   else if (a === 'memoSave') {
     const mo = M.busy(b);
-    try { await api('saveCustomer', { key: S.custDetail.key, memo: $('memoText').value }); await mo.ok(); S.memoEdit = false; toast('保存しました'); S.custList = null; showTab('cust'); }
+    const c = S.custDetail, memo = $('memoText').value;
+    try {
+      await api('saveCustomer', { key: c.key, memo: memo });
+      await mo.ok();
+      // 保存した内容を手元にも反映する（取り直さない）
+      c.memo = memo.trim();
+      const row = (S.custList || []).find(x => x.key === c.key);
+      if (row) row.memo = c.memo;
+      S.memoEdit = false; toast('保存しました'); refresh();
+    }
     catch (e) { mo.fail(); fail(e); }
   }
   else if (a === 'saveProfile') {
     const mo = M.busy(b);
-    try { await api('saveCustomer', { key: S.custDetail.key, name: $('cdName').value, tel: $('cdTel').value }); await mo.ok(); toast('保存しました'); S.custList = null; showTab('cust'); }
+    try { await api('saveCustomer', { key: S.custDetail.key, name: $('cdName').value, tel: $('cdTel').value }); await afterSave(mo); toast('保存しました'); refresh(); }
     catch (e) { mo.fail(); fail(e); }
   }
   else if (a === 'mergeOpen') {
@@ -1569,7 +1732,7 @@ ACTIONS.cust = async (a, b) => {
   else if (a === 'mergePick') {
     const c = S.custDetail;
     if (!confirm('「' + b.dataset.name + '」を「' + c.name + '」にまとめます。\n来店回数とメモも合わさります。よろしいですか？')) return;
-    try { await api('mergeCustomers', { from: b.dataset.from, into: c.key }); S.mergeOpen = false; S.custList = null; toast('まとめました'); showTab('cust'); }
+    try { await api('mergeCustomers', { from: b.dataset.from, into: c.key }); S.mergeOpen = false; toast('まとめました'); refresh(); reload(); }
     catch (e) { fail(e); }
   }
   else if (a === 'mergeDupe') {
@@ -1577,12 +1740,12 @@ ACTIONS.cust = async (a, b) => {
     if (!confirm(froms.length + 1 + '件を1人のお客様にまとめます。よろしいですか？')) return;
     try {
       for (const f of froms) await api('mergeCustomers', { from: f, into: b.dataset.into });
-      S.custList = null; toast('まとめました'); showTab('cust');
+      toast('まとめました'); reload();
     } catch (e) { fail(e); }
   }
   else if (a === 'unmerge') {
     if (!confirm('まとめたお客様を元に戻しますか？\n（合わさったメモと来店回数は、このお客様に残ります）')) return;
-    try { await api('unmergeCustomer', { key: b.dataset.key }); S.custList = null; toast('元に戻しました'); showTab('cust'); }
+    try { await api('unmergeCustomer', { key: b.dataset.key }); toast('元に戻しました'); reload(); }
     catch (e) { fail(e); }
   }
 };
@@ -1655,6 +1818,20 @@ function readCourseForm() {
   return c;
 }
 
+// メニューの保存（続けて押したときは、最後の保存の結果だけを表示に使う。失敗したら取り直す）
+async function saveCourses(fn) {
+  const seq = S.courseSeq = (S.courseSeq || 0) + 1;
+  try {
+    const res = await save(fn);
+    if (seq === S.courseSeq) { S.courses = res.courses; refresh(); }
+    return true;
+  } catch (e) {
+    fail(e);
+    try { S.courses = (await api('courses')).courses; refresh(); } catch (e2) { /* 表示はそのまま */ }
+    return false;
+  }
+}
+
 ACTIONS.menu = async (a, b) => {
   const id = b.dataset.id;
   try {
@@ -1674,12 +1851,19 @@ ACTIONS.menu = async (a, b) => {
       if (a === 'cChgMode') c.chg_mode = b.value;
       refresh();
     } else if (a === 'up' || a === 'down') {
-      S.courses = (await api('moveCourse', { id: id, dir: a === 'up' ? -1 : 1 })).courses; refresh();
-    } else if (a === 'toggle') {
-      const c = S.courses.find(x => x.id === id);
-      S.courses = (await api('toggleCourse', { id: id, visible: !c.visible })).courses;
-      toast(!c.visible ? '予約ページに表示しました' : '予約ページから隠しました');
+      // 並べ替えと表示の切り替えは、押したらすぐ表示を変え、裏で保存する
+      const i = S.courses.findIndex(x => x.id === id), j = i + (a === 'up' ? -1 : 1);
+      if (i < 0 || j < 0 || j >= S.courses.length) return;
+      const list = S.courses.slice();
+      list[i] = S.courses[j]; list[j] = S.courses[i];
+      S.courses = list;
       refresh();
+      await saveCourses(() => api('moveCourse', { id: id, dir: a === 'up' ? -1 : 1 }));
+    } else if (a === 'toggle') {
+      const vis = !S.courses.find(x => x.id === id).visible;
+      S.courses = S.courses.map(x => (x.id === id ? Object.assign({}, x, { visible: vis }) : x));
+      refresh();
+      if (await saveCourses(() => api('toggleCourse', { id: id, visible: vis }))) toast(vis ? '予約ページに表示しました' : '予約ページから隠しました');
     } else if (a === 'saveCourse') {
       const c = readCourseForm();
       if (!c.name.trim()) { $('cErr').textContent = 'メニュー名を入力してください。'; return; }
@@ -1742,7 +1926,7 @@ function sessFields(k) {
 
 VIEWS.set = {
   ready: () => true,
-  load: async () => { S.quota = (await api('quota')).quota; },
+  load: async () => { const q = (await api('quota')).quota; return () => { S.quota = q; }; },
   render: () => {
     const s = S.settings;
     const q = S.quota;
@@ -2104,7 +2288,7 @@ function menuHtml() {
     <div class="row" style="justify-content:space-between"><h2 style="margin:0">メニュー</h2><button class="btn small" data-act="new">＋ 追加</button></div>
     <div class="sub" style="margin:4px 0 6px">メニューごとに、料金、予約できる時間帯・曜日、締切を決められます。スイッチをオフにすると予約ページに出なくなります。</div>
     ${ed && !ed.id ? courseForm(ed) : ''}
-    ${list.length ? list.map((c, i) => `<div class="course ${c.visible ? '' : 'off'}">
+    ${list.length ? list.map((c, i) => `<div class="course ${c.visible ? '' : 'off'}" data-key="c:${esc(c.id)}">
       <div style="display:flex;flex-direction:column">
         <button class="icon" data-act="up" data-id="${esc(c.id)}" aria-label="上へ" ${i === 0 ? 'style="visibility:hidden"' : ''}>${icon('i-up')}</button>
         <button class="icon" data-act="down" data-id="${esc(c.id)}" aria-label="下へ" ${i === list.length - 1 ? 'style="visibility:hidden"' : ''}>${icon('i-down')}</button>
@@ -2135,9 +2319,9 @@ ACTIONS.set = async (a, b) => {
       interval: last ? last.interval : 30, stay: last ? last.stay : 120
     };
     try {
-      S.settings = (await api('saveSettings', next)).settings;
+      S.settings = (await save(() => api('saveSettings', next))).settings;
       toast('「' + name + '」を追加しました。時間を設定して保存してください');
-      S.dayData = null;
+      staleMonths();
       refresh();
     } catch (e) { alert(e.message); }
     return;
@@ -2150,9 +2334,9 @@ ACTIONS.set = async (a, b) => {
     delete next.sessions[k];
     Object.keys(next.weekly).forEach(d => { next.weekly[d] = (next.weekly[d] || []).filter(x => x !== k); });
     try {
-      S.settings = (await api('saveSettings', next)).settings;
+      S.settings = (await save(() => api('saveSettings', next))).settings;
       S.courses = (await api('courses')).courses;
-      S.dayData = null;
+      staleMonths();
       toast('削除しました');
       refresh();
     } catch (e) { alert(e.message); }
@@ -2179,9 +2363,9 @@ ACTIONS.set = async (a, b) => {
     if ($('setErr')) $('setErr').textContent = '';
     const mo = M.busy(b);
     try {
-      S.settings = (await api('saveSettings', next)).settings;
+      S.settings = (await save(() => api('saveSettings', next))).settings;
       await mo.ok();
-      S.dayData = null; S.monthData = null;
+      staleMonths();
       toast('設定を保存しました');
       refresh();
     } catch (e) { mo.fail(); if ($('setErr')) $('setErr').textContent = e.message; }
@@ -2237,8 +2421,19 @@ ACTIONS.set = async (a, b) => {
     const next = JSON.parse(JSON.stringify(S.settings));
     const cur = next.weekly[i] || [];
     next.weekly[i] = cur.indexOf(k) >= 0 ? cur.filter(x => x !== k) : cur.concat(k);
-    try { S.settings = (await api('saveSettings', next)).settings; toast(WD[Number(i)] + '曜日の営業を変更しました'); S.dayData = null; S.monthData = null; refresh(); }
-    catch (e) { fail(e); }
+    // 押したらすぐ表示を変え、裏で保存する（続けて押したときは、最後に送った内容を正とする）
+    S.settings = next;
+    refresh();
+    const seq = S.weeklySeq = (S.weeklySeq || 0) + 1;
+    try {
+      const res = await save(() => api('saveSettings', next));
+      if (seq === S.weeklySeq) { S.settings = res.settings; refresh(); }
+      toast(WD[Number(i)] + '曜日の営業を変更しました');
+    } catch (e) {
+      fail(e);
+      if (seq === S.weeklySeq) { try { S.settings = (await api('boot')).settings; refresh(); } catch (e2) { /* 表示はそのまま */ } }
+    }
+    staleMonths();
     return;
   }
   if (MENU_ACTS.indexOf(a) >= 0) return ACTIONS.menu(a, b);
@@ -2294,7 +2489,7 @@ $('view').addEventListener('input', e => {
   if (S.tab === 'cust' && e.target.id === 'custQ') {
     S.custQ = e.target.value;
     clearTimeout(S.custTimer);
-    S.custTimer = setTimeout(() => { S.custList = null; showTab('cust'); }, 300);
+    S.custTimer = setTimeout(reload, 300);
     return;
   }
   if (S.tab !== 'today') return;
@@ -2335,14 +2530,24 @@ $('view').addEventListener('change', e => {
 $('tabs').addEventListener('click', e => {
   const t = e.target.closest('.tab');
   if (!t) return;
-  if (t.dataset.tab === 'cust') { S.custSel = null; S.custDetail = null; }
-  showTab(t.dataset.tab);
+  const tab = t.dataset.tab;
+  if (tab === S.tab) {
+    // 今のタブをもう一度押したら一番上へ（お客様を開いているときは一覧へ戻る）
+    if (tab === 'cust' && S.custSel) { closeCust(); return; }
+    window.scrollTo({ top: 0, behavior: M.reduce() ? 'auto' : 'smooth' });
+    reload();
+    return;
+  }
+  // お客様タブは一覧から（一覧で見ていた位置に戻す）
+  if (tab === 'cust' && S.custSel) { S.custSel = null; S.scroll.cust = S.scroll.custList || 0; }
+  showTab(tab);
 });
 $('loginBtn').onclick = login;
 $('pw').onkeydown = e => { if (e.key === 'Enter') login(); };
 $('pw').oninput = () => { $('loginErr').textContent = ''; };
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !$('appView').classList.contains('hidden')) showTab(S.tab);
+  // アプリに戻ってきたら、表示はそのままで裏で最新にする
+  if (document.visibilityState === 'visible' && !$('appView').classList.contains('hidden')) reload();
 });
 
 boot();

@@ -3,3 +3,4 @@ dist/
 .mf/
 .wrangler/
 __pycache__/
+shots/
