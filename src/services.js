@@ -1062,29 +1062,42 @@ async function weeklyReport(env, force) {
   return { ok: res.ok, text: lines.join('\n') };
 }
 
-/* ---------- (3) Instagramの文案 ---------- */
+/* ---------- (3) Instagramの文案 ----------
+ * ・これまでの投稿の文は1日1回だけInstagramから読み、手元に置いて使い回す
+ * ・作るのは選んでいる種類（ストーリー・投稿・リール）の文だけ。書き方の特徴は一度読んだら使い回す
+ * ・これまでの投稿の文は、Claude側でも5分間は読み直さずに済むようにしておく（書き直しが速くなる）
+ */
+const IG_KIND_NAME = { story: 'ストーリー', post: '投稿', reel: 'リール' };
+const IG_KIND_RULE = {
+  story: 'ストーリーに載せる短い文（3〜4行、全体で60文字くらい）。空いている日時を知らせ、「ご予約はリンクから」で締める。ハッシュタグは付けない。',
+  post: 'フィード投稿の文（5〜8行）。季節や食材から書き出し、空きのお知らせとご予約の案内。最後にハッシュタグを3〜5個（これまでの投稿で使っているものを優先）。',
+  reel: 'リールに付ける短い文（2〜3行）とハッシュタグ。'
+};
 const IG_SYSTEM = [
   'あなたは、大阪・阿倍野の小さな薬膳レストラン「épii」のInstagramの文を、店主の代わりに下書きします。',
-  'これまでの投稿の文（渡す一覧）を読んで、書き出し・文の長さ・改行・絵文字やハッシュタグの使い方を、そのお店の書き方に合わせてください。',
-  '- story：ストーリーに載せる短い文（3〜4行、全体で60文字くらい）。空いている日時を知らせ、「ご予約はリンクから」で締める。',
-  '- post：フィード投稿の文（5〜8行）。季節や食材から書き出し、空きのお知らせとご予約の案内。最後にハッシュタグを3〜5個（これまでの投稿で使っているものを優先）。',
-  '- reel：リールに付ける短い文（2〜3行）とハッシュタグ。',
-  '- style：これまでの投稿から読み取った書き方の特徴を、3〜4項目（各25文字以内）。',
+  'これまでの投稿の文（次に渡す一覧）を読んで、書き出し・文の長さ・改行・絵文字やハッシュタグの使い方を、そのお店の書き方に合わせてください。',
+  '- 頼まれた種類の文（text）だけを書く。',
   '- 料理の写真があれば、写っているものに合わせる。写っていない料理や食材は書かない。写真がなければ、メニューの説明にある範囲で書く。',
   '- 値段・席数の数字は書かない（「お席に余裕があります」くらい）。お店が言っていない特典は書かない。',
+  '- style を頼まれたときだけ、これまでの投稿から読み取った書き方の特徴を3〜4項目（各25文字以内）。',
   '- 改行は「\\n」で入れる。' + AI_BREAK_RULE
 ].join('\n');
 
+// これまでの投稿の文（1日1回だけInstagramから読み直す）
 async function igCaptions(env) {
+  const saved = await kvGet(env, 'igCaps');
+  if (saved && Date.now() - saved.at < 86400000 && saved.list.length) return saved.list;
+  let list = [];
   const tk = await igToken(env).catch(() => null);
   if (tk) {
     try {
       const m = await igGet(env, tk.token, '/me/media', { fields: 'caption,media_product_type,timestamp', limit: 30 });
-      const list = (m.data || []).map(x => clean(x.caption, 1200)).filter(Boolean);
-      if (list.length) return list.slice(0, 20);
+      list = (m.data || []).map(x => clean(x.caption, 1200)).filter(Boolean).slice(0, 15);
     } catch (e) { /* 取り込み済みの文を使う */ }
   }
-  return (await env.DB.prepare("SELECT caption FROM ig_media WHERE kind != 'story' AND caption IS NOT NULL AND caption != '' ORDER BY ts DESC LIMIT 20").all()).results.map(x => x.caption);
+  if (!list.length) list = (await env.DB.prepare("SELECT caption FROM ig_media WHERE kind != 'story' AND caption IS NOT NULL AND caption != '' ORDER BY ts DESC LIMIT 15").all()).results.map(x => x.caption);
+  await kvPut(env, 'igCaps', { at: Date.now(), list: list });
+  return list;
 }
 
 // 告知の候補：これから1週間の空いている時間帯
@@ -1108,49 +1121,73 @@ async function upcomingOpenings(env) {
   }
   return { list: out.slice(0, 8), s: s, courses: w.courses };
 }
+function igKey(b) { return b.date === 'free' ? 'ig:free' : 'ig:' + String(b.date || '') + ':' + String(b.session || ''); }
 async function adminIgOpenings(env) {
   const o = await upcomingOpenings(env);
+  const keys = o.list.map(x => 'ig:' + x.date + ':' + x.session).concat('ig:free', 'ig:style');
   const cached = {};
-  if (o.list.length) {
-    const keys = o.list.map(x => 'ig:' + x.date + ':' + x.session).concat('ig:free');
-    (await env.DB.prepare('SELECT k, v FROM ai_cache WHERE k IN (' + keys.map(() => '?').join(',') + ')').bind(...keys).all()).results
-      .forEach(r => { try { cached[r.k.slice(3)] = JSON.parse(r.v); } catch (e) { /* 何もしない */ } });
-  }
-  return { openings: o.list, drafts: cached };
+  let style = [];
+  (await env.DB.prepare('SELECT k, v FROM ai_cache WHERE k IN (' + keys.map(() => '?').join(',') + ')').bind(...keys).all()).results.forEach(r => {
+    try { if (r.k === 'ig:style') style = JSON.parse(r.v); else cached[r.k.slice(3)] = JSON.parse(r.v); } catch (e) { /* 何もしない */ }
+  });
+  return { openings: o.list, drafts: cached, style: style };
 }
 
 async function adminIgDraft(env, b) {
+  const kind = IG_KIND_RULE[b.kind] ? b.kind : 'story';
   const o = await upcomingOpenings(env);
   const free = b.date === 'free';
   const op = free ? null : o.list.find(x => x.date === b.date && x.session === b.session) || (isDate(b.date) ? { date: b.date, session: String(b.session || ''), label: sessionLabel(o.s, String(b.session || '')), left: 0 } : null);
   if (!free && !op) fail('告知する日を選んでください。');
-  const key = free ? 'ig:free' : 'ig:' + op.date + ':' + op.session;
+  const key = igKey(b);
   const caps = await igCaptions(env);
+  const capsText = 'これまでの投稿の文（新しい順）：\n' + (caps.length ? caps.map((c, i) => '---' + (i + 1) + '\n' + c).join('\n') : 'なし（落ち着いた丁寧な文で書く）');
+  const capsSrc = await hashOf(caps);
+  const styleHit = await aiCacheGet(env, 'ig:style');
+  const needStyle = !styleHit || styleHit.src !== capsSrc;
   const menu = o.courses.filter(c => c.visible && (free || c.sessions.indexOf(op.session) >= 0))
     .map(c => '・' + c.name + (c.description ? '（' + c.description + '）' : '')).join('\n');
   const today = jstStamp(Date.now()).slice(0, 10);
-  const facts = [
+  const prev = await aiCacheGet(env, key);
+  const draft = prev ? prev.v : {};
+  const ask = [
     '今日：' + jdLong(today),
     free ? '告知：空きのお知らせではない、ふだんの投稿' : '告知する空き：' + jdLong(op.date) + ' ' + op.label + (op.date === today ? '（今日）' : op.date === addDays(today, 1) ? '（明日）' : ''),
     'メニュー：\n' + (menu || 'なし'),
-    'これまでの投稿の文（新しい順）：\n' + (caps.length ? caps.map((c, i) => '---' + (i + 1) + '\n' + c).join('\n') : 'なし（落ち着いた丁寧な文で書く）')
-  ].join('\n');
-  const src = await hashOf(facts);
-  if (!b.fresh && !b.image) {
-    const hit = await aiCacheGet(env, key);
-    if (hit && hit.src === src) return { key: key.slice(3), draft: hit.v };
-  }
+    '書く文：' + IG_KIND_NAME[kind] + '。' + IG_KIND_RULE[kind],
+    b.image ? '料理の写真：あり（1枚目）' : '',
+    b.before ? '前の案とは違う書き出しにしてください：' + plain(clean(b.before, 600)) : '',
+    needStyle ? 'style（書き方の特徴）も書いてください。' : 'style は空の配列でよい。'
+  ].filter(Boolean).join('\n');
   const content = [];
   if (b.image) content.push(imageBlock(b));
-  content.push({ type: 'text', text: facts + (b.image ? '\n料理の写真：あり（1枚目）' : '') + (b.fresh && b.before ? '\n\n前の案とは違う書き出しにしてください：' + plain(clean(b.before, 400)) : '') });
+  content.push({ type: 'text', text: ask });
   const out = await claude(env, {
-    system: IG_SYSTEM, effort: 'medium', maxTokens: 12000, content: content,
-    schema: strSchema({ style: { type: 'array', items: { type: 'string' } }, story: { type: 'string' }, post: { type: 'string' }, reel: { type: 'string' } })
+    // 決まった指示とこれまでの投稿の文を先頭に置き、Claude側で5分間とっておいてもらう
+    system: [{ type: 'text', text: IG_SYSTEM }, { type: 'text', text: capsText, cache_control: { type: 'ephemeral' } }],
+    effort: 'low', maxTokens: 6000, content: content,
+    schema: strSchema({ text: { type: 'string' }, style: { type: 'array', items: { type: 'string' } } })
   });
-  const draft = {
-    story: aiText(out.story, 600), post: aiText(out.post, 2000), reel: aiText(out.reel, 800),
-    style: (out.style || []).slice(0, 4).map(x => aiText(x, 80)), photo: !!b.image, at: jstStamp(Date.now())
-  };
-  await aiCachePut(env, key, src, draft);
+  draft[kind] = aiText(out.text, kind === 'story' ? 600 : 2200);
+  draft.edited = Object.assign({}, draft.edited || {}, { [kind]: false });
+  draft.at = jstStamp(Date.now());
+  await aiCachePut(env, key, '', draft);
+  let style = styleHit ? styleHit.v : [];
+  if (needStyle && out.style && out.style.length) {
+    style = out.style.slice(0, 4).map(x => aiText(x, 80));
+    await aiCachePut(env, 'ig:style', capsSrc, style);
+  }
+  return { key: key.slice(3), draft: draft, style: style };
+}
+// 文案を手で直したとき・消したとき
+async function adminIgSave(env, b) {
+  const kind = IG_KIND_RULE[b.kind] ? b.kind : '';
+  if (!kind) fail('種類を選んでください。');
+  const key = igKey(b);
+  const prev = await aiCacheGet(env, key);
+  const draft = prev ? prev.v : {};
+  if (b.remove) { delete draft[kind]; if (draft.edited) delete draft.edited[kind]; }
+  else { draft[kind] = clean(b.text, 2200); draft.edited = Object.assign({}, draft.edited || {}, { [kind]: true }); }
+  await aiCachePut(env, key, '', draft);
   return { key: key.slice(3), draft: draft };
 }

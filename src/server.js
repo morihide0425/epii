@@ -974,7 +974,8 @@ const ADMIN_FUNCS = {
   rcptSave: adminRcptSave,
   rcptUndo: adminRcptUndo,
   igOpenings: adminIgOpenings,
-  igDraft: adminIgDraft
+  igDraft: adminIgDraft,
+  igSave: adminIgSave
 };
 
 async function allCourses(env) {

@@ -56,7 +56,7 @@ function seedJournals() {
 
 // Claude：system の内容で何の依頼かを見分けて、それらしい JSON を返す
 function aiAnswer(body) {
-  const sys = body.system || '';
+  const sys = typeof body.system === 'string' ? body.system : JSON.stringify(body.system || '');
   const text = JSON.stringify(body.messages);
   if (sys.includes('ひと言')) {
     if (text.includes('返事の種類：お断り')) return { add: 'せっかく｜ご連絡を｜いただいたのに、｜申し訳ございません。' };
@@ -77,10 +77,11 @@ function aiAnswer(body) {
     ] };
   }
   if (sys.includes('Instagram')) {
-    return { style: ['最初の｜一文は｜短く', '絵文字は｜使わない', 'ハッシュタグは｜最後に｜3〜5個'],
-      story: '明日の｜ランチ、｜まだ｜お席が｜あります。\n\nご予約は｜リンクから。',
-      post: '十月の｜養生ランチ。\n\nれんこんと｜白きくらげの｜スープ。\n\nご予約は｜プロフィールの｜リンクから。\n#阿倍野ランチ #薬膳 #épii',
-      reel: '秋の｜薬膳。\n#薬膳 #épii' };
+    const n = calls.ai.filter(c => JSON.stringify(c.body.system || '').includes('Instagram')).length;
+    const style = text.includes('style（書き方の特徴）も') ? ['最初の｜一文は｜短く', '絵文字は｜使わない', 'ハッシュタグは｜最後に｜3〜5個'] : [];
+    if (text.includes('書く文：投稿')) return { text: '十月の｜養生ランチ。\n\nれんこんと｜白きくらげの｜スープ。\n\nご予約は｜プロフィールの｜リンクから。\n#阿倍野ランチ #薬膳 #épii', style: style };
+    if (text.includes('書く文：リール')) return { text: '秋の｜薬膳。\n#薬膳 #épii', style: style };
+    return { text: ['明日の｜ランチ、', '今週の｜ランチ、', 'この週末の｜ランチ、'][n % 3] + '｜まだ｜お席が｜あります。\n\nご予約は｜リンクから。', style: style };
   }
   return {};
 }

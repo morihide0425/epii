@@ -296,6 +296,8 @@
   .aiwaitbox { padding: 4px 0 8px; }
   .igtext { border: 1px solid var(--line2); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.8; margin-top: 10px; background: #fff; }
   .igtext .hash { color: var(--blue); }
+  div.igtext { cursor: text; }
+  textarea.igtext { display: block; width: 100%; resize: none; overflow: hidden; font-size: 14px; line-height: 1.8; padding: 10px 12px; min-height: 140px; }
   .igph { display: flex; gap: 10px; align-items: center; margin-top: 10px; font-size: 13px; }
   .igph img { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; }
   .addph { display: flex; gap: 10px; align-items: center; border: 1px dashed var(--line2); border-radius: 12px; padding: 10px; font-size: 13px; margin-top: 10px; cursor: pointer; }
@@ -2138,6 +2140,7 @@ VIEWS.set = {
     </div>` : ''}
     <div class="card"><button class="btn wide" data-act="logout">この端末からログアウト</button></div>`;
     setView(h);
+    fitAreas();
   }
 };
 
@@ -2262,21 +2265,25 @@ function buildIgInsights(d) {
   if (pd === null || pd >= 7) out.push({ tone: 'warn', title: lastPost ? '前回の投稿から' + pd + '日たっています' : 'この期間、投稿がありません',
     body: '投稿やリールは、お店を知らない人に見つけてもらう入口になります。1週間以上空くと、表示される機会が減りやすくなります。', action: '週1回を目安に、メニューや季節の一皿を投稿' });
   // 4. ストーリーを出した日の効果
-  const dly = d.daily.filter(x => x.date < today());
+  // 閲覧の記録が始まる前の日（0回）まで平均に入れると、ない日の平均がほぼ0になり倍率が極端になるので、記録のある日から数える。
+  // 倍率ではなく、1日あたりの回数そのものを見せる
+  const first = d.daily.find(x => x.opens > 0);
+  const dly = first ? d.daily.filter(x => x.date >= first.date && x.date < today()) : [];
   const sDays = dly.filter(x => x.stories > 0), nDays = dly.filter(x => x.stories === 0);
-  if (sDays.length >= 3 && nDays.length >= 3) {
+  if (sDays.length >= 3 && nDays.length >= 3 && sum(nDays, 'opens') >= 5) {
     const a1 = avg(sDays, 'opens'), a0 = avg(nDays, 'opens');
-    if (a0 > 0 && a1 / a0 >= 1.2) out.push({ tone: 'good', title: 'ストーリーを出した日は、予約ページの閲覧が' + (a1 / a0).toFixed(1) + '倍です',
-      body: 'ストーリーのある日は平均' + a1.toFixed(1) + '回、ない日は' + a0.toFixed(1) + '回開かれています。予約につながる効果が出ています。', action: '空きのある週は、ストーリーの回数を増やす' });
-    else if (a0 > 0) out.push({ tone: 'info', title: 'ストーリーを出した日と出さない日で、閲覧に大きな差はありません',
-      body: 'ストーリーのある日は平均' + a1.toFixed(1) + '回、ない日は' + a0.toFixed(1) + '回です。', action: 'ストーリーにリンクスタンプ（ストーリー用URL）を付けて、予約ページへの導線を作る', copy: storyUrl });
+    const r1 = a1.toFixed(1), r0 = a0.toFixed(1);
+    if (a1 - a0 >= 1 && a1 >= a0 * 1.2) out.push({ tone: 'good', title: 'ストーリーを出した日は、予約ページがよく開かれています',
+      body: '1日あたり、ストーリーのある日は' + r1 + '回、ない日は' + r0 + '回です（ある日' + sDays.length + '日・ない日' + nDays.length + '日の平均）。予約につながる効果が出ています。', action: '空きのある週は、ストーリーの回数を増やす' });
+    else out.push({ tone: 'info', title: 'ストーリーを出した日と出さない日で、閲覧に大きな差はありません',
+      body: '1日あたり、ストーリーのある日は' + r1 + '回、ない日は' + r0 + '回です。', action: 'ストーリーにリンクスタンプ（ストーリー用URL）を付けて、予約ページへの導線を作る', copy: storyUrl });
   }
   // 5. リールと投稿のどちらが伸びるか
   const reels = posts.filter(m => m.kind === 'reel' && m.reach), feeds = posts.filter(m => m.kind === 'feed' && m.reach);
   if (reels.length >= 2 && feeds.length >= 2) {
     const r = avg(reels, 'reach'), f = avg(feeds, 'reach');
-    if (r > f * 1.3) out.push({ tone: 'good', title: 'リールは投稿の' + (r / f).toFixed(1) + '倍の人に届いています', body: 'リールの平均リーチは' + Math.round(r) + '人、投稿は' + Math.round(f) + '人です。', action: '調理の様子や盛り付けなど、短い動画を増やす' });
-    else if (f > r * 1.3) out.push({ tone: 'info', title: '写真の投稿のほうが届いています', body: '投稿の平均リーチは' + Math.round(f) + '人、リールは' + Math.round(r) + '人です。', action: '写真の投稿を中心にし、リールは反応の良かった内容に絞る' });
+    if (f >= 10 && r > f * 1.3) out.push({ tone: 'good', title: 'リールは投稿の' + (r / f).toFixed(1) + '倍の人に届いています', body: 'リールの平均リーチは' + Math.round(r) + '人、投稿は' + Math.round(f) + '人です。', action: '調理の様子や盛り付けなど、短い動画を増やす' });
+    else if (r >= 10 && f > r * 1.3) out.push({ tone: 'info', title: '写真の投稿のほうが届いています', body: '投稿の平均リーチは' + Math.round(f) + '人、リールは' + Math.round(r) + '人です。', action: '写真の投稿を中心にし、リールは反応の良かった内容に絞る' });
   }
   // 6. 伸びやすい投稿時間
   const byHour = {};
@@ -2533,12 +2540,20 @@ ACTIONS.set = async (a, b) => {
   }
   if (a === 'moneyPer') { S.moneyPeriod = b.dataset.v; refresh(); loadMoney(); return; }
   if (a === 'moneyReload') { loadMoney(true, b); return; }
-  if (a === 'igSel') { S.igd.sel = b.dataset.v; S.igd.err = ''; refresh(); return; }
-  if (a === 'igKind') { S.igd.kind = b.dataset.v; refresh(); return; }
+  if (a === 'igSel') { S.igd.sel = b.dataset.v; S.igd.err = ''; S.igd.editing = ''; refresh(); return; }
+  if (a === 'igKind') { S.igd.kind = b.dataset.v; S.igd.editing = ''; refresh(); return; }
+  if (a === 'igEdit') {
+    S.igd.editing = S.igd.sel + '|' + S.igd.kind;
+    refresh(); fitAreas();
+    const ta = $('igTa');
+    if (ta) { ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (x) { /* 何もしない */ } }
+    return;
+  }
+  if (a === 'igDel') { await igDelete(b); return; }
   if (a === 'igMake') { igMake(false); return; }
   if (a === 'igAgain') { igMake(true); return; }
   if (a === 'igPhotoOff') { S.igd.photo = ''; refresh(); return; }
-  if (a === 'igCopy') { const dr = S.igd.drafts[S.igd.sel]; if (dr) await copyText(plainJa(dr[S.igd.kind])); return; }
+  if (a === 'igCopy') { const ta = $('igTa'); const dr = S.igd.drafts[S.igd.sel]; if (dr) await copyText(ta ? ta.value : plainJa(dr[S.igd.kind])); return; }
   if (a === 'anView') {
     S.anView = b.dataset.v; refresh();
     if (S.anView === 'money') { loadMoney(); return; }
@@ -3109,27 +3124,35 @@ function moneyHtml() {
 async function loadIg() {
   try {
     const r = await api('igOpenings');
-    const g = S.igd || { drafts: {}, kind: 'story', photo: '', wait: false, err: '' };
+    const g = S.igd || { drafts: {}, kind: 'story', photo: '', wait: {}, err: '', editing: '', style: [] };
     g.list = r.openings;
+    g.style = r.style || g.style || [];
     Object.keys(r.drafts || {}).forEach(k => { if (!g.drafts[k]) g.drafts[k] = r.drafts[k]; });
     if (!g.sel || (g.sel !== 'free' && !g.list.some(o => o.date + ':' + o.session === g.sel))) g.sel = g.list[0] ? g.list[0].date + ':' + g.list[0].session : 'free';
     S.igd = g;
     renderSet();
   } catch (e) { /* 文案だけ出さない */ }
 }
+function igWhere(sel) {
+  const i = sel.indexOf(':');
+  return sel === 'free' ? { date: 'free', session: '' } : { date: sel.slice(0, i), session: sel.slice(i + 1) };
+}
+// 選んでいる種類（ストーリー・投稿・リール）の文だけを作る・書き直す
 async function igMake(fresh) {
   const g = S.igd;
-  if (!g || g.wait) return;
-  g.wait = true; g.err = '';
+  if (!g) return;
+  const sel = g.sel, kind = g.kind, wk = sel + '|' + kind;
+  if (g.wait[wk]) return;
+  const dr = g.drafts[sel] || {};
+  if (fresh && dr.edited && dr.edited[kind] && !confirm('直した文は、書き直した文に置き換わります。よろしいですか？')) return;
+  g.wait[wk] = true; g.err = ''; g.editing = '';
   renderSet();
-  const sel = g.sel;
-  const i = sel.indexOf(':');
-  const before = fresh && g.drafts[sel] ? g.drafts[sel][g.kind] : '';
   try {
-    const r = await api('igDraft', { date: sel === 'free' ? 'free' : sel.slice(0, i), session: sel === 'free' ? '' : sel.slice(i + 1), image: g.photo || undefined, fresh: !!fresh || !!g.photo, before: before || '' });
-    g.drafts[r.key] = r.draft;
+    const r = await api('igDraft', Object.assign(igWhere(sel), { kind: kind, image: g.photo || undefined, before: fresh && dr[kind] ? plainJa(dr[kind]) : '' }));
+    g.drafts[r.key] = Object.assign({}, g.drafts[r.key], r.draft);
+    if (r.style && r.style.length) g.style = r.style;
   } catch (e) { g.err = e.message; }
-  g.wait = false;
+  delete g.wait[wk];
   renderSet();
 }
 async function igPhoto(input) {
@@ -3138,6 +3161,29 @@ async function igPhoto(input) {
   if (!file || !S.igd) return;
   try { S.igd.photo = await toJpeg(file, 1280); } catch (e) { alert(e.message); return; }
   igMake(true);
+}
+// 手で直した文は、少し待ってから保存する（打っているあいだは送らない）
+let igSaveTimer = 0;
+function igTyped(text) {
+  const g = S.igd;
+  const sel = g.sel, kind = g.kind;
+  const dr = g.drafts[sel] = g.drafts[sel] || {};
+  dr[kind] = text;
+  dr.edited = Object.assign({}, dr.edited, { [kind]: true });
+  clearTimeout(igSaveTimer);
+  igSaveTimer = setTimeout(() => { api('igSave', Object.assign(igWhere(sel), { kind: kind, text: text })).catch(e => toast(e.message)); }, 700);
+}
+async function igDelete(b) {
+  const g = S.igd;
+  const sel = g.sel, kind = g.kind;
+  if (!confirm('この' + { story: 'ストーリー', post: '投稿', reel: 'リール' }[kind] + 'の文案を消しますか？')) return;
+  clearTimeout(igSaveTimer);
+  await M.collapse(document.querySelector('[data-key="igbox"]'));
+  const dr = g.drafts[sel];
+  if (dr) { delete dr[kind]; if (dr.edited) delete dr.edited[kind]; }
+  g.editing = '';
+  renderSet();
+  try { await api('igSave', Object.assign(igWhere(sel), { kind: kind, remove: true })); } catch (e) { fail(e); }
 }
 function igDraftHtml() {
   if (!S.features.ai) return '';
@@ -3153,14 +3199,20 @@ function igDraftHtml() {
     ? `<div class="igph"><img src="${g.photo}" alt="選んだ料理の写真"><div style="flex:1;min-width:0">${phr('この写真に合わせた文にしています')}</div><button class="btn small ghost" data-act="igPhotoOff">外す</button></div>`
     : `<label class="addph" for="igPhoto">${icon('i-camera')}<span>${phr('料理の写真を選ぶと、写真に合わせた文にします（なくても大丈夫です）')}</span></label>`;
   h += '<input type="file" id="igPhoto" accept="image/*" class="vh" tabindex="-1">';
-  const dr = g.drafts[g.sel];
-  if (g.wait) h += `<div class="igtext" data-key="igw">${WAIT}${WAIT}<div class="sub">${phr('Claudeがこれまでの投稿を読んで書いています')}</div></div>`;
-  else if (dr && dr[g.kind]) {
-    h += `<div class="igtext" data-appear="ig:${esc(g.sel)}:${g.kind}:${hashStr(dr[g.kind])}">${phr(dr[g.kind], x => (x[0] === '#' ? 'hash' : ''))}</div>
-      <div class="acts"><button class="btn primary small" data-act="igCopy">文をコピー</button>${g.kind === 'story' && S.liffUrl ? `<button class="btn small" data-act="copyUrl" data-v="${esc(S.liffUrl + '?src=ig-story')}">ストーリー用の予約URLをコピー</button>` : ''}<button class="btn small" data-act="igAgain">書き直す</button></div>`;
-  } else h += '<button class="btn primary wide" data-act="igMake" style="margin-top:10px">文案を作る</button>';
+  const dr = g.drafts[g.sel] || {};
+  const text = dr[g.kind];
+  const wk = g.sel + '|' + g.kind;
+  if (g.wait[wk]) h += `<div class="igtext" data-key="igw">${WAIT}${WAIT}<div class="sub">${phr('Claudeがこれまでの投稿を読んで書いています')}</div></div>`;
+  else if (text) {
+    const editing = g.editing === wk;
+    h += `<div data-key="igbox">${editing
+      ? `<textarea class="igtext igta" id="igTa" data-auto="1" rows="6">${esc(plainJa(text))}</textarea>`
+      : `<div class="igtext" data-act="igEdit" role="button" tabindex="0" aria-label="文案（押すと直せます）" data-appear="ig:${esc(g.sel)}:${g.kind}:${hashStr(text)}">${phr(text, x => (x[0] === '#' ? 'hash' : ''))}</div>`}
+      <div class="sub" style="margin-top:4px">${phr(editing ? '直した文は、そのまま残ります。' : '文を押すと、自由に直せます。')}${dr.edited && dr.edited[g.kind] ? '<span class="tag gray" style="margin-left:6px">直した文</span>' : ''}</div>
+      <div class="acts"><button class="btn primary small" data-act="igCopy">文をコピー</button>${g.kind === 'story' && S.liffUrl ? `<button class="btn small" data-act="copyUrl" data-v="${esc(S.liffUrl + '?src=ig-story')}">予約URLをコピー</button>` : ''}<button class="btn small" data-act="igAgain">書き直す</button><button class="btn small ghost" data-act="igDel">消す</button></div></div>`;
+  } else h += `<button class="btn primary wide" data-act="igMake" style="margin-top:10px">${{ story: 'ストーリー', post: '投稿', reel: 'リール' }[g.kind]}の文案を作る</button>`;
   if (g.err) h += `<div class="warn">${phr(g.err)}</div>`;
-  if (dr && dr.style && dr.style.length) h += `<h3>これまでの投稿から読んだ書き方</h3><div class="stylebox">${dr.style.map(x => `<span class="hl">・${phr(x)}</span>`).join('')}</div>`;
+  if (g.style && g.style.length) h += `<h3>これまでの投稿から読んだ書き方</h3><div class="stylebox">${g.style.map(x => `<span class="hl">・${phr(x)}</span>`).join('')}</div>`;
   return h + '</div>';
 }
 
@@ -3215,6 +3267,7 @@ $('view').addEventListener('input', e => {
     S.custTimer = setTimeout(reload, 300);
     return;
   }
+  if (S.tab === 'set' && e.target.id === 'igTa' && S.igd) { igTyped(e.target.value); fitAreas(); return; }
   if (S.tab !== 'today') return;
   if (e.target.id === 'payQ') { S.salesQ = e.target.value; payQuery(); return; }
   if (e.target.dataset.rf && rcptItem(e.target.dataset.qid)) {

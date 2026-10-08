@@ -126,13 +126,22 @@ try {
   // Instagram
   res = await post('/admin/api/igOpenings', {}, A);
   check(Array.isArray(res.body.openings), 'openings');
-  res = await post('/admin/api/igDraft', { date: 'free' }, A);
-  check(res.body.draft.story.includes('｜') && res.body.draft.style.length === 3, 'ig draft');
-  const n1 = calls.ai.length;
-  res = await post('/admin/api/igDraft', { date: 'free' }, A);
-  check(calls.ai.length === n1, 'ig cached');
+  res = await post('/admin/api/igDraft', { date: 'free', kind: 'story' }, A);
+  check(res.body.draft.story.includes('｜') && !res.body.draft.post && res.body.style.length === 3, 'ig story only');
+  const igCall = calls.ai[calls.ai.length - 1].body;
+  check(Array.isArray(igCall.system) && igCall.system[1].cache_control && igCall.output_config.effort === 'low', 'captions cached on Claude side');
+  res = await post('/admin/api/igDraft', { date: 'free', kind: 'post' }, A);
+  check(res.body.draft.post.includes('#') && res.body.draft.story && res.body.style.length === 3, 'ig post added, story kept');
+  check(JSON.stringify(calls.ai[calls.ai.length - 1].body).includes('style は空の配列でよい'), 'style read once');
+  const story1 = res.body.draft.story;
+  res = await post('/admin/api/igDraft', { date: 'free', kind: 'story', before: story1 }, A);
+  check(res.body.draft.story !== story1 && res.body.draft.post.includes('#'), 'rewrite only story');
+  res = await post('/admin/api/igSave', { date: 'free', kind: 'post', text: '手で直した文 #épii' }, A);
+  check(res.body.draft.post === '手で直した文 #épii' && res.body.draft.edited.post, 'edit saved');
+  res = await post('/admin/api/igSave', { date: 'free', kind: 'reel', remove: true }, A);
+  res = await post('/admin/api/igSave', { date: 'free', kind: 'story', remove: true }, A);
   res = await post('/admin/api/igOpenings', {}, A);
-  check(res.body.drafts.free && res.body.drafts.free.post.includes('#'), 'ig cached in openings');
+  check(res.body.drafts.free.post === '手で直した文 #épii' && !res.body.drafts.free.story && res.body.style.length === 3, 'openings keep edits/deletes');
 
   // Claude が混み合っているとき
   opts.aiFail = 1;
