@@ -1121,11 +1121,11 @@ const TX_SYSTEM = [
   '- rate：消費税。食材・飲み物なら "8"、ほとんどの経費は "10"、税のかからないもの（振込手数料以外の税金・保険料・家賃の一部など）は "none"。',
   '- reason：何の支払いかを、ごく短く（15文字以内、体言止め）。例「Googleの利用料」「電気代」。',
   '- unsure：明細の名前だけでは分からないとき true（例：個人名への振込、略称で分からない）。',
-  '- sure：次のどちらかのときだけ true。(1) 過去の登録に同じ相手があり、同じ科目にした。(2) 名前だけで何の支払いかがはっきり分かり、ほかの科目になることがまずない（電力会社・ガス会社・水道局・携帯電話や通信の会社・国民年金など）。振込（パソコン・ネット・ATMの振込）・個人名・略称・カードの支払いでお店の名前がないもの・ものによって科目が変わる相手（ネット通販・ホームセンター・コンビニなど）は false。迷ったら false。'
+  '- sure：次のどちらかのときだけ true。(1) 過去の登録に同じ相手があり、同じ科目にした。(2) 名前だけで何の支払いかがはっきり分かり、ほかの科目になることがまずない（電力会社・ガス会社・水道局・携帯電話や通信の会社・Googleなどのサービスの利用料・ソフトやアプリの月額料金・国民年金など）。振込（パソコン・ネット・ATMの振込）・個人名・略称・カードの支払いでお店の名前がないもの・ものによって科目が変わる相手（ネット通販・ホームセンター・コンビニなど）は false。迷ったら false。'
 ].join('\n');
 // まとめて登録してよいほど確かか：前に同じ相手を同じ科目で登録している、または Claude が名前ではっきり分かると言ったもの。
 // 振込・ATM など、中身によって科目が変わるものは入れない
-const TX_GENERIC = /振込|振替|ﾌﾘｺﾐ|ﾌﾘｶｴ|フリコミ|フリカエ|ATM|ＡＴＭ|ｴｰﾃｲｴﾑ|引出|ﾋｷﾀﾞｼ|PC|ＰＣ|ﾊﾟｿｺﾝ|パソコン|ﾈｯﾄ|ネット|ｲﾝﾀｰﾈｯﾄ/i;
+const TX_GENERIC = /振込|振替|ﾌﾘｺﾐ|ﾌﾘｶｴ|フリコミ|フリカエ|ATM|ＡＴＭ|ｴｰﾃｲｴﾑ|引出|ﾋｷﾀﾞｼ|(PC|ＰＣ|ﾊﾟｿｺﾝ|パソコン|ﾈｯﾄ|ネット)\s*(ﾊﾞﾝｷﾝｸﾞ|バンキング)/i;
 function txKey(v) { return String(v || '').normalize('NFKC').replace(/[\s\d\-－.,、。・()（）]/g, '').toUpperCase().slice(0, 16); }
 async function adminMfTx(env, b) {
   if (!env.MF_API_KEY) return { connected: false };
@@ -1163,7 +1163,8 @@ async function adminMfTx(env, b) {
   const hits = {};
   if (keys.length) (await env.DB.prepare('SELECT k, v FROM ai_cache WHERE k IN (' + keys.map(() => '?').join(',') + ')').bind(...keys).all()).results
     .forEach(r => { try { hits[r.k.slice(3)] = JSON.parse(r.v); } catch (e) { /* 何もしない */ } });
-  const need = list.filter(t => !hits[t.id] && !t.receipt);
+  // 「確か」の印がない古い見立ては、もう一度 Claude に聞く
+  const need = list.filter(t => (!hits[t.id] || hits[t.id].sure === undefined) && !t.receipt);
   if (need.length && env.ANTHROPIC_API_KEY && b.suggest !== false) {
     try {
       const hist = await accountHistory(env);

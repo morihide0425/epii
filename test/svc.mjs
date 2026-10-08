@@ -419,12 +419,22 @@ try {
     await fetch(B + '/cdn-cgi/mf/scheduled');
     check(await wait(() => pushes.some(p => p.messages[0].text.includes('前に送ったあとで予約が変わりました') && p.messages[0].text.includes('2組 6名')), 8000), 'update sent the evening before');
   }
+  const accs0Cache = (await post('/admin/api/mfTx', { suggest: false }, A)).body.accounts;
+  const accs0 = () => accs0Cache[0].id;
   // 振込は Claude が確かだと言っても、まとめて登録には入れない
   txs.push({ id: 'TX%3D30', date: T, value: 8800, side: 'EXPENSE', content: 'PCﾌﾘｺﾐ ﾔﾏﾀﾞｼﾖｳﾃﾝ', journalizing_status: 'none' });
   res = await post('/admin/api/mfTx', {}, A);
   const tr = res.body.list.find(t => t.id === 'TX%3D30');
   check(tr && tr.ai && tr.ai.sure && !tr.sure, 'transfers are never bulk');
   txs.splice(txs.findIndex(t => t.id === 'TX%3D30'), 1);
+  // 前に作った見立て（「確か」の印がない）は、もう一度 Claude に聞いて印を付ける。サービスの利用料はまとめて登録できる
+  txs.push({ id: 'TX%3D40', date: T, value: 1045, side: 'EXPENSE', content: 'V670662 GOOGLE*WORKSPACE EPII-', journalizing_status: 'none' });
+  await db2.prepare("INSERT OR REPLACE INTO ai_cache (k, src, v, at) VALUES ('tx:TX%3D40', '', ?, ?)").bind(JSON.stringify({ accountId: accs0(), rate: '10', reason: '古い見立て', unsure: false }), T + ' 00:00').run();
+  const nAi3 = calls.ai.length;
+  res = await post('/admin/api/mfTx', {}, A);
+  const gw = res.body.list.find(t => t.id === 'TX%3D40');
+  check(calls.ai.length === nAi3 + 1 && gw.ai.sure === true && gw.sure, 'old suggestion re-asked, service fee is bulk ' + JSON.stringify(gw));
+  txs.splice(txs.findIndex(t => t.id === 'TX%3D40'), 1);
   // 予約0件の日：「見込みがあれば送る」にしていれば、見込みだけのメモを作る
   await db2.prepare("UPDATE reservations SET status = '確定待避' WHERE date = ? AND status = '確定'").bind(nd).run();
   res = await post('/admin/api/prep', { save: true, on: true, time: '21:00', parts: {}, note: '', empty: false }, A);

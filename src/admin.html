@@ -3431,11 +3431,11 @@ function txHtml() {
   if (!list.length) return h + '<div class="sub">ありません。すべて登録済みです。</div></div>';
   const bulk = txBulkItems();
   const can = list.filter(txBulkOk).length;
-  if (can >= 2) h += `<button class="btn primary wide" data-key="txbulk" data-act="txSaveAll" ${bulk.length ? '' : 'disabled'} style="margin:2px 0 8px">チェックした${bulk.length}件をまとめて登録</button>`;
+  if (can >= 1) h += `<button class="btn primary wide" data-key="txbulk" data-act="txSaveAll" ${bulk.length ? '' : 'disabled'} style="margin:2px 0 8px">チェックした${bulk.length}件をまとめて登録</button>`;
   h += list.map(t => {
     const sel = S.rcpt.txSel[t.id] || (S.rcpt.txSel[t.id] = { accountId: t.ai ? t.ai.accountId : '', rate: t.ai ? t.ai.rate : '10' });
     if (!sel.accountId && t.ai) { sel.accountId = t.ai.accountId; sel.rate = t.ai.rate; }
-    const ok = can >= 2 && txBulkOk(t);
+    const ok = can >= 1 && txBulkOk(t);
     const on = ok && !S.rcpt.txOff[t.id];
     return `<div class="txr ${on ? 'picked' : ''}" data-key="tx:${esc(t.id)}"><div class="top"><span class="sub">${jdShort(t.date)}</span><span class="nm">${esc(t.content || '（内容なし）')}</span><span class="am">${yen(t.amount)}</span></div>
       ${t.dupe ? `<div class="warn" style="margin-top:6px">${phr(jdShort(t.dupe.date) + 'に「' + t.dupe.method + '」で登録したレシート（' + (t.dupe.payee || 'お店の名前なし') + '）と同じ金額です。同じ支払いなら、ここでは登録しないでください（二重になります）。')}</div>` : ''}
