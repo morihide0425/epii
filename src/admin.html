@@ -268,6 +268,7 @@
   .who svg.spark { width: 12px; height: 12px; }
   .draft mark.add svg.spark { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
   .btn svg.spark { width: 15px; height: 15px; }
+  .chip svg.spark { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
   h3 svg.spark { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
   @media (prefers-reduced-motion: reduce) { svg.spark, svg.spark.busy, .clawd *, .aiwalk .mv { animation: none !important; } }
   .dlabel { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub); margin: 12px 0 6px; flex-wrap: wrap; }
@@ -322,15 +323,31 @@
   .picker .resc.sel { background: var(--green-l); border-radius: 10px; }
   .pay .pst { margin-top: 4px; }
   .kpis.money .v { font-size: 17px; } .kpi .c2 { font-size: 10px; color: var(--sub); margin-top: 1px; line-height: 1.35; } .kpi .c { font-size: 10px; margin-top: 2px; color: var(--sub); } .kpi .c.up { color: var(--green); } .kpi .c.down { color: var(--red); }
-  .pchart { display: flex; align-items: flex-end; gap: 10px; height: 150px; padding-top: 8px; }
-  .pchart .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
-  .pchart .pair { display: flex; align-items: flex-end; gap: 3px; height: 120px; width: 100%; justify-content: center; }
+  .pchart { position: relative; display: flex; align-items: flex-start; padding-top: 8px; }
+  .pchart .col { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+  .pchart .pair { display: flex; align-items: flex-end; gap: 3px; height: 120px; width: 100%; justify-content: center; box-sizing: border-box; }
+  .pchart .pline { position: absolute; left: 0; top: 8px; width: 100%; height: 120px; overflow: visible; pointer-events: none; animation: pl-draw .9s .25s cubic-bezier(.3,.7,.2,1) both; }
+  .pchart .pline polyline { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .pchart .pline .zl { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: .6; }
+  .pchart .pdot { position: absolute; left: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #fff; border: 2px solid var(--ink); box-sizing: border-box; z-index: 1; pointer-events: none; animation: pd-in .3s .9s ease-out both; }
+  .pchart .pdot.neg { border-color: var(--red); }
+  @keyframes pl-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes pd-in { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: none; } }
+  .legend i.lg-line { width: 14px; height: 2px; border-radius: 1px; background: var(--ink); vertical-align: 3px; }
+  @media (prefers-reduced-motion: reduce) { .pchart .pline, .pchart .pdot { animation: none; } }
   .pchart .b1, .pchart .b2 { width: 13px; border-radius: 3px 3px 0 0; min-height: 1px; } .pchart .b1 { background: var(--green); } .pchart .b2 { background: var(--amber); }
   .pchart .cl { font-size: 10px; color: var(--sub); }
   .erow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 84px; gap: 8px; align-items: center; font-size: 13px; padding: 4px 0; }
   .erow .ft { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; } .erow .fb { height: 100%; background: var(--amber); }
   .erow .fn { text-align: right; font-weight: 600; } .erow .fl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .aiwaitbox { padding: 4px 0 8px; }
+  .pchart .pl { font-size: 10px; font-weight: 700; line-height: 1.2; margin-top: 4px; } .pchart .pl.neg, .kpi .neg { color: var(--red); }
+  .goalbar { margin-top: 10px; padding: 10px 12px; background: var(--bg); border-radius: 12px; }
+  .goalbar .gtop { font-size: 12px; color: var(--sub); }
+  .goalbar .gnum { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; } .goalbar .gnum b { font-size: 17px; } .goalbar .gnum small { font-size: 11px; color: var(--sub); }
+  .goalbar .gnum span { margin-left: auto; font-weight: 700; font-size: 15px; color: var(--green); }
+  .goalbar .gtrack { height: 8px; border-radius: 4px; background: #fff; overflow: hidden; margin: 6px 0 4px; } .goalbar .gtrack i { display: block; height: 100%; background: var(--green); border-radius: 4px; }
+  .prepview { margin-top: 10px; white-space: pre-wrap; background: var(--bg); border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 1.7; line-break: strict; }
   .igtext { border: 1px solid var(--line2); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.8; margin-top: 10px; background: #fff; }
   .igtext .hash { color: var(--blue); }
   div.igtext { cursor: text; }
@@ -1487,6 +1504,7 @@ ACTIONS.today = async (a, b) => {
     return;
   }
   if (a === 'txSave') { await txSave(b); return; }
+  if (a === 'txSaveAll') { await txSaveAll(b); return; }
   if (a === 'askOpen') { S.ask[b.dataset.k] = S.ask[b.dataset.k] || { thread: [], input: '' }; S.ask[b.dataset.k].open = true; refresh(); const el = $('askIn-' + b.dataset.k); if (el) el.focus(); return; }
   if (a === 'askClose') { if (S.ask[b.dataset.k]) S.ask[b.dataset.k].open = false; refresh(); return; }
   if (a === 'askPreset') { await askSend(b.dataset.k, b.dataset.v); return; }
@@ -2210,7 +2228,7 @@ VIEWS.set = {
   render: () => {
     const s = S.settings;
     const q = S.quota;
-    const parts = [['rules', '受付'], ['hours', '時間帯'], ['weekly', '営業日'], ['menu', 'メニュー'], ['stats', '分析'], ['line', 'URL・LINE']];
+    const parts = [['rules', '受付'], ['hours', '時間帯'], ['weekly', '営業日'], ['menu', 'メニュー'], ['stats', '分析'], ['line', 'URL・LINE'], ['other', 'その他']];
     let h = `<div style="margin-bottom:10px" data-mg="setpart" data-mgs=".chip.on">${parts.map(p => `<button class="chip ${S.setPart === p[0] ? 'on' : ''}" data-act="setPart" data-v="${p[0]}">${p[1]}</button>`).join('')}</div>`;
     if (S.setPart === 'rules') h += `
     <div class="card"><h2>受付のルール</h2>
@@ -2260,6 +2278,7 @@ VIEWS.set = {
       }).join('')}
     </div>`;
     if (S.setPart === 'menu') h += menuHtml();
+    if (S.setPart === 'other') h += otherHtml();
     if (S.setPart === 'stats') {
       const views = [['dash', 'まとめ'], ['site', '予約'], ['ig', 'Instagram']];
       if (S.features.square || S.features.mf) views.push(['money', '売上・経費']);
@@ -2287,6 +2306,149 @@ VIEWS.set = {
     fitAreas();
   }
 };
+
+/* ---------- 設定＞その他：仕込みメモ・月の目標 ---------- */
+async function loadOther() {
+  try {
+    const [p, g] = await Promise.all([api('prep'), api('goal')]);
+    S.prep = { cfg: p.cfg, parts: p.parts, form: JSON.parse(JSON.stringify(p.cfg)), preview: null };
+    S.goal = { cfg: g.cfg, status: g.status, form: { on: g.cfg.on, kind: g.cfg.kind, amount: g.cfg.amount ? String(g.cfg.amount) : '' }, advice: null, wait: false };
+    renderSet();
+  } catch (e) { fail(e); }
+}
+// 利益の目標から必要な売上（サーバーの salesForProfit と同じ計算）
+function salesForProfit(profit, t) {
+  const r = Math.min(0.9, (t && t.ratio) || 0);
+  return Math.ceil((profit + ((t && t.fixed) || 0)) / (1 - r) / 1000) * 1000;
+}
+function goalCalcHtml() {
+  const G = S.goal, st = G.status, t = st.trend || {};
+  const amt = num(G.form.amount);
+  const lines = [];
+  if (t.months) {
+    lines.push('これまで（直近' + t.months + 'か月の平均）：売上 ' + yen(t.sales) + (t.hasExpense ? '、経費 ' + yen(t.expense) + '、利益 ' + yen(t.sales - t.expense) : ''));
+    if (t.hasExpense) lines.push('経費のうち食材費は売上の' + Math.round(t.ratio * 100) + '%、それ以外（家賃・光熱費など）は月 ' + yen(t.fixed) + 'ほど。利益が出はじめる売上の目安は月 ' + yen(salesForProfit(0, t)) + 'です。');
+  } else lines.push('まだ売上・経費の記録が少ないので、目安は出せません。');
+  if (amt) {
+    const need = G.form.kind === 'profit' ? salesForProfit(amt, t) : amt;
+    const perDay = st.openDays ? Math.ceil(need / st.openDays / 100) * 100 : 0;
+    const guests = t.perGuest ? Math.ceil(need / t.perGuest) : 0;
+    lines.push((G.form.kind === 'profit' ? '利益 ' + yen(amt) + 'には、売上 約' + yen(need) + 'が目安です。' : '') + '今月の営業日は' + st.openDays + '日なので、1日あたり ' + yen(perDay) + (guests ? '、予約なら月に約' + guests + '名（1日あたり約' + Math.ceil(guests / Math.max(1, st.openDays)) + '名）' : '') + 'です。');
+  }
+  return `<div class="stylebox" data-key="goalcalc" style="margin-top:8px">${lines.map(l => `<span class="hl">${phr(l)}</span>`).join('')}</div>`;
+}
+function otherHtml() {
+  if (!S.prep || !S.goal) return '<div class="card"><div class="loading">読み込み中…</div></div>';
+  const P = S.prep, F = P.form, G = S.goal;
+  const times = []; for (let hh = 17; hh <= 23; hh++) times.push(pad2(hh) + ':00');
+  let h = `<div class="card" data-key="prepcard"><div class="row" style="align-items:flex-start"><h2 style="flex:1;margin:0">${icon('i-pot')}仕込みメモ（前の晩にLINEへ）</h2>
+      <button class="sw ${F.on ? 'on' : ''}" data-act="prepOn" data-msw="prep" aria-label="仕込みメモを送る" aria-pressed="${F.on}"><span class="knob"></span></button></div>
+    <div class="sub" style="margin:6px 0 8px">${phr('次の営業日の予約を、前の晩にお店のLINEへまとめて送ります（定休日をはさむときは、その前の営業日の晩に）。予約がない日は送りません。送ったあとで予約が変わったら、前の日の晩にもう一度だけ送ります。')}</div>
+    <label class="f" for="prepTime">送る時刻</label>
+    <select id="prepTime" data-pf="time">${times.map(x => `<option value="${x}" ${F.time === x ? 'selected' : ''}>${x}ごろ</option>`).join('')}</select>
+    <label class="f">入れること</label>
+    <div class="acts" style="margin-top:0">${P.parts.map(x => `<button class="chip ${F.parts[x[0]] ? 'on' : ''}" data-act="prepPart" data-v="${x[0]}">${x[0] === 'guests' || x[0] === 'prep' || x[0] === 'cheer' ? spark() : ''}${esc(x[1])}</button>`).join('')}</div>
+    <label class="f" for="prepNote">毎回入れておくメモ（なくても大丈夫）</label>
+    <textarea id="prepNote" data-pf="note" rows="2" placeholder="例）パンの発注を確認・お花の水を替える">${esc(F.note)}</textarea>
+    <div class="acts"><button class="btn primary" data-act="prepSave">保存する</button><button class="btn" data-act="prepPreview">見本を見る</button><button class="btn ghost" data-act="prepSend">いまLINEに送ってみる</button></div>
+    <div class="sub" style="margin-top:6px">${phr('LINEの送信数を1回につき1通使います。お客様の名前と電話番号は、Claudeには送りません。')}</div>`;
+  if (P.preview) h += `<div class="prepview" data-key="prepview" data-appear="pv:${hashStr(P.preview.text)}">${P.preview.date ? `<div class="sub" style="margin-bottom:4px">${esc(jd(P.preview.date))}の分${P.preview.sent ? '（LINEに送りました）' : ''}</div>` : ''}${esc(P.preview.text)}</div>`;
+  if (P.wait) h += `<div style="margin-top:8px">${aiThink('Claudeが予約を読んで、メモをまとめています')}</div>`;
+  h += '</div>';
+  // 月の目標
+  const GF = G.form;
+  h += `<div class="card" data-key="goalcard"><div class="row" style="align-items:flex-start"><h2 style="flex:1;margin:0">${icon('i-coin')}月の目標</h2>
+      <button class="sw ${GF.on ? 'on' : ''}" data-act="goalOn" data-msw="goal" aria-label="月の目標を使う" aria-pressed="${GF.on}"><span class="knob"></span></button></div>
+    <div class="sub" style="margin:6px 0 8px">${phr('目標を入れると、今日の画面と分析に「今の進み具合」と「残りの営業日で1日あたりいくら必要か」を出します。')}</div>
+    <label class="f">何を目標にする？</label>
+    <div class="seg" data-mg="goalkind" data-mgs="button.on" style="margin-bottom:4px">${[['profit', '利益'], ['sales', '売上']].map(k => `<button class="${GF.kind === k[0] ? 'on' : ''}" data-act="goalKind" data-v="${k[0]}">${k[1]}</button>`).join('')}</div>
+    <div class="sub">${phr(GF.kind === 'profit' ? '利益は、売上から経費を引いて手元に残るお金です。ほしい利益から、必要な売上を計算します。' : '1か月の売上の目標を決めます。')}</div>
+    <label class="f" for="goalAmt">${GF.kind === 'profit' ? '1か月にほしい利益' : '1か月の売上の目標'}</label>
+    <input id="goalAmt" type="text" inputmode="numeric" value="${esc(fmtNum(GF.amount))}" placeholder="${GF.kind === 'profit' ? '例）300,000' : '例）800,000'}">
+    ${goalCalcHtml()}
+    <div class="acts"><button class="btn primary" data-act="goalSave">保存する</button>${S.features.ai ? `<button class="btn" data-act="goalAdvice">${spark(G.wait)}Claudeに目安を聞く</button>` : ''}</div>`;
+  if (G.wait) h += `<div style="margin-top:8px">${aiThink('Claudeがこれまでの売上と経費を読んでいます', true)}</div>`;
+  if (G.advice) h += `<div class="aimemo" data-appear="ga:${hashStr(G.advice.text)}" style="margin-top:10px"><span class="mlbl">${spark()}Claudeの目安</span>${phr(G.advice.text)}
+      ${G.advice.profit ? `<div class="acts"><button class="btn small" data-act="goalUse" data-kind="profit" data-v="${G.advice.profit}">利益 ${yen(G.advice.profit)} にする</button>${G.advice.sales ? `<button class="btn small" data-act="goalUse" data-kind="sales" data-v="${G.advice.sales}">売上 ${yen(G.advice.sales)} にする</button>` : ''}</div>` : ''}</div>`;
+  h += `<div class="sub" style="margin-top:8px">${phr('利益＝売上－経費。食材費は売上に合わせて増え、それ以外の経費は毎月だいたい同じとして計算しています。')}</div></div>`;
+  return h;
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+function readPrepForm() {
+  const F = S.prep.form;
+  if ($('prepTime')) F.time = $('prepTime').value;
+  if ($('prepNote')) F.note = $('prepNote').value;
+}
+async function prepSave(b, quiet) {
+  readPrepForm();
+  const F = S.prep.form;
+  const mo = b ? M.busy(b) : null;
+  try {
+    const r = await api('prep', Object.assign({ save: true }, F));
+    S.prep.cfg = r.cfg;
+    if (mo) await mo.ok();
+    if (!quiet) toast('保存しました');
+    renderSet();
+  } catch (e) { if (mo) mo.fail(); fail(e); }
+}
+async function prepPreview(send) {
+  readPrepForm();
+  const F = S.prep.form;
+  if (send && !confirm('次の営業日の仕込みメモを、いまお店のLINEに送ります（1通使います）。よろしいですか？')) return;
+  S.prep.wait = true; S.prep.preview = null; renderSet();
+  try {
+    const r = await api('prep', { preview: !send, send: !!send, parts: F.parts, note: F.note });
+    S.prep.preview = r.preview;
+    if (send && r.preview.sent) toast('LINEに送りました');
+  } catch (e) { fail(e); }
+  S.prep.wait = false;
+  renderSet();
+}
+async function goalSave(b) {
+  const G = S.goal;
+  const mo = b ? M.busy(b) : null;
+  try {
+    const r = await api('goal', { save: true, on: G.form.on, kind: G.form.kind, amount: num(G.form.amount) });
+    G.cfg = r.cfg; G.status = r.status;
+    S.salesAt = 0; S.money = null; S.dash = null;
+    if (mo) await mo.ok();
+    toast(G.form.on ? '目標を保存しました' : '目標を出さないようにしました');
+    renderSet();
+  } catch (e) { if (mo) mo.fail(); fail(e); }
+}
+async function goalAdvice() {
+  const G = S.goal;
+  G.wait = true; G.advice = null; renderSet();
+  try { G.advice = await api('goalAdvice'); } catch (e) { fail(e); }
+  G.wait = false;
+  renderSet();
+}
+const OTHER_ACTS = {
+  prepOn: async b => { S.prep.form.on = !S.prep.form.on; refresh(); await prepSave(null, true); toast(S.prep.form.on ? '仕込みメモを送るようにしました' : '仕込みメモを止めました'); },
+  prepPart: b => { readPrepForm(); const p = S.prep.form.parts; p[b.dataset.v] = !p[b.dataset.v]; refresh(); },
+  prepSave: b => prepSave(b),
+  prepPreview: () => prepPreview(false),
+  prepSend: () => prepPreview(true),
+  goalOn: async b => { S.goal.form.on = !S.goal.form.on; refresh(); if (!S.goal.form.on || num(S.goal.form.amount)) await goalSave(null); },
+  goalKind: b => { S.goal.form.kind = b.dataset.v; refresh(); },
+  goalSave: b => goalSave(b),
+  goalAdvice: () => goalAdvice(),
+  goalUse: b => { S.goal.form.kind = b.dataset.kind; S.goal.form.amount = b.dataset.v; S.goal.form.on = true; refresh(); toast('「保存する」で反映されます'); }
+};
+
+// 今日の画面・分析に出す、月の目標の進み具合
+function goalBarHtml(g, compact) {
+  if (!g || !g.on || !g.need) return '';
+  const rate = Math.min(100, g.rate);
+  const head = g.kind === 'profit' ? '今月の目標：利益 ' + yen(g.amount) + '（売上 ' + yen(g.need) + 'が目安）' : '今月の目標：売上 ' + yen(g.need);
+  const rest = g.remain <= 0 ? '目標に届きました。' : g.leftDays ? '残り' + g.leftDays + '営業日で、1日あたり ' + yen(g.perDay) + (g.perDayGuests ? '（予約なら約' + g.perDayGuests + '名）' : '') : '今月の営業日は終わりました。';
+  return `<div class="goalbar" data-key="goalbar" data-grow="goal:${g.month}:${g.sales}">
+    <div class="gtop">${phr(head)}</div>
+    <div class="gnum"><b>${yen(g.sales)}</b> <small>/ ${yen(g.need)}（売上）</small><span>${rate}%</span></div>
+    <div class="gtrack" data-g="x"><i style="width:${rate}%"></i></div>
+    <div class="sub">${phr(rest)}${!compact && g.bookedGuests ? `<span class="hl">${phr('これからの予約 ' + g.bookedGuests + '名で、約' + yen(g.bookedSales) + 'の見込みです。')}</span>` : ''}</div>
+  </div>`;
+}
 
 /* ---------- 分析 ---------- */
 const SRC_ENTRIES = [
@@ -2673,11 +2835,13 @@ ACTIONS.set = async (a, b) => {
 
 const setActions = ACTIONS.set;
 ACTIONS.set = async (a, b) => {
+  if (OTHER_ACTS[a]) { await OTHER_ACTS[a](b); return; }
   if (a === 'openMode') { S.openMode = b.value; if (b.value === 'rolling') { const n = JSON.parse(JSON.stringify(S.settings)); n.openUntil = ''; S.settings.openUntil = ''; } else if (!S.settings.openUntil) { S.settings.openUntil = monthEnd(today(), 1); } refresh(); return; }
   if (a === 'openPick') { $('openUntil').value = b.dataset.v; toast(Number(b.dataset.v.slice(5, 7)) + '月末までにしました。「設定を保存する」で反映されます'); return; }
   if (a === 'setPart') {
     S.setPart = b.dataset.v; S.editCourse = null; refresh();
     if (S.setPart === 'stats') loadDash();
+    if (S.setPart === 'other') { loadOther(); return; }
     if (S.setPart === 'stats' && S.anView === 'money') { loadMoney(); return; }
     if (S.setPart === 'stats' && S.anView === 'ig' && S.features.ai) loadIg();
     if (S.setPart === 'stats' && S.anView === 'ig' && !S.ig) { try { S.ig = await api('igStats', { days: S.anDays }); refresh(); } catch (e) { fail(e); } }
@@ -3008,6 +3172,7 @@ function salesHtml() {
   if (s.error) h += `<div class="warn" style="margin-bottom:8px">${phr(s.error)}</div>`;
   h += `<div class="sum3"><div><b>${yen(s.total)}</b><span>合計 ${s.count}件</span></div><div><b>${yen(s.withRes)}</b><span>予約あり ${s.resGroups || 0}組</span></div><div><b>${yen(s.walkIn)}</b><span>予約なし ${s.walkCount}件</span></div></div>`;
   if (s.total) h += `<div class="split" data-grow="split:${s.day}:${s.total}:${s.withRes}"><div data-g="x"><i class="a" style="width:${pr}%"></i><i class="b" style="width:${100 - pr}%"></i></div></div>`;
+  h += goalBarHtml(s.goal, true);
   if (!S.salesList) {
     const open = pays.filter(p => p.link === '');
     if (open.length) {
@@ -3210,6 +3375,8 @@ function txHtml() {
   let h = `<div class="card" data-key="txcard"><h2>${icon('i-coin')}口座から出たお金 <span class="cnt">まだ登録していないもの ${total}件</span></h2>
     <div class="sub" style="margin-bottom:6px">${phr('デビットカードの支払いや引き落としです。Claudeのおすすめの科目で、そのまま登録できます。レシートは先でもあとからでも、撮れば同じ支払いにまとめます（二重になりません）。')}</div>`;
   if (!list.length) return h + '<div class="sub">ありません。すべて登録済みです。</div></div>';
+  const bulk = txBulkItems();
+  if (bulk.length >= 2) h += `<button class="btn primary wide" data-act="txSaveAll" style="margin:4px 0 6px">${spark()}おすすめの科目のまま ${bulk.length}件をまとめて登録</button><div class="sub" style="margin-bottom:6px">${phr('Claudeが迷ったもの・レシートと二重になりそうなものは入れていません。')}</div>`;
   h += list.map(t => {
     const sel = S.rcpt.txSel[t.id] || (S.rcpt.txSel[t.id] = { accountId: t.ai ? t.ai.accountId : '', rate: t.ai ? t.ai.rate : '10' });
     if (!sel.accountId && t.ai) { sel.accountId = t.ai.accountId; sel.rate = t.ai.rate; }
@@ -3375,6 +3542,31 @@ async function rcptSaveAll(b) {
   toast(done.length + '枚を登録しました' + (fails ? '（' + fails + '枚は登録できませんでした）' : ''));
   loadTx();
 }
+// まとめて登録できるもの：科目が決まっていて、Claude が迷っておらず、二重の注意やレシートの預かりがないもの
+function txBulkItems() {
+  const R = S.rcpt;
+  return ((R.tx && R.tx.list) || []).filter(t => !t.receipt && !t.dupe && t.ai && !t.ai.unsure).map(t => {
+    const sel = R.txSel[t.id] || {};
+    return { id: t.id, date: t.date, content: t.content, accountId: sel.accountId || t.ai.accountId, rate: sel.rate || t.ai.rate };
+  }).filter(x => x.accountId);
+}
+async function txSaveAll(b) {
+  const R = S.rcpt;
+  const items = txBulkItems();
+  if (!items.length) return;
+  if (!confirm(items.length + '件を、いま表示している科目のままマネーフォワードに登録します。よろしいですか？')) return;
+  const mo = M.busy(b);
+  try {
+    const r = await api('mfTxSaveAll', { items: items });
+    await mo.ok();
+    await Promise.all(r.done.map(id => M.collapse(document.querySelector(`[data-key="tx:${CSS.escape(id)}"]`))));
+    R.tx.list = R.tx.list.filter(x => r.done.indexOf(x.id) < 0);
+    R.tx.total = Math.max(R.tx.list.length, (R.tx.total || 0) - r.done.length);
+    if (S.rcptInfo && S.rcptInfo.list) S.rcptInfo.list.txCount = R.tx.total;
+    refresh();
+    toast(r.done.length + '件を登録しました' + (r.failed.length ? '（' + r.failed.length + '件はできませんでした）' : ''));
+  } catch (e) { mo.fail(); fail(e); }
+}
 async function txSave(b) {
   const R = S.rcpt;
   const t = R.tx.list.find(x => x.id === b.dataset.id);
@@ -3496,7 +3688,8 @@ function dashHtml() {
   };
   const m = d.money;
   if (m && m.hasSales) { const x = pc(m.sales, m.salesPrev, true); tiles.push(dtile('売上', yen(m.sales), x[0], 'money', x[1])); }
-  if (m && m.hasSales && m.hasExpense) tiles.push(dtile('残り（売上－経費）', yen(m.sales - m.expense), m.sales ? '食材費の割合 ' + Math.round(m.food / m.sales * 100) + '%' : '', 'money'));
+  if (m && m.hasSales && m.hasExpense) tiles.push(dtile('利益（売上－経費）', yen(m.sales - m.expense), m.sales ? '食材費の割合 ' + Math.round(m.food / m.sales * 100) + '%' : '', 'money', m.sales - m.expense < 0 ? 'down' : ''));
+  if (d.goal && d.goal.on && d.goal.need) tiles.push(dtile('今月の目標', Math.min(999, d.goal.rate) + '<small>%</small>', d.goal.remain <= 0 ? '届きました' : d.goal.leftDays ? '1日あたり ' + yen(d.goal.perDay) : '', 'money'));
   else if (m && m.hasExpense) { const x = pc(m.expense, m.expensePrev, false); tiles.push(dtile('経費', yen(m.expense), x[0], 'money', x[1])); }
   tiles.push(dtile('予約（今月）', d.booking.groups + '<small>組</small> ' + d.booking.guests + '<small>名</small>', '先月 ' + d.booking.groupsPrev + '組', 'site'));
   tiles.push(dtile('予約ページ', d.booking.opens + '<small>回</small>', d.booking.requests + '人がリクエスト', 'site'));
@@ -3544,6 +3737,19 @@ function spanText(from, to) {
   if (f[2] === 1 && monthEnd) return f[1] === t[1] ? f[1] + '月' : f[1] + '〜' + t[1] + '月';
   return f[1] + '/' + f[2] + '〜' + t[1] + '/' + t[2];
 }
+// 今月の見通し：このままのペースの売上と利益、利益が出はじめる売上、月の目標
+function outlookHtml(m) {
+  const g = m.goal;
+  if (!g || m.period.key !== 'month' || !m.hasSales) return '';
+  const t = g.trend || {};
+  const lines = [];
+  if (g.pace) lines.push('このままのペースだと、今月の売上は約' + yen(g.pace) + (g.paceProfit !== undefined ? '、利益は約' + yen(g.paceProfit) : '') + 'です（営業日' + g.openDays + '日のうち' + g.doneDays + '日分から計算）。');
+  if (g.breakEven) lines.push('利益が出はじめる売上の目安は月 ' + yen(g.breakEven) + '（食材費は売上の' + Math.round(t.ratio * 100) + '%、それ以外の経費は月 ' + yen(t.fixed) + 'ほど）。');
+  if (g.bookedGuests && !(g.on && g.need)) lines.push('これからの予約は' + g.bookedGroups + '組' + g.bookedGuests + '名で、約' + yen(g.bookedSales) + 'の見込みです。');
+  if (!lines.length && !(g.on && g.need)) return '';
+  return `<div class="card" data-key="outlook"><h2>${icon('i-coin')}今月の見通し</h2>${goalBarHtml(g, false)}${lines.map(l => `<div class="sub" style="margin-top:4px">${phr(l)}</div>`).join('')}
+    ${g.on ? '' : `<div class="sub" style="margin-top:6px">${phr('月の目標を決めると、残りの営業日で1日あたりいくら必要かも出します。')}<button class="btn ghost small" data-act="setPart" data-v="other">設定＞その他 ›</button></div>`}</div>`;
+}
 function moneyKpi(v, k, c) { return `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div>${c || '<div class="c">&nbsp;</div>'}</div>`; }
 function moneyHtml() {
   const m = S.money;
@@ -3570,17 +3776,30 @@ function moneyHtml() {
   h += `<div class="kpis money">
     ${moneyKpi(m.hasSales ? yen(n.sales) : '–', '売上', m.hasSales ? ch(n.sales, p.sales, true) : '')}
     ${moneyKpi(m.hasExpense ? yen(n.expense) : '–', '経費', m.hasExpense ? ch(n.expense, p.expense, false) : '')}
-    ${moneyKpi(m.hasSales && m.hasExpense ? yen(n.sales - n.expense) : '–', '残り', m.hasSales && m.hasExpense ? ch(n.sales - n.expense, p.sales - p.expense, true) : '')}
+    ${moneyKpi(m.hasSales && m.hasExpense ? `<span class="${n.sales - n.expense < 0 ? 'neg' : ''}">${yen(n.sales - n.expense)}</span>` : '–', '利益（売上－経費）', m.hasSales && m.hasExpense ? ch(n.sales - n.expense, p.sales - p.expense, true) : '')}
   </div><div class="kpis money">
     ${moneyKpi(food !== null ? food + '%' : '–', '食材費の割合', foodP !== null ? `<div class="c2">${esc(was)}：${foodP}%</div>` : '')}
     ${moneyKpi(m.hasSales && one !== null ? yen(one) : '–', '1人あたり（予約）', m.hasSales && oneP !== null ? `<div class="c2">${esc(was)}：${yen(oneP)}</div>` : '')}
     ${moneyKpi(m.hasSales && walk !== null ? walk + '%' : '–', '予約なしの売上', m.hasSales && walkP !== null ? `<div class="c2">${esc(was)}：${walkP}%</div>` : '')}
   </div>`;
+  h += outlookHtml(m);
   h += aiSectionHtml('money');
-  const mx = Math.max(1, ...m.months.map(x => Math.max(x.sales || 0, x.expense || 0)));
-  h += `<div class="card"><h2>${icon('i-cal')}月ごとの売上と経費</h2>
-    <div class="pchart" data-grow="mchart:${m.months.map(x => x.sales + '/' + x.expense).join(',')}">${m.months.map(x => `<div class="col" data-tip="${Number(x.ym.slice(5))}月 売上${yen(x.sales)}${x.expense !== null ? '・経費' + yen(x.expense) : ''}"><div class="pair"><div class="b1" data-g="up" style="height:${Math.round((x.sales || 0) / mx * 100)}%"></div>${x.expense !== null ? `<div class="b2" data-g="up" style="height:${Math.round(x.expense / mx * 100)}%"></div>` : ''}</div><span class="cl">${Number(x.ym.slice(5))}月</span></div>`).join('')}</div>
-    <div class="legend"><span><i style="background:var(--green)"></i>売上（Square）</span>${m.hasExpense ? '<span><i style="background:var(--amber)"></i>経費（マネーフォワード）</span>' : ''}</div></div>`;
+  const both = m.hasSales && m.hasExpense;
+  const pf = x => (x.expense !== null && both && (x.sales || x.expense) ? (x.sales || 0) - x.expense : null);
+  const man = v => (!v ? '0' : Math.abs(v) >= 10000 ? (v / 10000).toFixed(Math.abs(v) >= 1000000 ? 0 : 1).replace(/\.0$/, '') + '万' : Math.round(v / 1000) + '千');
+  // 売上・経費は棒、利益は折れ線（赤字のときは0の線より下に出す）
+  const PH = 120;
+  const pv = m.months.map(pf);
+  const top = Math.max(1, ...m.months.map(x => Math.max(x.sales || 0, x.expense || 0)), ...pv.map(v => v || 0));
+  const low = Math.min(0, ...pv.map(v => v || 0));
+  const yOf = v => Math.round((top - v) / (top - low) * PH * 10) / 10;
+  const zero = Math.round(-low / (top - low) * PH);
+  const cnt = m.months.length;
+  const pts = pv.map((v, i) => (v === null ? null : (i * 10 + 5) + ',' + yOf(v))).filter(Boolean);
+  h += `<div class="card"><h2>${icon('i-cal')}月ごとの売上・経費・利益</h2>
+    <div class="pchart" data-grow="mchart:${m.months.map(x => x.sales + '/' + x.expense).join(',')}">${m.months.map((x, i) => { const pr = pv[i]; return `<div class="col" data-tip="${Number(x.ym.slice(5))}月 売上${yen(x.sales)}${x.expense !== null ? '・経費' + yen(x.expense) : ''}${pr !== null ? '・利益' + yen(pr) : ''}"><div class="pair" style="height:${PH}px;padding-bottom:${zero}px"><div class="b1" data-g="up" style="height:${Math.round((x.sales || 0) / top * 100)}%"></div>${x.expense !== null ? `<div class="b2" data-g="up" style="height:${Math.round(x.expense / top * 100)}%"></div>` : ''}</div>${pr !== null ? `<i class="pdot ${pr < 0 ? 'neg' : ''}" style="top:${yOf(pr)}px"></i>` : ''}<span class="pl ${pr !== null && pr < 0 ? 'neg' : ''}">${pr !== null ? (pr < 0 ? '−' : '') + man(Math.abs(pr)) : '&nbsp;'}</span><span class="cl">${Number(x.ym.slice(5))}月</span></div>`; }).join('')}
+      ${pts.length >= 2 || zero ? `<svg class="pline" viewBox="0 0 ${cnt * 10} ${PH}" preserveAspectRatio="none" aria-hidden="true">${zero ? `<line x1="0" x2="${cnt * 10}" y1="${PH - zero}" y2="${PH - zero}" class="zl"/>` : ''}${pts.length >= 2 ? `<polyline points="${pts.join(' ')}"/>` : ''}</svg>` : ''}</div>
+    <div class="legend"><span><i style="background:var(--green)"></i>売上（Square）</span>${m.hasExpense ? '<span><i style="background:var(--amber)"></i>経費（マネーフォワード）</span>' : ''}${both ? '<span><i class="lg-line"></i>利益（折れ線と下の数字。赤は赤字）</span>' : ''}</div></div>`;
   if (m.hasExpense) {
     const rows = m.expenses.slice(0, 5);
     const rest = m.expenses.slice(5).reduce((a, x) => a + x.value, 0);
@@ -3728,6 +3947,12 @@ $('view').addEventListener('click', async e => {
 });
 
 $('view').addEventListener('input', e => {
+  if (S.tab === 'set' && e.target.id === 'goalAmt' && S.goal) {
+    S.goal.form.amount = e.target.value;
+    const box = document.querySelector('[data-key=goalcalc]');
+    if (box) box.outerHTML = goalCalcHtml();
+    return;
+  }
   if (S.tab === 'book' && S.edit && e.target.dataset.e) {
     const k = e.target.dataset.e;
     S.edit[k] = e.target.value;

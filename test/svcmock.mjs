@@ -68,6 +68,19 @@ function seedJournals() {
 function aiAnswer(body) {
   const sys = typeof body.system === 'string' ? body.system : JSON.stringify(body.system || '');
   const text = JSON.stringify(body.messages);
+  if (sys.includes('仕込みメモ')) {
+    const rows = String(body.messages[0].content[0].text).split('\n').filter(l => /^[A-Z]\d*｜/.test(l));
+    const ref = l => l.split('｜')[0];
+    return {
+      cautions: rows.filter(l => l.includes('アレルギー')).map(l => ({ ref: ref(l), text: 'くるみ｜アレルギー' })),
+      celebrations: rows.filter(l => l.includes('記念日')).map(l => ({ ref: ref(l), text: '結婚記念日' })),
+      guests: rows.filter(l => /\d+回目/.test(l)).map(l => ({ ref: ref(l), text: '2回目。｜前回も｜ランチ' })),
+      prep: rows.some(l => l.includes('アレルギー')) ? ['くるみを｜使わない皿を｜1名分'] : [],
+      cheer: '明日は｜ゆったりした日です。｜今夜は｜早めに｜休んでくださいね。'
+    };
+  }
+  if (sys.includes('週のはじめに送るLINE')) return { cheer: '先週も｜おつかれさまでした。｜今週も｜無理せずに。' };
+  if (sys.includes('月の目標をどのくらい')) return { profit: 300000, sales: 820000, text: '食材費の｜割合が｜30%ほどなので、｜売上 ¥820,000で｜利益 ¥300,000が｜目安です。' };
   if (sys.includes('ひと言')) {
     if (text.includes('返事の種類：お断り')) return { add: 'せっかく｜ご連絡を｜いただいたのに、｜申し訳ございません。' };
     if (text.includes('結婚記念日')) return { add: '結婚記念日との｜こと、｜おめでとう｜ございます。｜くるみの｜アレルギーも｜承りました。' };

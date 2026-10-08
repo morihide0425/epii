@@ -927,6 +927,10 @@ const ADMIN_FUNCS = {
   customers: adminCustomers,
   customer: adminCustomer,
   exportCsv: adminExport,
+  goal: adminGoal,
+  goalAdvice: adminGoalAdvice,
+  prep: adminPrep,
+  mfTxSaveAll: adminMfTxSaveAll,
   saveCustomer: async (env, b) => {
     const key = String(b.key || normPhone(b.phone) || '').slice(0, 60);
     if (!key) fail('お客様が見つかりません。');
@@ -2005,6 +2009,7 @@ async function runSchedule(env) {
     if (!at || Date.now() - at.at > 3600000) { await kvPut(env, 'rcptMatchAt', { at: Date.now() }); await rcptMatchWaiting(env); }
   } catch (e) { console.error('明細との結びつけのエラー', e && e.message); }
   try { await weeklyReport(env); } catch (e) { console.error('週のまとめのエラー', e && e.message); }
+  try { await prepNotify(env); } catch (e) { console.error('仕込みメモのエラー', e && e.message); }
   await env.DB.prepare('DELETE FROM ai_cache WHERE at < ?').bind(addDays(jstStamp(Date.now()).slice(0, 10), -60)).run();
   await env.DB.prepare('DELETE FROM events WHERE date < ?').bind(addDays(jstStamp(Date.now()).slice(0, 10), -180)).run();
   await env.DB.prepare('DELETE FROM login_fail WHERE until < ?').bind(Date.now()).run();

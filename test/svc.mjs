@@ -321,6 +321,71 @@ try {
   await fetch(B + '/cdn-cgi/mf/scheduled');
   await new Promise(r => setTimeout(r, 1500));
   check(!pushes.some(p => p.messages[0].text.includes('先週のまとめ')), 'weekly once');
+  check(wk.includes('先週もおつかれさまでした') && String(calls.ai.find(c => String(c.body.system).includes('週のはじめに送るLINE')).body.messages[0].content[0].text).includes('売上'), 'weekly cheer');
+
+  // 月の目標（利益で決める → 必要な売上・残りの営業日で1日あたり・予約なら何名）
+  res = await post('/admin/api/goal', { save: true, on: true, kind: 'profit', amount: '300,000' }, A);
+  const g = res.body.status;
+  check(res.body.cfg.amount === 300000 && g.on && g.need > 300000 && g.openDays > 0 && g.trend.perGuest > 0, 'goal from profit ' + JSON.stringify(g).slice(0, 300));
+  check(g.leftDays === 0 || (g.perDay > 0 && g.perDayGuests > 0 && g.perDay * g.leftDays >= g.remain), 'per remaining business day');
+  check(g.breakEven > 0 && g.need === Math.ceil((300000 + g.trend.fixed) / (1 - g.trend.ratio) / 1000) * 1000, 'need = (profit + fixed) / (1 - food ratio)');
+  res = await post('/admin/api/sales', {}, A);
+  check(res.body.goal && res.body.goal.need === g.need, 'goal on today sales');
+  res = await post('/admin/api/money', { period: 'month' }, A);
+  check(res.body.goal && res.body.goal.on, 'goal on money');
+  res = await post('/admin/api/analysisAi', { section: 'money' }, A);
+  const mtext = calls.ai[calls.ai.length - 1].body.messages[0].content[0].text;
+  check(mtext.includes('今月の目標：利益 ¥300,000') && mtext.includes('利益が出はじめる売上の目安') && mtext.includes('利益をどう増やすか'), 'profit and goal sent to Claude');
+  res = await post('/admin/api/goalAdvice', {}, A);
+  check(res.body.profit === 300000 && res.body.sales === 820000 && res.body.text.includes('目安'), 'goal advice ' + JSON.stringify(res));
+  res = await post('/admin/api/goal', { save: true, on: false, kind: 'sales', amount: 900000 }, A);
+  res = await post('/admin/api/sales', {}, A);
+  check(!res.body.goal, 'goal off hides it');
+
+  // 仕込みメモ：次の営業日の予約を、前の晩にお店のLINEへ（予約がなければ送らない）
+  const day0 = (await post('/admin/api/prep', { preview: true }, A)).body;
+  const nd = day0.preview.date;
+  check(nd > T && wd(nd) !== 1 && wd(nd) !== 2, 'next business day ' + nd);
+  const db2 = await env.mf.getD1Database('DB');
+  await db2.prepare("DELETE FROM reservations WHERE date = ?").bind(nd).run();
+  res = await post('/admin/api/prep', { preview: true }, A);
+  check(res.body.preview.empty && res.body.preview.text.includes('予約がない日は送りません'), 'empty day');
+  await db2.prepare("INSERT INTO reservations (id, created_at, updated_at, status, date, time, session, guests, name, phone, course_id, course_name, note, hold_date, hold_time, hold_session, source, memo) VALUES ('PP1', ?, ?, '確定', ?, '18:00', 'dinner', 2, '佐藤 恵', '09011112222', '', '季節の薬膳フレンチ', '結婚記念日。くるみアレルギー。090-1234-9999', ?, '18:00', 'dinner', 'LINE', '')").bind(T + ' 09:00', T + ' 09:00', nd, nd).run();
+  await db2.prepare("INSERT INTO reservations (id, created_at, updated_at, status, date, time, session, guests, name, phone, course_id, course_name, note, hold_date, hold_time, hold_session, source, memo) VALUES ('PP2', ?, ?, '確定', ?, '11:30', 'lunch', 3, '鈴木 一郎', '', '', '養生ランチ', '', ?, '11:30', 'lunch', '電話', '')").bind(T + ' 09:00', T + ' 09:00', nd, nd).run();
+  res = await post('/admin/api/prep', { preview: true }, A);
+  const pv = res.body.preview.text;
+  check(pv.startsWith('【仕込みメモ ') && pv.includes('ご予約 2組 5名') && pv.includes('11:30 鈴木 一郎様 3名 養生ランチ（初めて）') && pv.includes('18:00 佐藤 恵様 2名 季節の薬膳フレンチ（'), 'prep list\n' + pv);
+  check(pv.includes('■ コースごとの人数') && pv.includes('季節の薬膳フレンチ 2名') && pv.includes('18:00 佐藤様：くるみアレルギー') && pv.includes('18:00 佐藤様：結婚記念日') && pv.includes('くるみを使わない皿を1名分') && pv.includes('今夜は早めに休んでくださいね') && !pv.includes('｜'), 'prep sections');
+  const pbody = JSON.stringify(calls.ai[calls.ai.length - 1].body);
+  check(!pbody.includes('佐藤') && !pbody.includes('鈴木') && !pbody.includes('1234-9999') && !pbody.includes('09011112222'), 'no names or phones to Claude');
+  const nAi2 = calls.ai.length;
+  res = await post('/admin/api/prep', { preview: true, parts: { cheer: false, course: false }, note: 'パンの発注を確認' }, A);
+  check(calls.ai.length === nAi2 && !res.body.preview.text.includes('■ コースごとの人数') && !res.body.preview.text.includes('休んでくださいね') && res.body.preview.text.includes('■ いつものメモ\nパンの発注を確認'), 'parts switch + cached');
+  // オンにして時刻を過ぎていれば、定期実行で1回だけ送る
+  await post('/admin/api/prep', { save: true, on: true, time: '00:00', parts: {}, note: '' }, A);
+  pushes.length = 0;
+  await fetch(B + '/cdn-cgi/mf/scheduled');
+  check(await wait(() => pushes.some(p => p.messages[0].text.startsWith('【仕込みメモ')), 8000), 'prep pushed by schedule');
+  pushes.length = 0;
+  await fetch(B + '/cdn-cgi/mf/scheduled');
+  await new Promise(r => setTimeout(r, 1500));
+  check(!pushes.some(p => p.messages[0].text.startsWith('【仕込みメモ')), 'prep once a day');
+  // 前の晩より前に送っていて、そのあと予約が変わった：前の日の晩にもう一度送る
+  if (add(nd, -1) === T) {
+    const sent = JSON.parse((await db2.prepare("SELECT v FROM kv WHERE k = 'prepSent'").first()).v);
+    sent[nd].day = add(T, -2);
+    await db2.prepare("UPDATE kv SET v = ? WHERE k = 'prepSent'").bind(JSON.stringify(sent)).run();
+    await db2.prepare("DELETE FROM kv WHERE k = 'prepChecked'").run();
+    await db2.prepare("UPDATE reservations SET guests = 4 WHERE id = 'PP2'").run();
+    pushes.length = 0;
+    await fetch(B + '/cdn-cgi/mf/scheduled');
+    check(await wait(() => pushes.some(p => p.messages[0].text.includes('前に送ったあとで予約が変わりました') && p.messages[0].text.includes('2組 6名')), 8000), 'update sent the evening before');
+  }
+  // 口座の明細をおすすめのまま、まとめて登録
+  txs.push({ id: 'TX%3D20', date: T, value: 1100, side: 'EXPENSE', content: 'ﾃｽﾄ1', journalizing_status: 'none' }, { id: 'TX%3D21', date: T, value: 2200, side: 'EXPENSE', content: 'ﾃｽﾄ2', journalizing_status: 'none' });
+  const accs = (await post('/admin/api/mfTx', { suggest: false }, A)).body.accounts;
+  res = await post('/admin/api/mfTxSaveAll', { items: [{ id: 'TX%3D20', date: T, content: 'ﾃｽﾄ1', accountId: accs[0].id, rate: '10' }, { id: 'TX%3D21', date: T, content: 'ﾃｽﾄ2', accountId: accs[0].id, rate: '10' }, { id: 'TX%3D20', date: T, content: 'ﾃｽﾄ1', accountId: accs[0].id, rate: '10' }] }, A);
+  check(res.body.done.length === 2 && res.body.failed.length === 1 && txs.filter(t => t.id === 'TX%3D20' || t.id === 'TX%3D21').every(t => t.journalizing_status === 'registered'), 'bulk register ' + JSON.stringify(res.body));
   console.log(wk);
   console.log('ALL OK', ok, 'checks');
 } catch (e) {
