@@ -40,7 +40,8 @@ const ACCOUNTS = [
   { id: 'A%3D7', name: '売上高', account_group: 'REVENUE', available: true },
   { id: 'A%3D8', name: '未払金', account_group: 'LIABILITY', available: true },
   { id: 'A%3D9', name: '普通預金', account_group: 'ASSET', available: true },
-  { id: 'A%3D10', name: '通信費', account_group: 'EXPENSE', available: true }
+  { id: 'A%3D10', name: '通信費', account_group: 'EXPENSE', available: true },
+  { id: 'A%3D11', name: '事業主貸', account_group: 'ASSET', available: true }
 ];
 const TAXES = [
   { id: 'T1', name: '課仕 10%', available: true }, { id: 'T2', name: '課税仕入 10%', available: true },
@@ -59,6 +60,7 @@ function seedJournals() {
   txs.push({ id: 'TX%3D1', date: today, value: 6580, side: 'EXPENSE', content: 'VISAデビット アベノセイカ', journalizing_status: 'none', connected_account_id: 'CA1' });
   txs.push({ id: 'TX%3D2', date: addDays(today, -3), value: 5500, side: 'EXPENSE', content: 'NTTﾋｶﾞｼﾆﾎﾝ', journalizing_status: 'none', connected_account_id: 'CA1' });
   txs.push({ id: 'TX%3D3', date: addDays(today, -5), value: 33000, side: 'EXPENSE', content: 'ｶﾝｻｲﾃﾞﾝﾘﾖｸ', journalizing_status: 'none', connected_account_id: 'CA1' });
+  txs.push({ id: 'TX%3D11', date: addDays(today, -4), value: 16980, side: 'EXPENSE', content: 'ｺｸﾐﾝﾈﾝｷﾝ', journalizing_status: 'none', connected_account_id: 'CA1' });
   txs.push({ id: 'TX%3D4', date: addDays(today, -2), value: 120000, side: 'INCOME', content: 'ｽｸｴｱ', journalizing_status: 'none', connected_account_id: 'CA1' });
 }
 
@@ -73,7 +75,7 @@ function aiAnswer(body) {
   }
   if (sys.includes('口座から出たお金の明細')) {
     const ids = [...text.matchAll(/(TX%3D\d+)｜/g)].map(m => m[1]);
-    return { items: ids.map(id => ({ id: id, account: id === 'TX%3D2' ? '通信費' : id === 'TX%3D3' ? '水道光熱費' : '仕入高', rate: id === 'TX%3D1' ? '8' : '10', reason: id === 'TX%3D2' ? '電話・インターネット代なので' : '電気代なので', unsure: false })) };
+    return { items: ids.map(id => ({ id: id, account: id === 'TX%3D2' ? '通信費' : id === 'TX%3D3' ? '水道光熱費' : id === 'TX%3D11' ? '事業主貸' : '仕入高', rate: id === 'TX%3D1' ? '8' : id === 'TX%3D11' ? 'none' : '10', reason: id === 'TX%3D2' ? '電話・インターネット代なので' : '電気代なので', unsure: false })) };
   }
   if (sys.includes('相談相手')) return { answer: 'お店で使う｜洗剤なら｜消耗品費で｜大丈夫です。', account: '消耗品費' };
   if (sys.includes('来店前メモ')) return { memo: '2回目。｜前回も｜ランチ。｜辛いものが｜苦手。' };

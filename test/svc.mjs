@@ -217,6 +217,14 @@ try {
   check(calls.ai.length === nAi, 'suggestions cached');
   res = await post('/admin/api/mfTxSave', { id: nt.id, date: nt.date, content: nt.content, accountId: nt.ai.accountId, rate: nt.ai.rate }, A);
   check(txs.find(t => t.id === 'TX%3D2').journalizing_status === 'registered', 'bank line registered');
+  // 自分のために使ったお金（国民年金など）は事業主貸。消費税なし、経費には入れない
+  const pt = (await post('/admin/api/mfTx', {}, A)).body;
+  const pen = pt.list.find(t => t.id === 'TX%3D11');
+  const own = pt.accounts.find(a => a.personal);
+  check(own && own.name === '事業主貸' && pen.ai.accountId === own.id && pen.ai.rate === 'none' && String(calls.ai[calls.ai.length - 1].body.system).includes('事業主貸'), 'personal suggested ' + JSON.stringify(pen.ai));
+  res = await post('/admin/api/mfTxSave', { id: pen.id, date: pen.date, content: pen.content, accountId: own.id, rate: '10' }, A);
+  const pj = journals.find(x => x.transaction_id === 'TX%3D11');
+  check(pj && pj.branches[0].debitor.account_id === 'A%3D11' && !['T2', 'T3'].includes(pj.branches[0].debitor.tax_id), 'personal journal without tax ' + JSON.stringify(pj && pj.branches));
   // 先に口座の明細を登録してから、同じ支払いのレシートを撮った：新しい仕訳は作らず、登録済みの仕訳に写真と内容をまとめる
   const txj = journals.find(x => x.transaction_id === 'TX%3D2');
   const nJ3 = journals.length;

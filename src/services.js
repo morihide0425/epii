@@ -671,6 +671,12 @@ async function expenseOptions(env, m) {
     .map(a => ({ id: a.id, name: a.name, help: ACCOUNT_HELP[a.name] || '', n: used[a.name] || 0 }))
     .sort((x, y) => (y.n - x.n) || ((y.help ? 1 : 0) - (x.help ? 1 : 0)));
 }
+// 口座から出たお金は、経費のほかに「事業主貸」（自分のために使ったお金）も選べる。経費には入らない
+const PRIVATE_HELP = '自分のために使ったお金。生活費・家族の買い物・国民年金・国民健康保険・住民税・所得税など。経費にはなりません';
+function txOptions(m, expense) {
+  const own = m.accounts.find(a => a.name === '事業主貸');
+  return own ? expense.concat([{ id: own.id, name: own.name, help: PRIVATE_HELP, n: 0, personal: true }]) : expense;
+}
 // これまでの登録（お店→科目）。Claude が科目を選ぶ手がかり
 async function accountHistory(env) {
   const out = [];
@@ -1108,6 +1114,7 @@ const TX_SYSTEM = [
   'あなたは、小さな飲食店の経理を手伝っています。店主は会計に詳しくありません。',
   '銀行口座から出たお金の明細（デビットカードの支払い・引き落とし・振込）の内容から、経費の勘定科目を選びます。',
   '- account：必ず渡した一覧の中から1つ。過去の登録に同じ相手があれば合わせる。',
+  '- 店主が自分のために使ったお金（生活費・家族の買い物・国民年金・国民健康保険・住民税・所得税・個人の保険・個人のカードの引き落としなど）は「事業主貸」にして、rate は "none"。経費にはしない。',
   '- rate：消費税。食材・飲み物なら "8"、ほとんどの経費は "10"、税のかからないもの（振込手数料以外の税金・保険料・家賃の一部など）は "none"。',
   '- reason：理由を会計の言葉を使わずに短く（25文字以内）。',
   '- unsure：明細の名前だけでは分からないとき true（例：個人名への振込、略称で分からない）。'
@@ -1142,7 +1149,7 @@ async function adminMfTx(env, b) {
     const r = oks.find(x => x.amount === t.amount && diffDays(x.date, t.date) >= -2 && diffDays(x.date, t.date) <= 7);
     if (r) t.dupe = { date: r.date, payee: r.payee || '', method: r.method || '' };
   });
-  const expense = await expenseOptions(env, m);
+  const expense = txOptions(m, await expenseOptions(env, m));
   // Claude の科目の提案（作ってあるものは使い回す）
   const keys = list.map(t => 'tx:' + t.id);
   const hits = {};
@@ -1171,12 +1178,12 @@ async function adminMfTx(env, b) {
 }
 async function adminMfTxSave(env, b) {
   const m = await mfMaster(env);
-  const expense = await expenseOptions(env, m);
+  const expense = txOptions(m, await expenseOptions(env, m));
   const acc = expense.find(a => a.id === b.accountId);
   if (!acc) fail('勘定科目を選んでください。');
   const tx = { id: String(b.id || ''), date: String(b.date || ''), content: clean(b.content, 60) };
   if (!tx.id || !isDate(tx.date)) fail('明細が見つかりません。画面を更新してください。');
-  const rate = ['8', '10', 'none'].indexOf(b.rate) >= 0 ? b.rate : '10';
+  const rate = acc.personal ? 'none' : ['8', '10', 'none'].indexOf(b.rate) >= 0 ? b.rate : '10';
   await mfFromTx(env, m, tx, { accountId: acc.id, rate: rate, remark: clean(b.memo || tx.content, 200) });
   await mfTouched(env, tx.date);
   const left = await kvGet(env, 'mfTxCount');
@@ -1196,9 +1203,10 @@ async function adminAiAsk(env, b) {
   const q = clean(b.question, 300);
   if (!q) fail('聞きたいことを入れてください。');
   const m = env.MF_API_KEY ? await mfMaster(env) : { accounts: [] };
-  const expense = env.MF_API_KEY ? await expenseOptions(env, m) : [];
-  const note = await ownerNote(env);
   const ctx = b.context || {};
+  const base = env.MF_API_KEY ? await expenseOptions(env, m) : [];
+  const expense = env.MF_API_KEY && ctx.kind === 'tx' ? txOptions(m, base) : base;
+  const note = await ownerNote(env);
   const facts = [
     '勘定科目の一覧：' + (accountList(expense) || 'なし'),
     note ? 'お店からのメモ：' + note : '',

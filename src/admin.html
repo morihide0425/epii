@@ -1493,7 +1493,7 @@ ACTIONS.today = async (a, b) => {
   if (a === 'askSend') { const el = $('askIn-' + b.dataset.k); await askSend(b.dataset.k, el ? el.value : ''); return; }
   if (a === 'askUse') {
     const k = b.dataset.k, acc = b.dataset.acc;
-    if (k.indexOf('tx:') === 0) { const sel = S.rcpt.txSel[k.slice(3)] = S.rcpt.txSel[k.slice(3)] || {}; sel.accountId = acc; }
+    if (k.indexOf('tx:') === 0) { const sel = S.rcpt.txSel[k.slice(3)] = S.rcpt.txSel[k.slice(3)] || {}; sel.accountId = acc; if (txPersonal(acc)) sel.rate = 'none'; }
     else { const q = rcptItem(k); if (q) { q.form.accountId = acc; q.form.unsure = (q.form.unsure || []).filter(x => x !== 'account'); } }
     refresh();
     toast('科目を変えました');
@@ -3132,7 +3132,7 @@ function askContext(key) {
     const t = (S.rcpt.tx && S.rcpt.tx.list || []).find(x => 'tx:' + x.id === key);
     const sel = t ? S.rcpt.txSel[t.id] || {} : {};
     const acc = t ? (S.rcpt.tx.accounts || []).find(a => a.id === sel.accountId) : null;
-    return t ? { content: t.content, amount: t.amount, date: t.date, account: acc ? acc.name : '', pay: '口座から（デビットカード・引き落とし・振込）' } : {};
+    return t ? { kind: 'tx', content: t.content, amount: t.amount, date: t.date, account: acc ? acc.name : '', pay: '口座から（デビットカード・引き落とし・振込）' } : {};
   }
   const q = rcptItem(key);
   if (!q || !q.form) return {};
@@ -3201,6 +3201,7 @@ function rcptQueueItem(q, R) {
     <div class="acts"><button class="btn primary" data-act="rqSave" data-id="${id}">これで登録</button><button class="btn" data-act="rqClose">閉じる</button><button class="btn ghost" data-act="rqDrop" data-id="${id}">消す</button></div></div>`;
   return h;
 }
+function txPersonal(id) { const a = ((S.rcpt.tx && S.rcpt.tx.accounts) || []).find(x => x.id === id); return !!(a && a.personal); }
 function txHtml() {
   const T = S.rcpt.tx;
   if (!T || !T.connected) return '';
@@ -3215,7 +3216,7 @@ function txHtml() {
     return `<div class="txr" data-key="tx:${esc(t.id)}"><div class="top"><span class="sub">${jdShort(t.date)}</span><span class="nm">${esc(t.content || '（内容なし）')}</span><span class="am">${yen(t.amount)}</span></div>
       ${t.dupe ? `<div class="warn" style="margin-top:6px">${phr(jdShort(t.dupe.date) + 'に「' + t.dupe.method + '」で登録したレシート（' + (t.dupe.payee || 'お店の名前なし') + '）と同じ金額です。同じ支払いなら、ここでは登録しないでください（二重になります）。')}</div>` : ''}
       ${t.receipt ? `<div class="sub"><span class="tag blue">レシートを預かっています</span> ${phr('明細と結びつけて登録します')}</div>` : `
-      <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions(T.accounts || [], sel.accountId)}</select>
+      <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions((T.accounts || []).filter(a => !a.personal), sel.accountId)}${(T.accounts || []).filter(a => a.personal).map(a => `<optgroup label="経費ではないもの"><option value="${esc(a.id)}" ${a.id === sel.accountId ? 'selected' : ''}>${esc(a.name)}（自分のために使ったお金）</option></optgroup>`).join('')}</select>
         <select data-tx="${esc(t.id)}" data-tf="rate" aria-label="消費税" style="width:96px;flex-shrink:0">${['8', '10', 'none'].map(k => `<option value="${k}" ${sel.rate === k ? 'selected' : ''}>${{ '8': '8%', '10': '10%', none: '税なし' }[k]}</option>`).join('')}</select></div>
       ${t.ai ? `<div class="sub aiby" data-appear="txai:${esc(t.id)}">${aiTag('Claudeの見立て')}${phr(t.ai.reason + (t.ai.unsure ? '（明細だけでは分かりにくいので、確かめてください）' : ''))}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
       <div class="acts"><button class="btn small ${t.dupe ? '' : 'primary'}" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : 'この科目で登録'}</button></div>
@@ -3787,6 +3788,8 @@ $('view').addEventListener('change', e => {
     if (e.target.dataset.tx && S.rcpt && S.rcpt.txSel) {
       const sel = S.rcpt.txSel[e.target.dataset.tx] = S.rcpt.txSel[e.target.dataset.tx] || {};
       sel[e.target.dataset.tf] = e.target.value;
+      // 事業主貸（自分のために使ったお金）は消費税なし
+      if (e.target.dataset.tf === 'accountId' && txPersonal(e.target.value) && sel.rate !== 'none') { sel.rate = 'none'; refresh(); }
       return;
     }
     if (e.target.dataset.rf && rcptItem(e.target.dataset.qid)) {
