@@ -302,6 +302,21 @@ try {
   check(res.status === 200 && calls.mf.slice(nErr).filter(c => c.startsWith('POST /journals')).length === 1, 'remembered: no failing first try');
   opts.exempt = false;
 
+  // Squareの「未入力」の明細：Squareの会計と結びつけて、今までと同じ形で登録する（免税事業者：合計の金額だけ）
+  res = await post('/admin/api/sqUnentered', {}, A);
+  const su = Object.fromEntries(res.body.items.map(x => [x.id, x]));
+  check(su.SQT1.ok && su.SQT1.kind === 'card' && su.SQT2.ok && su.SQT2.kind === 'cash' && su.SQT3.ok && su.SQT3.kind === 'payout' && su.SQT3.fee === 330 && su.SQT3.net === 9820 && !su.SQT4.ok && su.SQT4.why, 'square unentered matched ' + JSON.stringify(res.body.items));
+  res = await post('/admin/api/rcptList', {}, A);
+  check(res.body.list.sqN === 4, 'count on the button');
+  res = await post('/admin/api/sqEnter', {}, A);
+  const jt = id => journals.find(x => x.transaction_id === id);
+  check(res.body.done.length === 3 && res.body.list.items.length === 1 && res.body.list.items[0].id === 'SQT4', 'entered 3 ' + JSON.stringify(res.body).slice(0, 300));
+  check(jt('SQT1').branches[0].debitor.account_id === 'A%3D14' && jt('SQT1').branches[0].creditor.account_id === 'A%3D7' && jt('SQT1').branches[0].debitor.value === 9900, 'card sale: 未収金／売上高');
+  check(jt('SQT2').branches[0].debitor.account_id === 'A%3D5' && jt('SQT2').branches[0].creditor.account_id === 'A%3D7', 'cash sale: 現金／売上高');
+  const poj = jt('SQT3').branches;
+  check(poj.length === 2 && poj[0].debitor.account_id === 'A%3D9' && poj[0].debitor.value === 9820 && poj[1].debitor.value === 330 && poj.every(b => b.creditor.account_id === 'A%3D14'), 'payout: 普通預金＋手数料／未収金 ' + JSON.stringify(poj));
+  check(['SQT1', 'SQT2', 'SQT3'].every(id => txs.find(t => t.id === id).journalizing_status === 'registered'), 'marked as entered in MoneyForward');
+
   // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
   res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);
   check(res.body.answer.includes('売上') && res.body.remember === '', 'chat ' + JSON.stringify(res.body));

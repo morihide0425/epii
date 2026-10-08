@@ -936,6 +936,8 @@ const ADMIN_FUNCS = {
   bookIgnore: adminBookIgnore,
   bookAi: adminBookAi,
   bookCash: adminBookCash,
+  sqUnentered: adminSqUnentered,
+  sqEnter: adminSqEnter,
   saveCustomer: async (env, b) => {
     const key = String(b.key || normPhone(b.phone) || '').slice(0, 60);
     if (!key) fail('お客様が見つかりません。');

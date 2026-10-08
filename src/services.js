@@ -885,8 +885,9 @@ async function rcptList(env) {
   const last = rs[2].results[0].last || '';
   const tx = await kvGet(env, 'mfTxCount');
   const bk = await kvGet(env, 'bookCount');
+  const su = await kvGet(env, 'sqUnentered');
   return {
-    bookN: bk ? bk.n : 0,
+    bookN: bk ? bk.n : 0, sqN: su ? su.n : 0,
     count: rs[0].results[0].n, total: rs[0].results[0].total, waiting: rs[3].results[0].n,
     last: last, idle: last ? diffDays(last.slice(0, 10), now.slice(0, 10)) : null,
     txCount: tx ? tx.n : 0,
@@ -1161,7 +1162,7 @@ async function adminMfTx(env, b) {
     const pages = j.metadata && Number(j.metadata.total_pages);
     if (!pages || page >= pages || !(j.transactions || []).length) break;
   }
-  let list = all.filter(t => (!t.side || t.side === 'EXPENSE') && (!t.journalizing_status || t.journalizing_status === 'none'))
+  let list = all.filter(t => (!t.side || t.side === 'EXPENSE') && (!t.journalizing_status || t.journalizing_status === 'none') && !SQ_TX.test(String(t.content || '')))
     .map(t => ({ id: String(t.id), date: t.date, amount: Number(t.value) || 0, content: clean(t.content, 60) }))
     .filter(t => t.amount > 0).sort((a, x) => x.date.localeCompare(a.date));
   await kvPut(env, 'mfTxCount', { n: list.length, at: Date.now() });
@@ -1735,6 +1736,8 @@ async function weeklyReport(env, force) {
       const bk = await adminBook(env, {}).catch(() => null);
       const bn = bk && bk.issues ? bk.issues.filter(x => x.fix).length + (bk.sales || []).filter(x => x.diffN).length : 0;
       if (bn) exp.push('帳簿で直したほうがよいところが' + bn + '件あります（今日の画面＞経費を登録で直せます）');
+      const su = await sqUnentered(env).catch(() => null);
+      if (su && su.items && su.items.length) exp.push('Squareの売上・入金で、マネーフォワードにまだ入れていないものが' + su.items.length + '件あります（今日の画面＞経費を登録でまとめて登録できます）');
     } catch (e) { console.error('週のまとめ：経費', e.message); }
     if (exp.length) lines.push('', '【経費の登録】', ...exp.map(x => '・' + x));
   }
@@ -2487,7 +2490,7 @@ async function bookBank(env, js, months) {
     if (!pages || page >= pages || !(j.transactions || []).length) break;
   }
   // Squareの明細（お取引）はのぞき、銀行の明細だけにする
-  const bank = all.filter(t => !/お取引/.test(String(t.content || ''))).map(t => ({ d: t.date, v: Number(t.value) || 0, in: t.side === 'INCOME', c: clean(t.content, 40), st: t.journalizing_status || '', used: false }));
+  const bank = all.filter(t => !SQ_TX.test(String(t.content || '')) && !/お取引/.test(String(t.content || ''))).map(t => ({ d: t.date, v: Number(t.value) || 0, in: t.side === 'INCOME', c: clean(t.content, 40), st: t.journalizing_status || '', used: false }));
   const book = [];
   js.forEach(j => j.b.forEach(br => {
     if (br[0] === '普通預金') book.push({ j: j, d: j.d, v: br[1], in: true, r: br[4] || j.m });
@@ -2620,4 +2623,122 @@ async function adminBookAi(env) {
     .map(x => ({ id: String(x.id), bi: Number(x.bi) || 0, from: String(x.from), to: String(x.to), title: plain(clean(x.title || '科目がちがうかも', 30)), why: plain(clean(x.why, 60)) }));
   await kvPut(env, 'bookAi', { at: jstStamp(Date.now()), items: items });
   return await adminBook(env, {});
+}
+
+/* ---------- (7) Squareの「未入力」の明細を、ここから登録する ----------
+ * マネーフォワードのSquare連携で届いて、まだ仕訳していない明細（会計・入金）を、Squareのデータと1件ずつ結びつけて登録する。
+ * 免税事業者なので、売上は税率で分けず合計の金額だけ。今までの「入力済み」と同じ形：
+ *   現金の会計：現金／売上高　カード・QRの会計：未収金／売上高　入金：普通預金＋支払手数料／未収金 */
+const SQ_TX = /お取引\s*No\.|入金\s*po_/;
+async function sqGet(env, path) {
+  let res;
+  try { res = await fetch(sqBase(env) + path, { headers: { authorization: 'Bearer ' + env.SQUARE_ACCESS_TOKEN, 'square-version': SQ_VERSION, accept: 'application/json' } }); }
+  catch (e) { fail('Squareにつながりませんでした（通信エラー）。', 502, 'SQ_NET'); }
+  let j = {};
+  try { j = await res.json(); } catch (e) { /* 何もしない */ }
+  if (!res.ok) fail('Squareの入金の記録を読めませんでした（' + (res.status === 403 ? 'トークンに入金を読む権限がありません' : 'エラーコード ' + res.status) + '）。', 502, 'SQ_ERROR');
+  return j;
+}
+// 入金（payout）の手数料：入金額＝売上の合計－手数料（一度読んだら手元に置く）
+async function sqPayout(env, id) {
+  const k = 'sqpo:' + id;
+  const hit = await kvGet(env, k);
+  if (hit) return hit;
+  const po = (await sqGet(env, '/v2/payouts/' + encodeURIComponent(id))).payout || {};
+  const net = po.amount_money ? Number(po.amount_money.amount) || 0 : 0;
+  let fee = 0, cursor = '';
+  for (let page = 0; page < 20; page++) {
+    const j = await sqGet(env, '/v2/payouts/' + encodeURIComponent(id) + '/payout-entries?limit=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+    (j.payout_entries || []).forEach(e => { fee += Math.abs(e.fee_amount_money ? Number(e.fee_amount_money.amount) || 0 : 0); });
+    cursor = j.cursor || '';
+    if (!cursor) break;
+  }
+  const v = { net: net, fee: fee, gross: net + fee };
+  await kvPut(env, k, v);
+  return v;
+}
+async function sqUnentered(env) {
+  if (!env.MF_API_KEY || !env.SQUARE_ACCESS_TOKEN) return { connected: false, items: [] };
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const months = bookMonths(today);
+  const all = [];
+  for (let page = 1; page <= 20; page++) {
+    const j = await mfApi(env, 'GET', '/transactions', { start_date: months[0] + '-01', end_date: today, journalizing_statuses: 'none', per_page: 500, page: page });
+    all.push(...(j.transactions || []));
+    const pages = j.metadata && Number(j.metadata.total_pages);
+    if (!pages || page >= pages || !(j.transactions || []).length) break;
+  }
+  const txs = all.filter(t => SQ_TX.test(String(t.content || '')) && (!t.journalizing_status || t.journalizing_status === 'none'));
+  if (!txs.length) { await kvPut(env, 'sqUnentered', { n: 0, at: Date.now() }); return { connected: true, items: [] }; }
+  try { await sqEnsure(env, monthsBetween(txs.map(t => t.date).sort()[0], today), 6 * 3600000); } catch (e) { if (!e.userFacing) throw e; }
+  const pays = (await env.DB.prepare("SELECT id, ts, date, amount, refunded, method FROM sq_payments WHERE status = 'COMPLETED' AND date BETWEEN ? AND ?").bind(txs.map(t => t.date).sort()[0], today).all()).results;
+  const used = {};
+  const items = [];
+  for (const t of txs.sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+    const c = String(t.content || '');
+    const v = Number(t.value) || 0;
+    const it = { id: String(t.id), date: t.date, content: clean(c, 80), amount: v, ok: false, why: '' };
+    const po = c.match(/入金\s*(po_[\w-]+)/);
+    if (po) {
+      it.kind = 'payout';
+      it.po = po[1];
+      try {
+        const p = await sqPayout(env, po[1]);
+        Object.assign(it, p);
+        if (p.gross === v || p.net === v) it.ok = true; else it.why = 'Squareの入金の金額（' + p.net.toLocaleString() + '円＋手数料' + p.fee.toLocaleString() + '円）と合いません';
+      } catch (e) { it.why = e.message; }
+    } else {
+      const m = c.match(/(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})\s*お取引\s*No\.\s*(\S+)/);
+      const tm = m ? m[4] + ':' + m[5] : '';
+      const no = m ? m[6] : '';
+      it.time = tm; it.no = no;
+      const cand = pays.filter(p => !used[p.id] && p.date === (m ? m[1] + '-' + m[2] + '-' + m[3] : t.date) && (p.amount === v || p.amount - p.refunded === v) && (!tm || Math.abs(toMin(p.ts.slice(11, 16)) - toMin(tm)) <= 3));
+      const hit = cand.find(p => no && p.id.slice(0, no.length) === no) || (cand.length === 1 ? cand[0] : cand[0]);
+      if (hit) { used[hit.id] = 1; it.kind = hit.method === '現金' ? 'cash' : 'card'; it.method = hit.method || ''; it.ok = true; }
+      else { it.kind = 'sale'; it.why = 'Squareに同じ時刻・金額の会計が見つかりません（現金かカードか分からないので、マネーフォワードで登録してください）'; }
+    }
+    items.push(it);
+  }
+  await kvPut(env, 'sqUnentered', { n: items.length, at: Date.now() });
+  return { connected: true, items: items };
+}
+async function adminSqUnentered(env) { return Object.assign(await sqUnentered(env), { tried: !!(await kvGet(env, 'sqEnterTried')) }); }
+async function adminSqEnter(env, b) {
+  const m = await mfMaster(env);
+  const acc = n => { const a = m.accounts.find(x => x.name === n); if (!a) fail('マネーフォワードに「' + n + '」の科目が見つかりませんでした。'); return a.id; };
+  const ids = Array.isArray(b.ids) ? b.ids.map(String) : null;
+  const cur = await sqUnentered(env);
+  const todo = cur.items.filter(x => x.ok && (!ids || ids.indexOf(x.id) >= 0));
+  if (!todo.length) fail('登録できる明細がありません。');
+  // 書き込む前に、使う科目がそろっているか確かめる（途中で止まって半端な仕訳が残らないように）
+  ['売上高', '未収金'].concat(todo.some(x => x.kind === 'cash') ? ['現金'] : []).concat(todo.some(x => x.kind === 'payout') ? ['普通預金', '支払手数料'] : []).forEach(acc);
+  const done = [], failed = [], months = {};
+  for (const x of todo) {
+    try {
+      const r = await mfApi(env, 'POST', '/transactions/journalize', null, { transaction_id: x.id, account_id: x.kind === 'payout' ? acc('普通預金') : acc('売上高'), remark: x.content });
+      let jid = (r.journal && r.journal.id) || r.journal_id || (r.journals && r.journals[0] && r.journals[0].id) || '';
+      if (!jid) {
+        const j = await mfApi(env, 'GET', '/journals', { start_date: x.date, end_date: x.date, transaction_ids: x.id });
+        const hit = (j.journals || []).find(o => o.transaction_id === x.id);
+        jid = hit ? hit.id : '';
+      }
+      if (!jid) throw new Error('登録した仕訳が見つかりませんでした');
+      const g = await mfApi(env, 'GET', '/journals/' + encodeURIComponent(jid));
+      const jr = g.journal || {};
+      const br = (d, dv, c, cv, rm) => ({ debitor: { account_id: d, value: dv }, creditor: { account_id: c, value: cv }, remark: rm });
+      let branches;
+      if (x.kind === 'payout') {
+        branches = [br(acc('普通預金'), x.net, acc('未収金'), x.net, x.content)];
+        if (x.fee > 0) branches.push(br(acc('支払手数料'), x.fee, acc('未収金'), x.fee, '手数料'));
+      } else {
+        branches = [br(acc(x.kind === 'cash' ? '現金' : '未収金'), x.amount, acc('売上高'), x.amount, x.content + (x.method ? ' ' + x.method : ''))];
+      }
+      await mfApi(env, 'PUT', '/journals/' + encodeURIComponent(jid), null, { journal: { transaction_date: jr.transaction_date || x.date, journal_type: jr.journal_type || 'journal_entry', memo: jr.memo || '', branches: branches } });
+      done.push(x.id);
+      months[String(x.date).slice(0, 7)] = 1;
+    } catch (e) { failed.push({ id: x.id, message: e.message }); }
+  }
+  for (const ym of Object.keys(months)) await mfTouched(env, ym + '-01');
+  if (done.length) await kvPut(env, 'sqEnterTried', { at: jstStamp(Date.now()) });
+  return { done: done, failed: failed, list: Object.assign(await sqUnentered(env), { tried: !!done.length || !!(await kvGet(env, 'sqEnterTried')) }) };
 }

@@ -46,7 +46,8 @@ const ACCOUNTS = [
   { id: 'A%3D13', name: '雑収入', account_group: 'REVENUE', available: true },
   { id: 'A%3D14', name: '未収金', account_group: 'ASSET', available: true },
   { id: 'A%3D15', name: '売上値引・返品', account_group: 'REVENUE', available: true },
-  { id: 'A%3D16', name: '損害保険料', account_group: 'EXPENSE', available: true }
+  { id: 'A%3D16', name: '損害保険料', account_group: 'EXPENSE', available: true },
+  { id: 'A%3D17', name: '支払手数料', account_group: 'EXPENSE', available: true }
 ];
 const TAXES = [
   { id: 'T1', name: '課仕 10%', available: true }, { id: 'T2', name: '課税仕入 10%', available: true },
@@ -84,6 +85,13 @@ function seedJournals() {
   jb('BK16', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
   jb('BK17', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
   txs.push({ id: 'TX%3D90', date: today, value: 2200, side: 'EXPENSE', content: 'ﾃｽﾄ ﾁｭｳﾌｸ', journalizing_status: 'registered' });
+  // Squareの「未入力」の明細：3日前の会計（カード・現金）、入金、Squareにない会計
+  const d3 = addDays(today, -3);
+  const sl = d3.replace(/-/g, '/');
+  txs.push({ id: 'SQT1', date: d3, value: 9900, side: 'INCOME', content: sl + ' 12:40 お取引 No.PAY2', journalizing_status: 'none' });
+  txs.push({ id: 'SQT2', date: d3, value: 9900, side: 'INCOME', content: sl + ' 20:10 お取引 No.PAY2', journalizing_status: 'none' });
+  txs.push({ id: 'SQT3', date: today, value: 10150, side: 'INCOME', content: today.replace(/-/g, '/') + ' 09:30 入金 po_test1', journalizing_status: 'none' });
+  txs.push({ id: 'SQT4', date: d3, value: 1234, side: 'INCOME', content: sl + ' 15:00 お取引 No.ZZZZ', journalizing_status: 'none' });
   // 帳簿の口座の動きに合う銀行の明細（登録済み）。BK4 だけは銀行にない
   [['BK5', 550, 'INCOME', today], ['BK9', 120000, 'EXPENSE', today], ['BK10', 10000, 'EXPENSE', today], ['BK11', 340, 'EXPENSE', addDays(today, -6)], ['BK12', 340, 'INCOME', today], ['BK13', 500, 'INCOME', today], ['BK14', 1000, 'EXPENSE', addDays(today, -5)], ['BK15', 300, 'INCOME', today]]
     .forEach((x, i) => txs.push({ id: 'TXB' + i, date: x[3], value: x[1], side: x[2], content: x[0], journalizing_status: 'registered' }));
@@ -186,6 +194,12 @@ export function startSvcMock(port) {
           content: [{ type: 'thinking', thinking: '', signature: 'x' }, { type: 'text', text: JSON.stringify(aiAnswer(body)) }], usage: { input_tokens: 10, output_tokens: 10 } });
       }
       // Square
+      const pom = u.pathname.match(/^\/v2\/payouts\/([^/]+)(\/payout-entries)?$/);
+      if (pom) {
+        if (pom[1] !== 'po_test1') return send({ errors: [{ code: 'NOT_FOUND' }] }, 404);
+        if (pom[2]) return send({ payout_entries: [{ type: 'CHARGE', gross_amount_money: { amount: 10150 }, fee_amount_money: { amount: -330 }, net_amount_money: { amount: 9820 } }] });
+        return send({ payout: { id: 'po_test1', amount_money: { amount: 9820, currency: 'JPY' } } });
+      }
       if (u.pathname === '/v2/payments') {
         calls.sq.push(u.search);
         if (req.headers.authorization !== 'Bearer sq-test') return send({ errors: [{ code: 'UNAUTHORIZED', detail: 'bad token' }] }, 401);

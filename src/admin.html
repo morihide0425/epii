@@ -1519,8 +1519,10 @@ ACTIONS.today = async (a, b) => {
     loadRcpt();
     loadTx();
     loadBook();
+    loadSqUn();
     return;
   }
+  if (a === 'sqEnter') { await sqEnter(b); return; }
   if (a === 'bookFix') { await bookFix(b); return; }
   if (a === 'bookIgnore') { await bookCall(b, 'bookIgnore', { key: b.dataset.k }, 'このままにしました'); return; }
   if (a === 'bookAi') { await bookAi(); return; }
@@ -3338,7 +3340,8 @@ function rcptButton() {
   const L = S.rcptInfo && S.rcptInfo.list;
   let tag = '';
   if (L) {
-    if (L.bookN) tag = `<span class="tag amber">直すところ ${L.bookN}件</span>`;
+    if (L.sqN) tag = `<span class="tag amber">Squareの未入力 ${L.sqN}件</span>`;
+    else if (L.bookN) tag = `<span class="tag amber">直すところ ${L.bookN}件</span>`;
     else if (L.txCount) tag = `<span class="tag amber">口座の明細 ${L.txCount}件</span>`;
     else if (L.idle === null || L.idle >= 7) tag = `<span class="tag amber">${L.idle === null ? 'まだ登録なし' : L.idle + '日登録なし'}</span>`;
     else tag = `<span class="tag blue">今月 ${L.count}件</span>`;
@@ -3482,6 +3485,7 @@ function rcptHtml() {
       ${oks.length >= 2 ? `<button class="btn primary wide" data-act="rqSaveAll" style="margin-top:12px">「このまま登録できます」の${oks.length}枚をまとめて登録</button>` : ''}
       <div class="sub" style="margin-top:8px">${phr('科目は、これまでにマネーフォワードに登録したお店に合わせて選んでいます。')}</div></div>`;
   }
+  h += sqUnHtml();
   h += txHtml();
   h += bookHtml();
   const L = S.rcptInfo && S.rcptInfo.list;
@@ -3497,6 +3501,47 @@ function rcptHtml() {
   return h;
 }
 function rcptItem(id) { return S.rcpt ? S.rcpt.queue.find(q => q.id === id) : null; }
+/* ---------- Squareの売上・入金で、マネーフォワードにまだ入れていないもの ---------- */
+async function loadSqUn() {
+  const R = S.rcpt;
+  try { R.sq = await api('sqUnentered'); } catch (e) { R.sq = { connected: true, items: [], err: e.message }; }
+  if (R === S.rcpt && S.tab === 'today') renderWhenIdle('today');
+}
+function sqUnHtml() {
+  const Q = S.rcpt.sq;
+  if (!Q || !Q.connected || (!Q.items.length && !Q.err)) return '';
+  const ok = Q.items.filter(x => x.ok), ng = Q.items.filter(x => !x.ok);
+  const grp = k => ok.filter(x => x.kind === k);
+  const sum = l => l.reduce((a, x) => a + (x.kind === 'payout' ? x.net + x.fee : x.amount), 0);
+  const rows = [];
+  if (grp('card').length) rows.push(['カード・QR', grp('card').length + '件 ' + yen(sum(grp('card'))), '未収金／売上高']);
+  if (grp('cash').length) rows.push(['現金', grp('cash').length + '件 ' + yen(sum(grp('cash'))), '現金／売上高']);
+  if (grp('payout').length) rows.push(['入金', grp('payout').length + '件 ' + yen(grp('payout').reduce((a, x) => a + x.net, 0)), '手数料 ' + yen(grp('payout').reduce((a, x) => a + x.fee, 0)) + '　普通預金＋支払手数料／未収金']);
+  let h = `<div class="card" data-key="squn"><h2>${icon('i-coin')}Squareの未入力 <span class="cnt">${Q.items.length}件</span></h2>`;
+  if (Q.err) h += `<div class="warn">${phr(Q.err)}</div>`;
+  if (rows.length) h += `<div class="gcalc">${rows.map(gRow).join('')}</div>`;
+  if (ok.length) h += Q.tried
+    ? `<button class="btn primary wide" data-act="sqEnter" style="margin-top:8px">${ok.length}件をまとめて登録</button>`
+    : `<button class="btn primary wide" data-act="sqEnter" data-one="1" style="margin-top:8px">まず1件だけ登録してみる</button><div class="sub" style="margin-top:4px">${phr('登録したら、マネーフォワードで形を確かめてください。次からまとめて登録できます。')}</div>`;
+  if (ng.length) h += `<h3>ここでは登録できないもの <span class="cnt">${ng.length}件</span></h3>` + ng.slice(0, 5).map(x => `<div class="bk"><div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.content)}</span><span class="am">${yen(x.amount)}</span></div><div class="basis">${esc(x.why)}</div></div>`).join('');
+  return h + '</div>';
+}
+async function sqEnter(b) {
+  const Q = S.rcpt.sq;
+  const ok = Q.items.filter(x => x.ok);
+  const one = !!b.dataset.one;
+  if (!one && !confirm(ok.length + '件を、マネーフォワードに登録します。よろしいですか？')) return;
+  const mo = M.busy(b);
+  try {
+    const r = await api('sqEnter', one ? { ids: [ok[0].id] } : {});
+    await mo.ok();
+    S.rcpt.sq = r.list;
+    if (S.rcptInfo && S.rcptInfo.list) S.rcptInfo.list.sqN = r.list.items.length;
+    refresh();
+    toast(r.done.length + '件を登録しました' + (r.failed.length ? '（' + r.failed.length + '件はできませんでした：' + r.failed[0].message + '）' : '') + (one ? '。マネーフォワードで確かめてください' : ''));
+  } catch (e) { mo.fail(); fail(e); }
+}
+
 /* ---------- 帳簿のチェック：登録がおかしい仕訳を見つけて、ここで直す（マネーフォワードを開かなくてよい） ---------- */
 async function loadBook(force) {
   const R = S.rcpt;
