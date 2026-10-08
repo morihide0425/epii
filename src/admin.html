@@ -372,7 +372,13 @@
   .cashadj label { display: block; font-size: 11px; color: var(--sub); } .cashadj label input { margin-top: 4px; font-size: 15px; padding: 7px 9px; }
   .golink { display: flex; width: 100%; align-items: center; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid var(--line2); border-radius: 12px; background: none; text-align: left; } .golink span { flex: 1; min-width: 0; } .golink b { display: block; font-size: 14px; } .golink small { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; } .golink em { font-style: normal; font-size: 12px; color: var(--blue); white-space: nowrap; }
   .askans { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0 2px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.6; } .askans svg.spark { flex-shrink: 0; margin-top: 3px; }
-  .cdate { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); } .cdate input { width: auto; font-size: 13px; padding: 4px 6px; }
+  .cdate { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub); margin-top: 2px; } .cdate input { -webkit-appearance: none; appearance: none; width: auto; min-width: 0; max-width: 60%; font-size: 14px; padding: 6px 8px; }
+  .cashin input[type=date] { -webkit-appearance: none; appearance: none; }
+  .clbox { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; } .clh { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .clexp { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; } .clexp b { font-size: 20px; } .clexp > span { white-space: nowrap; } .clsub { font-size: 11px; color: var(--sub); line-height: 1.6; margin-top: 2px; }
+  .clin { display: block; font-size: 11px; color: var(--sub); margin-top: 10px; } .clin input { margin-top: 4px; font-size: 16px; padding: 8px 10px; }
+  .clres { margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--bg); font-size: 13px; line-height: 1.6; } .clnotes { margin-top: 14px; } .clnotes > div { padding: 6px 0; font-size: 13px; } .clnotes b { display: block; font-weight: 600; } .clnotes span { font-size: 11px; color: var(--sub); }
+  .clres > b { display: block; font-size: 14px; } .clres > span { display: block; font-size: 12px; color: var(--sub); margin-top: 2px; }
   .adjgo { display: flex; gap: 8px; margin-top: 10px; } .adjgo .btn[disabled] { cursor: not-allowed; } .cashin input { font-size: 15px; padding: 7px 9px; margin-top: 2px; } .bk select { width: auto; flex: 1; min-width: 0; font-size: 14px; padding: 6px 8px; }
   .custlist { margin-top: 8px; } .custrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
   .custrow .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3662,23 +3668,45 @@ function closeHtml(B) {
   const ys = v => (v < 0 ? '−⁠' + yen(-v) : yen(v));   // 記号と金額のあいだで折り返さない
   const src = o => ({ mf: '前年からの繰り越し', books: '前年までの帳簿から', input: '入れた額' }[o.openSrc] || '');
   const dl = jdShort(C.date);
-  let h = `<div class="card" data-key="close"><h2>${icon('i-check-ink')}締めの確認</h2><div class="sub">${phr('この日の時点で、帳簿の現金と口座の残高が、手元の現金・通帳と合っているかを見ます。')}</div>
-    <div class="chips" style="margin-top:10px">${C.presets.map(p => `<button class="chip${p.d === C.date ? ' on' : ''}" data-act="acctDate" data-v="${p.d}">${esc(p.label)}</button>`).join('')}<label class="cdate">ほかの日<input type="date" id="acctDate" value="${esc(C.date)}" min="${esc(C.from)}" max="${today()}"></label></div>`;
-  const rows = [];
-  const X = C.cash, K = C.bank;
-  rows.push(['現金', has(X.book) ? '帳簿 ' + ys(X.book) : '1月1日の額がわかりません', has(X.book) ? '1月1日 ' + ys(X.open) + (src(X) ? '（' + src(X) + '）' : '') + (X.book < 0 ? '\nマイナスは、現金売上の記録漏れかも' : X.low ? '\n' + jdShort(X.low.d) + 'に一時 ' + ys(X.low.v) + '。現金売上の記録漏れかも' : '') : '下の「1月1日の残高」に入れると比べられます']);
-  if (has(X.diff)) rows.push(['数えた現金', yen(X.counted) + (X.diff ? '（差 ' + (X.diff > 0 ? '+⁠' : '') + ys(X.diff) + '）' : ''), X.diff ? dl + 'の帳簿と比べて' : '帳簿と合っています']);
-  rows.push(['口座', has(K.book) ? '帳簿 ' + ys(K.book) : '1月1日の額がわかりません', has(K.book) ? '1月1日 ' + ys(K.open) + (src(K) ? '（' + src(K) + '）' : '') : '下の「1月1日の残高」に入れると比べられます']);
-  if (has(K.diff)) rows.push(['通帳の残高', yen(K.counted) + (K.diff ? '（差 ' + (K.diff > 0 ? '+⁠' : '') + ys(K.diff) + '）' : ''), K.diff ? (K.cands.length ? (K.candSum === K.diff ? '下の' + K.cands.length + '件で説明できます' : '下の' + K.cands.length + '件で ' + ys(K.candSum) + '、残り ' + ys(K.diff - K.candSum) + 'は理由が見つかりません') : '理由になりそうな明細は見つかりません') : '帳簿と合っています']);
-  if (C.ar > 0) rows.push(['Squareの入金待ち', yen(C.ar), '翌月に入る分なのでふつうです']);
-  if (C.salesDiff) rows.push(['売上', C.salesDiff + 'か月 合わない', '下の「売上の照らし合わせ」で理由を見られます']);
-  if (B.total) rows.push(['貸借', B.balanced === B.total ? '合っています' : (B.total - B.balanced) + '件 合わない', B.total + '件の仕訳']);
-  h += `<div class="gcalc">${rows.map(r => `<div><span>${r[0]}</span><b>${esc(r[1])}<small>${phr(r[2])}</small></b></div>`).join('')}</div>`;
-  if (has(K.diff) && K.diff && K.cands.length) h += `<ul class="causes">${K.cands.map(c => `<li><span>${jdShort(c.date)}</span>${esc(c.text)} ${yen(c.amount)}</li>`).join('')}</ul><button class="btn small" data-act="goBook" style="margin-top:6px">今日＞経費を登録で直す</button>`;
-  h += `<div class="cashin"><label>${dl}の手元の現金<input type="text" inputmode="numeric" id="clCash" value="${has(X.counted) ? esc(fmtNum(X.counted)) : ''}" placeholder="数えて入れる"></label><label>${dl}の通帳の残高<input type="text" inputmode="numeric" id="clBank" value="${has(K.counted) ? esc(fmtNum(K.counted)) : ''}" placeholder="通帳を見て入れる"></label></div><div class="acts" style="margin-top:8px"><button class="btn small primary" data-act="acctCompare">比べる</button></div>`;
-  h += adjHtml(C, 'cash') + adjHtml(C, 'bank');
+  let h = `<div class="card" data-key="close"><h2>${icon('i-check-ink')}締めの確認</h2><div class="sub">${phr('1．いつの分かを選ぶ\n2．お店の現金と通帳の残高を入れて「比べる」')}</div>
+    <div class="chips" style="margin-top:10px">${C.presets.map(p => `<button class="chip${p.d === C.date ? ' on' : ''}" data-act="acctDate" data-v="${p.d}">${esc(p.label)}</button>`).join('')}</div>
+    <label class="cdate">ほかの日<input type="date" id="acctDate" value="${esc(C.date)}" min="${esc(C.from)}" max="${today()}"></label>`;
+  // 現金・口座：「帳簿ではいくらあるはず」→「実際の額」→ 結果と、次にすること
+  const box = (X, acct) => {
+    const cash = acct === 'cash';
+    const name = cash ? 'お店の現金' : '口座（通帳）';
+    let b = `<div class="clbox" data-key="cl:${acct}"><div class="clh">${name}</div>`;
+    if (!has(X.book)) b += `<div class="clsub">${phr('1月1日の額がわからないので、帳簿の額を出せません。下の「1月1日の残高を直す」から入れてください')}</div>`;
+    else {
+      b += `<div class="clexp"><span>帳簿では${dl}に</span><b>${ys(X.book)}</b><span>${X.book < 0 ? '（マイナス）' : 'あるはず'}</span></div><div class="clsub">${phr('1月1日の ' + ys(X.open) + (src(X) ? '（' + src(X) + '）' : '') + 'に、その後の出入りを足した額')}</div>`;
+      if (X.book < 0) b += `<div class="clsub">${phr(cash ? '現金がマイナスになることはないので、現金の売上の登録漏れかも' : '残高がマイナスになることはないので、入金の登録漏れかも')}</div>`;
+      else if (cash && X.low) b += `<div class="clsub">${phr('帳簿の上で、' + jdShort(X.low.d) + 'に現金がマイナス（' + ys(X.low.v) + '）になっています。現金の売上の登録漏れかも')}</div>`;
+    }
+    b += `<label class="clin">${cash ? '実際に数えた額' : '通帳の残高'}<input type="text" inputmode="numeric" id="${cash ? 'clCash' : 'clBank'}" value="${has(X.counted) ? esc(fmtNum(X.counted)) : ''}" placeholder="${cash ? '数えて入れる' : '通帳を見て入れる'}"></label>`;
+    if (has(X.diff)) {
+      if (!X.diff) b += `<div class="okbar" style="margin:8px 0 0">${icon('i-check-ink')}合っています</div>`;
+      else {
+        const less = X.diff < 0;
+        b += `<div class="clres"><b>${cash ? '数えた額' : '通帳'}のほうが ${yen(Math.abs(X.diff))} ${less ? '少ない' : '多い'}</b>`;
+        if (cash) b += `<span>${phr(less ? '考えられること：現金で払った経費の登録漏れ、またはお店のお金を自分用に使った' : '考えられること：現金の売上の登録漏れ、または自分のお金をお店に足した')}</span>`;
+        else if (X.cands.length) b += `<span>${phr(X.candSum === X.diff ? '下の' + X.cands.length + '件で、この差は説明できます。直すと合います' : '下の' + X.cands.length + '件が理由かも（' + ys(X.candSum) + '分）。残り ' + ys(X.diff - X.candSum) + 'は理由が見つかりません')}</span>`;
+        else b += `<span>${phr('理由になりそうな明細は見つかりません。通帳の日付をもう一度見てください')}</span>`;
+        b += '</div>';
+        if (!cash && X.cands.length) b += `<ul class="causes">${X.cands.map(c => `<li><span>${jdShort(c.date)}</span>${esc(c.text)} ${yen(c.amount)}</li>`).join('')}</ul><button class="btn small" data-act="goBook" style="margin-top:6px">今日＞経費を登録で直す</button>`;
+        b += adjHtml(C, acct);
+      }
+    }
+    return b + '</div>';
+  };
+  h += box(C.cash, 'cash') + box(C.bank, 'bank');
+  h += `<div class="acts" style="margin-top:10px"><button class="btn primary" data-act="acctCompare">比べる</button></div>`;
+  const other = [];
+  if (C.ar > 0) other.push(['Squareからまだ入っていないお金', yen(C.ar), '翌月に入る分なのでふつうです']);
+  if (C.salesDiff) other.push(['売上が合わない月', C.salesDiff + 'か月', '下の「売上の照らし合わせ」で理由を見られます']);
+  if (B.total && B.balanced !== B.total) other.push(['借方と貸方が合わない仕訳', (B.total - B.balanced) + '件', '今日＞経費を登録で直せます']);
+  if (other.length) h += `<div class="clnotes">${other.map(r => `<div><b>${esc(r[0])}　${esc(r[1])}</b><span>${phr(r[2])}</span></div>`).join('')}</div>`;
   if (!S.acctOpen) h += `<button class="more2" data-act="acctOpenEdit">1月1日の残高を直す（ちがうときだけ）</button>`;
-  else h += `<div class="cashin" style="margin-top:12px"><label>1月1日の現金<input type="text" inputmode="numeric" id="opCash" value="${X.openSrc === 'input' ? esc(fmtNum(X.open)) : ''}" placeholder="${has(X.open) ? esc(fmtNum(X.open)) : 'わかれば'}"></label><label>1月1日の口座<input type="text" inputmode="numeric" id="opBank" value="${K.openSrc === 'input' ? esc(fmtNum(K.open)) : ''}" placeholder="${has(K.open) ? esc(fmtNum(K.open)) : 'わかれば'}"></label></div><div class="sub" style="margin-top:4px">${phr('空にすると、前年からの繰り越しを使います')}</div><div class="acts" style="margin-top:8px"><button class="btn small" data-act="acctOpenSave">保存</button><button class="btn small ghost" data-act="acctOpenEdit">やめる</button></div>`;
+  else h += `<div class="cashin" style="margin-top:12px"><label>1月1日の現金<input type="text" inputmode="numeric" id="opCash" value="${C.cash.openSrc === 'input' ? esc(fmtNum(C.cash.open)) : ''}" placeholder="${has(C.cash.open) ? esc(fmtNum(C.cash.open)) : 'わかれば'}"></label><label>1月1日の口座<input type="text" inputmode="numeric" id="opBank" value="${C.bank.openSrc === 'input' ? esc(fmtNum(C.bank.open)) : ''}" placeholder="${has(C.bank.open) ? esc(fmtNum(C.bank.open)) : 'わかれば'}"></label></div><div class="sub" style="margin-top:4px">${phr('空にすると、前年からの繰り越しを使います')}</div><div class="acts" style="margin-top:8px"><button class="btn small" data-act="acctOpenSave">保存</button><button class="btn small ghost" data-act="acctOpenEdit">やめる</button></div>`;
   return h + '</div>';
 }
 // 帳尻合わせ：月末の日だけ。開く→科目を選ぶ→差の金額を打つ→確認（まちがって押さないように）

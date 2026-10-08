@@ -55,14 +55,15 @@ async def main():
         await card.screenshot(path=SHOTS+'/book_ai.png')
         # 設定＞会計：締めの確認
         await card.locator('[data-act=goAcct]').click()
-        await a.wait_for_selector('[data-key=close] .gcalc', timeout=20000); await a.wait_for_timeout(500)
+        await a.wait_for_selector('[data-key=close] .clbox', timeout=20000); await a.wait_for_timeout(500)
         cl=a.locator('[data-key=close]')
         print('会計のタブ:', await a.locator('[data-act=setPart].on').inner_text(), '／締めの日:', await cl.locator('[data-act=acctDate].on').inner_text())
-        print('締め:', (await cl.locator('.gcalc').inner_text()).replace('\n',' / '))
+        print('締め:', (await cl.inner_text()).replace('\n',' / ')[:500])
         await a.fill('#clCash', '30000'); await a.fill('#clBank', '600000'); await cl.locator('[data-act=acctCompare]').click(); await a.wait_for_timeout(1500)
-        print('比べた:', (await cl.locator('.gcalc').inner_text()).replace('\n',' / '))
+        print('比べた:', (await cl.inner_text()).replace('\n',' / ')[:700])
         print('理由の候補:', [t.replace('\n',' ') for t in await cl.locator('.causes li').all_inner_texts()][:4])
         await cl.screenshot(path=SHOTS+'/acct_close.png')
+        await cl.locator('[data-key="cl:bank"]').screenshot(path=SHOTS+'/acct_bank.png')
         print('帳尻合わせ:', await cl.locator('.cashadj').all_inner_texts())
         await cl.locator('[data-act=adjOpen][data-v=cash]').click(); await a.wait_for_timeout(300)
         go=cl.locator('[data-act=adjGo][data-v=cash]')
@@ -75,7 +76,7 @@ async def main():
         print('差の金額で押せる:', not await go.is_disabled())
         await cl.locator('[data-key="adj:cash"]').screenshot(path=SHOTS+'/acct_adj.png')
         await go.click(); await a.wait_for_timeout(2000)
-        print('合わせたあと:', [t.replace('\n',' ') for t in await cl.locator('.gcalc > div').all_inner_texts() if t.startswith('数えた')], '／確認:', dialogs[-1].replace('\n',' '))
+        print('合わせたあと:', (await cl.locator('[data-key="cl:cash"]').inner_text()).replace('\n',' / '), '／確認:', dialogs[-1].replace('\n',' '))
         sc=a.locator('[data-key=salescheck]')
         btn=sc.locator('[data-act=acctDays]').first
         if await btn.count():
