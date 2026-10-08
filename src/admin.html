@@ -353,6 +353,7 @@
   .txpick { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--green); cursor: pointer; margin-right: 4px; }
   .txpick input { width: 20px; height: 20px; accent-color: var(--green); flex-shrink: 0; }
   .txwhy { margin-top: 6px; }
+  .gcalc > div { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 13px; } .gcalc span { color: var(--sub); font-size: 12px; } .gcalc b { margin-left: auto; text-align: right; }
   .custlist { margin-top: 8px; } .custrow { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
   .custrow .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pvnote { font-size: 12px; color: var(--amber); margin-bottom: 6px; white-space: normal; }
@@ -2333,18 +2334,17 @@ function salesForProfit(profit, t) {
 function goalCalcHtml() {
   const G = S.goal, st = G.status, t = st.trend || {};
   const amt = num(G.form.amount);
-  const lines = [];
-  if (t.months) {
-    lines.push('これまで（直近' + t.months + 'か月の平均）：売上 ' + yen(t.sales) + (t.hasExpense ? '、経費 ' + yen(t.expense) + '、利益 ' + yen(t.sales - t.expense) : ''));
-    if (t.hasExpense) lines.push('経費のうち食材費は売上の' + Math.round(t.ratio * 100) + '%、それ以外（家賃・光熱費など）は月 ' + yen(t.fixed) + 'ほど。利益が出はじめる売上の目安は月 ' + yen(salesForProfit(0, t)) + 'です。');
-  } else lines.push('まだ売上・経費の記録が少ないので、目安は出せません。');
+  const rows = [];
+  if (t.months) rows.push(['これまで（月）', '売上 ' + yen(t.sales) + (t.hasExpense ? '・利益 ' + yen(t.sales - t.expense) : '')]);
   if (amt) {
     const need = G.form.kind === 'profit' ? salesForProfit(amt, t) : amt;
     const perDay = st.openDays ? Math.ceil(need / st.openDays / 100) * 100 : 0;
-    const guests = t.perGuest ? Math.ceil(need / t.perGuest) : 0;
-    lines.push((G.form.kind === 'profit' ? '利益 ' + yen(amt) + 'には、売上 約' + yen(need) + 'が目安です。' : '') + '今月の営業日は' + st.openDays + '日なので、1日あたり ' + yen(perDay) + (guests ? '、予約なら月に約' + guests + '名（1日あたり約' + Math.ceil(guests / Math.max(1, st.openDays)) + '名）' : '') + 'です。');
+    const guests = t.perGuest ? Math.ceil(need / t.perGuest / Math.max(1, st.openDays)) : 0;
+    if (G.form.kind === 'profit') rows.push(['必要な売上', yen(need)]);
+    rows.push(['1日あたり', yen(perDay) + (guests ? '（約' + guests + '名）' : '')]);
   }
-  return `<div class="stylebox" data-key="goalcalc" style="margin-top:8px">${lines.map(l => `<span class="hl">${phr(l)}</span>`).join('')}</div>`;
+  if (!rows.length) return '<div data-key="goalcalc"></div>';
+  return `<div class="stylebox gcalc" data-key="goalcalc" style="margin-top:8px">${rows.map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join('')}</div>`;
 }
 function otherHtml() {
   if (!S.prep || !S.goal) return '<div class="card"><div class="loading">読み込み中…</div></div>';
@@ -2352,36 +2352,34 @@ function otherHtml() {
   const times = []; for (let hh = 17; hh <= 23; hh++) times.push(pad2(hh) + ':00');
   let h = `<div class="card" data-key="prepcard"><div class="row" style="align-items:flex-start"><h2 style="flex:1;margin:0">${icon('i-pot')}仕込みメモ（前の晩にLINEへ）</h2>
       <button class="sw ${F.on ? 'on' : ''}" data-act="prepOn" data-msw="prep" aria-label="仕込みメモを送る" aria-pressed="${F.on}"><span class="knob"></span></button></div>
-    <div class="sub" style="margin:6px 0 8px">${phr('次の営業日の予約を、前の晩にお店のLINEへまとめて送ります（定休日をはさむときは、その前の営業日の晩に）。予約がない日は送りません。送ったあとで予約が変わったら、前の日の晩にもう一度だけ送ります。')}</div>
+    <div class="sub" style="margin:6px 0 8px">${phr('次の営業日の予約を、前の晩にLINEで送ります。')}</div>
     <label class="f" for="prepTime">送る時刻</label>
     <select id="prepTime" data-pf="time">${times.map(x => `<option value="${x}" ${F.time === x ? 'selected' : ''}>${x}ごろ</option>`).join('')}</select>
     <label class="f">入れること</label>
     <div class="acts" style="margin-top:0">${P.parts.map(x => `<button class="chip ${F.parts[x[0]] ? 'on' : ''}" data-act="prepPart" data-v="${x[0]}">${x[0] === 'guests' || x[0] === 'prep' || x[0] === 'cheer' ? spark() : ''}${esc(x[1])}</button>`).join('')}${(F.custom || []).map((x, i) => `<button class="chip ${x.on ? 'on' : ''}" data-act="prepCustOn" data-i="${i}">${x.kind === 'ai' ? spark() : ''}${esc(x.title)}</button>`).join('')}</div>
     ${prepCustomHtml()}
-    <label class="f" for="prepNote">毎回入れておくメモ（なくても大丈夫）</label>
+    <label class="txpick" style="margin:10px 0 0;color:var(--ink);font-weight:400"><input type="checkbox" id="prepEmpty" ${F.empty ? 'checked' : ''}>予約0件でも、見込みがあれば送る</label>
+    <label class="f" for="prepNote">いつものメモ（なくてもOK）</label>
     <textarea id="prepNote" data-pf="note" rows="2" placeholder="例）パンの発注を確認・お花の水を替える">${esc(F.note)}</textarea>
-    <div class="acts"><button class="btn primary" data-act="prepSave">保存する</button><button class="btn" data-act="prepPreview">見本を見る</button><button class="btn ghost" data-act="prepSend">いまLINEに送ってみる</button></div>
-    <div class="sub" style="margin-top:6px">${phr('LINEの送信数を1回につき1通使います。お客様の名前と電話番号は、Claudeには送りません。')}</div>`;
+    <div class="acts"><button class="btn primary" data-act="prepSave">保存する</button><button class="btn" data-act="prepPreview">見本を見る</button><button class="btn ghost" data-act="prepSend">LINEに送ってみる</button></div>`;
   if (P.preview) h += `<div class="prepview" data-key="prepview" data-appear="pv:${hashStr(P.preview.text)}">${P.preview.note ? `<div class="pvnote">${phr(P.preview.note)}</div>` : ''}${P.preview.date && !P.preview.sample ? `<div class="sub" style="margin-bottom:4px">${esc(jd(P.preview.date))}の分${P.preview.sent ? '（LINEに送りました）' : ''}</div>` : P.preview.sent ? '<div class="sub" style="margin-bottom:4px">LINEに送りました</div>' : ''}${esc(P.preview.text)}</div>`;
-  if (P.wait) h += `<div style="margin-top:8px">${aiThink('Claudeが予約を読んで、メモをまとめています')}</div>`;
+  if (P.wait) h += `<div style="margin-top:8px">${aiThink('Claudeがまとめています')}</div>`;
   h += '</div>';
   // 月の目標
   const GF = G.form;
   h += `<div class="card" data-key="goalcard"><div class="row" style="align-items:flex-start"><h2 style="flex:1;margin:0">${icon('i-coin')}月の目標</h2>
       <button class="sw ${GF.on ? 'on' : ''}" data-act="goalOn" data-msw="goal" aria-label="月の目標を使う" aria-pressed="${GF.on}"><span class="knob"></span></button></div>
-    <div class="sub" style="margin:6px 0 8px">${phr('目標を入れると、今日の画面と分析に「今の進み具合」と「残りの営業日で1日あたりいくら必要か」を出します。')}</div>
-    <label class="f">何を目標にする？</label>
+    <label class="f" style="margin-top:6px">何を目標にする？</label>
     <div class="seg" data-mg="goalkind" data-mgs="button.on" style="margin-bottom:4px">${[['profit', '利益'], ['sales', '売上']].map(k => `<button class="${GF.kind === k[0] ? 'on' : ''}" data-act="goalKind" data-v="${k[0]}">${k[1]}</button>`).join('')}</div>
-    <div class="sub">${phr(GF.kind === 'profit' ? '利益は、売上から経費を引いて手元に残るお金です。ほしい利益から、必要な売上を計算します。' : '1か月の売上の目標を決めます。')}</div>
-    <label class="f" for="goalAmt">${GF.kind === 'profit' ? '1か月にほしい利益' : '1か月の売上の目標'}</label>
+    ${GF.kind === 'profit' ? '<div class="sub">利益＝売上－経費</div>' : ''}
+    <label class="f" for="goalAmt">${GF.kind === 'profit' ? '1か月の利益' : '1か月の売上'}</label>
     <input id="goalAmt" type="text" inputmode="numeric" value="${esc(fmtNum(GF.amount))}" placeholder="${GF.kind === 'profit' ? '例）300,000' : '例）800,000'}">
     ${goalCalcHtml()}
     <div class="acts"><button class="btn primary" data-act="goalSave">保存する</button>${S.features.ai ? `<button class="btn" data-act="goalAdvice">${spark(G.wait)}Claudeに目安を聞く</button>` : ''}</div>`;
-  if (G.wait) h += `<div style="margin-top:8px">${aiThink('Claudeがこれまでの売上と経費を読んでいます', true)}</div>`;
+  if (G.wait) h += `<div style="margin-top:8px">${aiThink('Claudeが考えています', true)}</div>`;
   if (G.advice) h += `<div class="aimemo" data-appear="ga:${hashStr(G.advice.text)}" style="margin-top:10px"><span class="mlbl">${spark()}Claudeの目安</span>${phr(G.advice.text)}
       ${G.advice.profit ? `<div class="acts"><button class="btn small" data-act="goalUse" data-kind="profit" data-v="${G.advice.profit}">利益 ${yen(G.advice.profit)} にする</button>${G.advice.sales ? `<button class="btn small" data-act="goalUse" data-kind="sales" data-v="${G.advice.sales}">売上 ${yen(G.advice.sales)} にする</button>` : ''}</div>` : ''}</div>`;
-  h += `<div class="sub" style="margin-top:8px">${phr('利益＝売上－経費。食材費は売上に合わせて増え、それ以外の経費は毎月だいたい同じとして計算しています。')}</div></div>`;
-  return h;
+  return h + '</div>';
 }
 function pad2(n) { return String(n).padStart(2, '0'); }
 // 入れることを足す：Claude にまとめてもらう項目か、毎回同じ文を入れる項目
@@ -2391,13 +2389,12 @@ function prepCustomHtml() {
   if ((F.custom || []).length) h += `<div class="custlist">${F.custom.map((x, i) => `<div class="custrow"><div style="flex:1;min-width:0"><b>${esc(x.title)}</b><span class="sub">${x.kind === 'ai' ? 'Claudeにお願い：' : '毎回入れる文：'}${esc(x.body)}</span></div><button class="btn small ghost" data-act="prepCustEdit" data-i="${i}">直す</button><button class="btn small ghost danger" data-act="prepCustDel" data-i="${i}">消す</button></div>`).join('')}</div>`;
   if (!E) return h + ((F.custom || []).length < 8 ? `<button class="btn small" data-act="prepCustNew" style="margin-top:6px">${icon('i-plus')}入れることを足す</button>` : '');
   return h + `<div class="sheet" data-key="prepedit" style="margin-top:8px">
-    <label class="f" for="pcTitle">項目の名前（LINEの見出しになります）</label>
+    <label class="f" for="pcTitle">項目の名前</label>
     <input id="pcTitle" type="text" maxlength="20" value="${esc(E.title)}" placeholder="例）ドリンクの準備">
     <label class="f">中身</label>
     <div class="seg" data-mg="pckind" data-mgs="button.on">${[['ai', 'Claudeにまとめてもらう'], ['text', '毎回同じ文を入れる']].map(k => `<button class="${E.kind === k[0] ? 'on' : ''}" data-act="prepCustKind" data-v="${k[0]}">${k[1]}</button>`).join('')}</div>
-    <label class="f" for="pcBody">${E.kind === 'ai' ? 'Claudeへのお願い（予約を読んで、何をまとめてほしいか）' : '入れる文'}</label>
+    <label class="f" for="pcBody">${E.kind === 'ai' ? 'Claudeへのお願い' : '入れる文'}</label>
     <textarea id="pcBody" rows="3" maxlength="300" placeholder="${E.kind === 'ai' ? '例）ご要望から、ノンアルコールのドリンクを頼みそうな方を書き出して' : '例）閉店後に冷蔵庫の温度を確認'}">${esc(E.body)}</textarea>
-    ${E.kind === 'ai' ? `<div class="sub">${phr('予約の時間・人数・コース・ご要望・来店の記録をもとに、Claudeが毎回まとめます。お客様の名前と電話番号は送りません。')}</div>` : ''}
     <p class="err" id="pcErr" role="alert"></p>
     <div class="acts"><button class="btn primary small" data-act="prepCustOk">${E.i >= 0 ? '直す' : '足す'}</button><button class="btn small" data-act="prepCustCancel">やめる</button></div>
   </div>`;
@@ -2412,6 +2409,7 @@ function readPrepForm() {
   const F = S.prep.form;
   if ($('prepTime')) F.time = $('prepTime').value;
   if ($('prepNote')) F.note = $('prepNote').value;
+  if ($('prepEmpty')) F.empty = $('prepEmpty').checked;
 }
 async function prepSave(b, quiet) {
   readPrepForm();
@@ -2490,13 +2488,13 @@ const OTHER_ACTS = {
 function goalBarHtml(g, compact) {
   if (!g || !g.on || !g.need) return '';
   const rate = Math.min(100, g.rate);
-  const head = g.kind === 'profit' ? '今月の目標：利益 ' + yen(g.amount) + '（売上 ' + yen(g.need) + 'が目安）' : '今月の目標：売上 ' + yen(g.need);
-  const rest = g.remain <= 0 ? '目標に届きました。' : g.leftDays ? '残り' + g.leftDays + '営業日で、1日あたり ' + yen(g.perDay) + (g.perDayGuests ? '（予約なら約' + g.perDayGuests + '名）' : '') : '今月の営業日は終わりました。';
+  const head = g.kind === 'profit' ? '今月の目標　利益 ' + yen(g.amount) : '今月の目標';
+  const rest = g.remain <= 0 ? '目標に届きました' : g.leftDays ? 'あと' + g.leftDays + '日　1日 ' + yen(g.perDay) + (g.perDayGuests ? '（約' + g.perDayGuests + '名）' : '') : '今月の営業は終わりました';
   return `<div class="goalbar" data-key="goalbar" data-grow="goal:${g.month}:${g.sales}">
     <div class="gtop">${phr(head)}</div>
-    <div class="gnum"><b>${yen(g.sales)}</b> <small>/ ${yen(g.need)}（売上）</small><span>${rate}%</span></div>
+    <div class="gnum"><b>${yen(g.sales)}</b> <small>/ ${yen(g.need)}</small><span>${rate}%</span></div>
     <div class="gtrack" data-g="x"><i style="width:${rate}%"></i></div>
-    <div class="sub">${phr(rest)}${!compact && g.bookedGuests ? `<span class="hl">${phr('これからの予約 ' + g.bookedGuests + '名で、約' + yen(g.bookedSales) + 'の見込みです。')}</span>` : ''}</div>
+    <div class="sub">${phr(rest)}${!compact && g.bookedGuests ? `<span class="hl">${phr('予約済み ' + g.bookedGuests + '名（約' + yen(g.bookedSales) + '）')}</span>` : ''}</div>
   </div>`;
 }
 
@@ -3439,7 +3437,7 @@ function txHtml() {
       ${t.receipt ? `<div class="sub"><span class="tag blue">レシートを預かっています</span> ${phr('明細と結びつけて登録します')}</div>` : `
       <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions((T.accounts || []).filter(a => !a.personal), sel.accountId)}${(T.accounts || []).filter(a => a.personal).map(a => `<optgroup label="経費ではないもの"><option value="${esc(a.id)}" ${a.id === sel.accountId ? 'selected' : ''}>${esc(a.name)}（自分のために使ったお金）</option></optgroup>`).join('')}</select>
         <select data-tx="${esc(t.id)}" data-tf="rate" aria-label="消費税" style="width:96px;flex-shrink:0">${['8', '10', 'none'].map(k => `<option value="${k}" ${sel.rate === k ? 'selected' : ''}>${{ '8': '8%', '10': '10%', none: '税なし' }[k]}</option>`).join('')}</select></div>
-      ${t.ai ? `<div class="sub aiby" data-appear="txai:${esc(t.id)}">${aiTag('Claudeの見立て')}${phr(t.ai.reason + (t.ai.unsure ? '（明細だけでは分かりにくいので、確かめてください）' : ''))}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
+      ${t.ai ? `<div class="sub aiby" data-appear="txai:${esc(t.id)}">${aiTag('Claudeの見立て')}${phr(t.same ? '前と同じ科目' : t.ai.reason)}${t.ai.unsure ? ' <span class="tag amber">要確認</span>' : ''}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
       <div class="acts txacts">${ok ? `<label class="txpick"><input type="checkbox" data-txpick="${esc(t.id)}" ${on ? 'checked' : ''}>まとめて</label>` : why ? '<span class="tag gray">1件ずつ確認</span>' : ''}<button class="btn small ${t.dupe || on ? '' : 'primary'}" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : on ? 'これだけ登録' : 'この科目で登録'}</button>${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? '' : askHtml('tx:' + t.id, 'この明細')}</div>
       ${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? askHtml('tx:' + t.id, 'この明細') : ''}`}
     </div>`;
@@ -3599,7 +3597,8 @@ async function rcptSaveAll(b) {
 // まとめて登録できるもの：科目が決まっていて、Claude が迷っておらず、二重の注意やレシートの預かりがないもの
 function txBulkOk(t) {
   const sel = S.rcpt.txSel[t.id] || {};
-  return !t.receipt && !t.dupe && !!t.ai && !t.ai.unsure && !!(sel.accountId || t.ai.accountId);
+  // 確かなものだけ：前と同じ相手・同じ科目、または名前ではっきり分かるもの。科目を変えたものは1件ずつ
+  return !t.receipt && !t.dupe && !!t.sure && (!sel.accountId || sel.accountId === t.ai.accountId);
 }
 function txBulkItems() {
   const R = S.rcpt;
@@ -3802,12 +3801,12 @@ function outlookHtml(m) {
   if (!g || m.period.key !== 'month' || !m.hasSales) return '';
   const t = g.trend || {};
   const lines = [];
-  if (g.pace) lines.push('このままのペースだと、今月の売上は約' + yen(g.pace) + (g.paceProfit !== undefined ? '、利益は約' + yen(g.paceProfit) : '') + 'です（営業日' + g.openDays + '日のうち' + g.doneDays + '日分から計算）。');
-  if (g.breakEven) lines.push('利益が出はじめる売上の目安は月 ' + yen(g.breakEven) + '（食材費は売上の' + Math.round(t.ratio * 100) + '%、それ以外の経費は月 ' + yen(t.fixed) + 'ほど）。');
-  if (g.bookedGuests && !(g.on && g.need)) lines.push('これからの予約は' + g.bookedGroups + '組' + g.bookedGuests + '名で、約' + yen(g.bookedSales) + 'の見込みです。');
+  if (g.pace) lines.push(['このペースだと', '売上 約' + yen(g.pace) + (g.paceProfit !== undefined ? '・利益 約' + yen(g.paceProfit) : '')]);
+  if (g.breakEven) lines.push(['利益が出る売上', '月 ' + yen(g.breakEven) + ' 以上']);
+  if (g.bookedGuests && !(g.on && g.need)) lines.push(['予約済み', g.bookedGuests + '名（約' + yen(g.bookedSales) + '）']);
   if (!lines.length && !(g.on && g.need)) return '';
-  return `<div class="card" data-key="outlook"><h2>${icon('i-coin')}今月の見通し</h2>${goalBarHtml(g, false)}${lines.map(l => `<div class="sub" style="margin-top:4px">${phr(l)}</div>`).join('')}
-    ${g.on ? '' : `<div class="sub" style="margin-top:6px">${phr('月の目標を決めると、残りの営業日で1日あたりいくら必要かも出します。')}<button class="btn ghost small" data-act="setPart" data-v="other">設定＞その他 ›</button></div>`}</div>`;
+  return `<div class="card" data-key="outlook"><h2>${icon('i-coin')}今月の見通し</h2>${goalBarHtml(g, false)}${lines.length ? `<div class="gcalc" style="margin-top:8px">${lines.map(l => `<div><span>${l[0]}</span><b>${l[1]}</b></div>`).join('')}</div>` : ''}
+    ${g.on ? '' : `<button class="btn ghost small" data-act="setPart" data-v="other" style="padding-left:0;margin-top:4px">月の目標を決める ›</button>`}</div>`;
 }
 function moneyKpi(v, k, c) { return `<div class="kpi"><div class="v">${v}</div><div class="k">${k}</div>${c || '<div class="c">&nbsp;</div>'}</div>`; }
 function moneyHtml() {

@@ -89,7 +89,7 @@ function aiAnswer(body) {
   }
   if (sys.includes('口座から出たお金の明細')) {
     const ids = [...text.matchAll(/(TX%3D\d+)｜/g)].map(m => m[1]);
-    return { items: ids.map(id => ({ id: id, account: id === 'TX%3D2' ? '通信費' : id === 'TX%3D3' ? '水道光熱費' : id === 'TX%3D11' ? '事業主貸' : '仕入高', rate: id === 'TX%3D1' ? '8' : id === 'TX%3D11' ? 'none' : '10', reason: id === 'TX%3D2' ? '電話・インターネット代なので' : '電気代なので', unsure: false })) };
+    return { items: ids.map(id => ({ id: id, account: id === 'TX%3D2' ? '通信費' : id === 'TX%3D3' ? '水道光熱費' : id === 'TX%3D11' ? '事業主貸' : '仕入高', rate: id === 'TX%3D1' ? '8' : id === 'TX%3D11' ? 'none' : '10', reason: id === 'TX%3D2' ? '電話・インターネット代なので' : '電気代なので', unsure: false, sure: id !== 'TX%3D1' })) };
   }
   if (sys.includes('相談相手')) return { answer: 'お店で使う｜洗剤なら｜消耗品費で｜大丈夫です。', account: '消耗品費' };
   if (sys.includes('来店前メモ')) return { memo: '2回目。｜前回も｜ランチ。｜辛いものが｜苦手。' };

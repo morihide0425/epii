@@ -212,6 +212,7 @@ try {
   check(res.body.list.length >= 2 && res.body.list.every(t => t.amount > 0 && t.id.startsWith('TX')) && !res.body.list.some(t => t.content === 'ｽｸｴｱ'), 'unregistered bank lines ' + JSON.stringify(res.body.list.map(t => t.content)));
   const nt = res.body.list.find(t => t.id === 'TX%3D2');
   check(nt.ai && res.body.accounts.find(a => a.id === nt.ai.accountId).name === '通信費' && nt.ai.reason, 'suggested account');
+  check(nt.sure && res.body.list.find(t => t.id === 'TX%3D3').sure, 'sure lines marked');
   const nAi = calls.ai.length;
   res = await post('/admin/api/mfTx', {}, A);
   check(calls.ai.length === nAi, 'suggestions cached');
@@ -350,7 +351,7 @@ try {
   await db2.prepare("DELETE FROM reservations WHERE date = ?").bind(nd).run();
   await db2.prepare("INSERT INTO reservations (id, created_at, updated_at, status, date, time, session, guests, name, phone, course_id, course_name, note, hold_date, hold_time, hold_session, source, memo) VALUES ('PP0', ?, ?, '確定', ?, '12:00', 'lunch', 2, '高橋 誠', '', '', '養生ランチ', '', ?, '12:00', 'lunch', '電話', '')").bind(T + ' 09:00', T + ' 09:00', add(nd, 7), add(nd, 7)).run();
   res = await post('/admin/api/prep', { preview: true }, A);
-  check(res.body.preview.date > nd && res.body.preview.note.includes('いちばん近い予約のある日') && res.body.preview.text.startsWith('【仕込みメモ '), 'no reservations on next day: nearest day ' + JSON.stringify(res.body.preview).slice(0, 200));
+  check(res.body.preview.date > nd && res.body.preview.note.includes('次の営業日は予約がないので') && res.body.preview.text.startsWith('【仕込みメモ '), 'no reservations on next day: nearest day ' + JSON.stringify(res.body.preview).slice(0, 200));
   // これからの予約がひとつもない：見本のお客様で見せる（DBには入れない）
   await db2.prepare("UPDATE reservations SET status = '確定待避' WHERE status = '確定' AND date > ?").bind(T).run();
   res = await post('/admin/api/prep', { preview: true }, A);
@@ -382,7 +383,7 @@ try {
   }
   res = await post('/admin/api/prep', { preview: true, parts: {}, note: '' }, A);
   const ft = res.body.preview.text;
-  check(ft.includes('■ これから入りそうな予約（見込み）') && /・養生ランチ（当日09:00まで受付）：いま3名。これまでの.曜は締切までに平均\+[\d.]+名（多い日\+3名）/.test(ft), 'forecast for same-day menu\n' + ft);
+  check(ft.includes('■ これから入りそうな予約（見込み）') && /・養生ランチ（当日9:00まで）いま3名 → [\d〜]+名分/.test(ft) && ft.includes('（過去'), 'forecast for same-day menu\n' + ft);
   const fin = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
   check(fin.includes('【お店の設定（管理画面の設定タブ）】') && fin.includes('養生ランチ：') && fin.includes('予約の締切 当日09:00まで') && fin.includes('これから入りそうな予約の見込み') && !fin.includes('過去 客'), 'settings and forecast sent to Claude');
   res = await post('/admin/api/analysisAi', { section: 'booking' }, A);
@@ -416,6 +417,22 @@ try {
     await fetch(B + '/cdn-cgi/mf/scheduled');
     check(await wait(() => pushes.some(p => p.messages[0].text.includes('前に送ったあとで予約が変わりました') && p.messages[0].text.includes('2組 6名')), 8000), 'update sent the evening before');
   }
+  // 振込は Claude が確かだと言っても、まとめて登録には入れない
+  txs.push({ id: 'TX%3D30', date: T, value: 8800, side: 'EXPENSE', content: 'PCﾌﾘｺﾐ ﾔﾏﾀﾞｼﾖｳﾃﾝ', journalizing_status: 'none' });
+  res = await post('/admin/api/mfTx', {}, A);
+  const tr = res.body.list.find(t => t.id === 'TX%3D30');
+  check(tr && tr.ai && tr.ai.sure && !tr.sure, 'transfers are never bulk');
+  txs.splice(txs.findIndex(t => t.id === 'TX%3D30'), 1);
+  // 予約0件の日：「見込みがあれば送る」にしていれば、見込みだけのメモを作る
+  await db2.prepare("UPDATE reservations SET status = '確定待避' WHERE date = ? AND status = '確定'").bind(nd).run();
+  res = await post('/admin/api/prep', { save: true, on: true, time: '21:00', parts: {}, note: '', empty: false }, A);
+  res = await post('/admin/api/prep', { preview: true }, A);
+  check(res.body.preview.date !== nd, 'empty day not sent by default');
+  await post('/admin/api/prep', { save: true, on: true, time: '21:00', parts: {}, note: '', empty: true }, A);
+  res = await post('/admin/api/prep', { preview: true }, A);
+  check(res.body.preview.date === nd && res.body.preview.text.includes('ご予約 まだありません（見込みだけ）') && res.body.preview.text.includes('■ これから入りそうな予約') && !res.body.preview.text.includes('■ 時間ごと'), 'empty day with forecast\n' + res.body.preview.text);
+  await db2.prepare("UPDATE reservations SET status = '確定' WHERE status = '確定待避'").run();
+  await post('/admin/api/prep', { save: true, on: false, time: '21:00', parts: {}, note: '', empty: false }, A);
   // 口座の明細をおすすめのまま、まとめて登録
   txs.push({ id: 'TX%3D20', date: T, value: 1100, side: 'EXPENSE', content: 'ﾃｽﾄ1', journalizing_status: 'none' }, { id: 'TX%3D21', date: T, value: 2200, side: 'EXPENSE', content: 'ﾃｽﾄ2', journalizing_status: 'none' });
   const accs = (await post('/admin/api/mfTx', { suggest: false }, A)).body.accounts;

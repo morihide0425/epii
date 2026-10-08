@@ -1120,8 +1120,13 @@ const TX_SYSTEM = [
   '- 店主が自分のために使ったお金（生活費・家族の買い物・国民年金・国民健康保険・住民税・所得税・個人の保険・個人のカードの引き落としなど）は「事業主貸」にして、rate は "none"。経費にはしない。',
   '- rate：消費税。食材・飲み物なら "8"、ほとんどの経費は "10"、税のかからないもの（振込手数料以外の税金・保険料・家賃の一部など）は "none"。',
   '- reason：理由を会計の言葉を使わずに短く（25文字以内）。',
-  '- unsure：明細の名前だけでは分からないとき true（例：個人名への振込、略称で分からない）。'
+  '- unsure：明細の名前だけでは分からないとき true（例：個人名への振込、略称で分からない）。',
+  '- sure：次のどちらかのときだけ true。(1) 過去の登録に同じ相手があり、同じ科目にした。(2) 名前だけで何の支払いかがはっきり分かり、ほかの科目になることがまずない（電力会社・ガス会社・水道局・携帯電話や通信の会社・国民年金など）。振込（パソコン・ネット・ATMの振込）・個人名・略称・カードの支払いでお店の名前がないもの・ものによって科目が変わる相手（ネット通販・ホームセンター・コンビニなど）は false。迷ったら false。'
 ].join('\n');
+// まとめて登録してよいほど確かか：前に同じ相手を同じ科目で登録している、または Claude が名前ではっきり分かると言ったもの。
+// 振込・ATM など、中身によって科目が変わるものは入れない
+const TX_GENERIC = /振込|振替|ﾌﾘｺﾐ|ﾌﾘｶｴ|フリコミ|フリカエ|ATM|ＡＴＭ|ｴｰﾃｲｴﾑ|引出|ﾋｷﾀﾞｼ|PC|ＰＣ|ﾊﾟｿｺﾝ|パソコン|ﾈｯﾄ|ネット|ｲﾝﾀｰﾈｯﾄ/i;
+function txKey(v) { return String(v || '').normalize('NFKC').replace(/[\s\d\-－.,、。・()（）]/g, '').toUpperCase().slice(0, 16); }
 async function adminMfTx(env, b) {
   if (!env.MF_API_KEY) return { connected: false };
   const today = jstStamp(Date.now()).slice(0, 10);
@@ -1166,17 +1171,33 @@ async function adminMfTx(env, b) {
         system: TX_SYSTEM, effort: 'low', maxTokens: 8000,
         content: [{ type: 'text', text: '勘定科目の一覧：' + accountList(expense) + '\n過去に登録した相手と科目：' + (hist.join('、') || 'なし') +
           '\n\n明細（id｜日付｜内容｜金額）：\n' + need.map(t => t.id + '｜' + t.date + '｜' + t.content + '｜¥' + t.amount).join('\n') }],
-        schema: strSchema({ items: { type: 'array', items: strSchema({ id: { type: 'string' }, account: { type: 'string' }, rate: { type: 'string', enum: ['8', '10', 'none'] }, reason: { type: 'string' }, unsure: { type: 'boolean' } }) } })
+        schema: strSchema({ items: { type: 'array', items: strSchema({ id: { type: 'string' }, account: { type: 'string' }, rate: { type: 'string', enum: ['8', '10', 'none'] }, reason: { type: 'string' }, unsure: { type: 'boolean' }, sure: { type: 'boolean' } }) } })
       });
       for (const x of out.items || []) {
         const a = expense.find(e => e.name === x.account);
         if (!a || !need.some(t => t.id === x.id)) continue;
-        hits[x.id] = { accountId: a.id, rate: x.rate, reason: aiText(x.reason, 60), unsure: !!x.unsure };
+        hits[x.id] = { accountId: a.id, rate: x.rate, reason: aiText(x.reason, 60), unsure: !!x.unsure, sure: !!x.sure && !x.unsure };
         await aiCachePut(env, 'tx:' + x.id, '', hits[x.id]);
       }
     } catch (e) { if (!e.userFacing) throw e; }
   }
   list.forEach(t => { t.ai = hits[t.id] || null; });
+  // 前に同じ相手を登録した科目（口座の明細から作った仕訳の摘要は、明細の内容）
+  const past = {};
+  try {
+    (await env.DB.prepare("SELECT remark, account FROM mf_lines WHERE remark != '' AND date >= ?").bind(addDays(today, -400)).all()).results.forEach(r => {
+      const k = txKey(r.remark);
+      if (!k) return;
+      past[k] = past[k] === undefined || past[k] === r.account ? r.account : null; // 科目が分かれていたら null
+    });
+  } catch (e) { /* まだ表がないとき */ }
+  list.forEach(t => {
+    if (!t.ai) return;
+    const acc = expense.find(a => a.id === t.ai.accountId);
+    const was = past[txKey(t.content)];
+    t.same = !!(acc && was && was === acc.name);
+    t.sure = !t.ai.unsure && !TX_GENERIC.test(t.content) && (t.same || !!t.ai.sure);
+  });
   return { connected: true, list: list, total: total, accounts: expense };
 }
 // Claude のおすすめのまま、まとめて登録する（迷うもの・二重の注意があるものは画面で外してから送る）
@@ -2027,17 +2048,16 @@ async function prepForecast(env, s, date, sendAt, rows) {
 }
 function forecastLines(fc) {
   if (!fc) return [];
-  const f1 = v => (Math.round(v * 10) / 10).toString();
   const lines = [];
   fc.items.forEach(x => {
-    const dl = (x.deadline.slice(0, 10) === fc.date ? '当日' : jdShort(x.deadline.slice(0, 10))) + x.deadline.slice(11, 16) + 'まで受付';
-    if (x.avg === null) { lines.push('・' + x.name + '（' + dl + '）：いま' + x.booked + '名。まだ記録が少ないので見込みは出せません'); return; }
-    if (!x.max) { lines.push('・' + x.name + '（' + dl + '）：いま' + x.booked + '名。これまでの' + fc.weekday + '曜は、この時間よりあとに入った予約はありません'); return; }
-    lines.push('・' + x.name + '（' + dl + '）：いま' + x.booked + '名。これまでの' + fc.weekday + '曜は締切までに平均+' + f1(x.avg) + '名（多い日+' + x.max + '名）。' +
-      (x.suggest === x.booked ? '多めに見るなら' + x.high + '名分' : x.suggest + '名分' + (x.high > x.suggest ? '、多めなら' + x.high + '名分' : '')) + 'の用意が目安');
+    const dl = (x.deadline.slice(0, 10) === fc.date ? '当日' : jdShort(x.deadline.slice(0, 10))) + Number(x.deadline.slice(11, 13)) + ':' + x.deadline.slice(14, 16) + 'まで';
+    const head = '・' + x.name + '（' + dl + '）いま' + x.booked + '名';
+    if (x.avg === null) lines.push(head + '（記録が少なく見込みなし）');
+    else if (!x.max) lines.push(head + '（あとから増えたことはなし）');
+    else lines.push(head + ' → ' + (x.suggest === x.high ? x.suggest : (x.suggest === x.booked ? x.booked + '〜' + x.high : x.suggest + '〜' + x.high)) + '名分');
   });
-  fc.walk.filter(w => w.avg >= 0.5).forEach(w => lines.push('・予約なしのお客様（' + w.session + '）：これまでの' + fc.weekday + '曜は平均' + f1(w.avg) + '件'));
-  if (lines.length) lines.push('（過去' + fc.days + '回の' + fc.weekday + '曜から計算）');
+  fc.walk.filter(w => w.avg >= 0.5).forEach(w => lines.push('・予約なし（' + w.session + '）いつも約' + Math.round(w.avg) + '件'));
+  if (lines.length) lines.push('（過去' + fc.days + '回の' + fc.weekday + '曜から）');
   return lines;
 }
 // 店主が足した項目：kind 'ai' は Claude へのお願い（予約を読んでまとめてもらう）、'text' は毎回そのまま入れる文
@@ -2051,7 +2071,7 @@ async function prepCfg(env) {
   const v = (await kvGet(env, 'prepCfg')) || {};
   const parts = {};
   PREP_PARTS.forEach(p => { parts[p[0]] = !v.parts || v.parts[p[0]] !== false; });
-  return { on: !!v.on, time: /^\d{2}:\d{2}$/.test(v.time || '') ? v.time : '21:00', parts: parts, note: String(v.note || ''), custom: prepCustom(v.custom) };
+  return { on: !!v.on, time: /^\d{2}:\d{2}$/.test(v.time || '') ? v.time : '21:00', parts: parts, note: String(v.note || ''), custom: prepCustom(v.custom), empty: !!v.empty };
 }
 const PREP_SYSTEM = [
   'あなたは、大阪・阿倍野の小さな薬膳レストラン「épii」の店主（ひとりで仕込みから接客まで切り盛りしています）のために、次の営業日の「仕込みメモ」を作ります。店主は前の晩にLINEで読みます。',
@@ -2093,7 +2113,14 @@ async function prepMemo(env, date, cfg, sample) {
   const s = await getSettings(env);
   const today = jstStamp(Date.now()).slice(0, 10);
   const rows = sample ? await prepSampleRows(env, date) : (await env.DB.prepare("SELECT * FROM reservations WHERE date = ? AND status = '確定' ORDER BY time, created_at").bind(date).all()).results;
-  if (!rows.length) return null;
+  // 予約が0件の日：設定で「見込みがあれば送る」にしていて、締切までに入りそうなときだけ作る
+  if (!rows.length) {
+    if (!cfg.empty) return null;
+    const at0 = jstStamp(Date.now());
+    const sa0 = at0 > addDays(date, -1) + ' ' + (cfg.time || '21:00') ? at0 : addDays(date, -1) + ' ' + (cfg.time || '21:00');
+    const f0 = await prepForecast(env, s, date, sa0, []).catch(() => null);
+    if (!f0 || !(f0.items.some(x => x.avg >= 0.5) || f0.walk.some(w => w.avg >= 0.5))) return null;
+  }
   const pend = sample ? 0 : (await env.DB.prepare("SELECT COUNT(*) AS n FROM reservations WHERE date = ? AND status IN ('返事待ち','提案中')").bind(date).first()).n;
   const custom = (cfg.custom || []).filter(x => x.on);
   const aiCustom = custom.filter(x => x.kind === 'ai');
@@ -2112,12 +2139,12 @@ async function prepMemo(env, date, cfg, sample) {
   const guests = rows.reduce((a, r) => a + (Number(r.guests) || 0), 0);
   const bySess = {};
   rows.forEach(r => { const k = sessionLabel(s, r.session); bySess[k] = bySess[k] || [0, 0]; bySess[k][0]++; bySess[k][1] += Number(r.guests) || 0; });
-  const lines = ['【仕込みメモ ' + jd(date) + '】', 'ご予約 ' + rows.length + '組 ' + guests + '名' + (Object.keys(bySess).length > 1 ? '（' + Object.keys(bySess).map(k => k + ' ' + bySess[k][0] + '組' + bySess[k][1] + '名').join('・') + '）' : '')];
-  if (P.list) {
+  const lines = ['【仕込みメモ ' + jd(date) + '】', !rows.length ? 'ご予約 まだありません（見込みだけ）' : 'ご予約 ' + rows.length + '組 ' + guests + '名' + (Object.keys(bySess).length > 1 ? '（' + Object.keys(bySess).map(k => k + ' ' + bySess[k][0] + '組' + bySess[k][1] + '名').join('・') + '）' : '')];
+  if (P.list && rows.length) {
     lines.push('', '■ 時間ごと');
     refs.forEach(x => lines.push(x.r.time + ' ' + x.r.name + '様 ' + x.r.guests + '名 ' + (x.r.course_name || 'コース未定') + '（' + (x.f && x.f.visits ? (x.f.visits + 1) + '回目' : '初めて') + '）'));
   }
-  if (P.course) {
+  if (P.course && rows.length) {
     const c = {};
     rows.forEach(r => { const k = r.course_name || 'コース未定'; c[k] = (c[k] || 0) + (Number(r.guests) || 0); });
     lines.push('', '■ コースごとの人数', ...Object.keys(c).map(k => k + ' ' + c[k] + '名'));
@@ -2213,7 +2240,7 @@ async function adminPrep(env, b) {
   if (b.save) {
     const parts = {};
     PREP_PARTS.forEach(p => { parts[p[0]] = !(b.parts && b.parts[p[0]] === false); });
-    await kvPut(env, 'prepCfg', { on: !!b.on, time: /^\d{2}:\d{2}$/.test(b.time || '') ? b.time : '21:00', parts: parts, note: clean(b.note, 300), custom: prepCustom(b.custom) });
+    await kvPut(env, 'prepCfg', { on: !!b.on, time: /^\d{2}:\d{2}$/.test(b.time || '') ? b.time : '21:00', parts: parts, note: clean(b.note, 300), custom: prepCustom(b.custom), empty: !!b.empty });
   }
   const cfg = await prepCfg(env);
   if (b.preview || b.send) {
@@ -2226,8 +2253,8 @@ async function adminPrep(env, b) {
     if (!memo) {
       // 次の営業日に予約がないときは、いちばん近い予約のある日。それもなければ見本のお客様で
       const r = await env.DB.prepare("SELECT date FROM reservations WHERE status = '確定' AND date > ? ORDER BY date LIMIT 1").bind(today).first();
-      if (r) { memo = await prepMemo(env, r.date, use); why = (next ? jd(next.date) + '（次の営業日）はまだ予約がないので、いちばん近い予約のある日で作りました。' : '') + '予約がない日は送りません。'; }
-      else { memo = await prepMemo(env, next ? next.date : addDays(today, 1), use, true); memo.sample = true; why = 'これからの予約がないので、見本のお客様（実際にはいません）で作りました。予約がない日は送りません。'; }
+      if (r) { memo = await prepMemo(env, r.date, use); why = '次の営業日は予約がないので、' + jd(r.date) + 'の分で見本を作りました'; }
+      else { memo = await prepMemo(env, next ? next.date : addDays(today, 1), use, true); memo.sample = true; why = '予約がないので、見本のお客様で作りました'; }
     }
     const text = memo.sample ? memo.text.replace('【仕込みメモ ', '【仕込みメモ（見本） ') : memo.text;
     if (b.send) {
