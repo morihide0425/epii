@@ -152,6 +152,19 @@ export default {
   }
 };
 
+// プライバシーポリシー（Googleの同意画面に載せるURL）
+function privacyPage() {
+  const body = [
+    '<h1>プライバシーポリシー</h1>',
+    '<p>' + SHOP.name + '（大阪・阿倍野）の予約システムで扱う情報について説明します。</p>',
+    '<h2>お客様の情報</h2><p>ご予約のために、お名前・電話番号・LINEのID・ご予約の内容・ご要望をお預かりします。ご予約の確認とご連絡、来店の準備のためだけに使い、法令にもとづく場合をのぞいて第三者には渡しません。</p>',
+    '<h2>Googleのデータ</h2><p>店主がGoogleアカウントでつないだときだけ、お店のGoogleビジネスプロフィールの情報（表示回数・検索された言葉・口コミなど）を読み取り、店主がお店の運営を見直すための管理画面にだけ表示します。Googleの情報を書き換えたり、広告に使ったり、第三者に売ったりはしません。管理画面の「Googleとのつながりを切る」で、いつでも読み取りをやめられます。Google APIから受け取った情報の利用は、Google API Services User Data Policy（Limited Use の要件を含む）にしたがいます。</p>',
+    '<h2>お問い合わせ</h2><p>' + SHOP.name + '　電話 ' + SHOP.tel + '</p>'
+  ].join('');
+  return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>プライバシーポリシー｜' + SHOP.name + '</title><body style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px 16px;line-height:1.8;color:#1F1F1F;background:#fff">' + body + '</body></html>',
+    { headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
+
 async function route(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -168,6 +181,7 @@ async function route(request, env, ctx) {
     if (path === '/admin.webmanifest') return manifest('admin');
     if (path === '/app.webmanifest') return manifest('app');
     if (path === '/admin/google/callback') { await ensureSchema(env); return googleCallback(url, env); }
+    if (path === '/privacy') return privacyPage();
     return new Response('Not found', { status: 404 });
   }
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
