@@ -167,6 +167,7 @@ async function route(request, env, ctx) {
     if (path === '/apple-touch-icon.png') return pngIcon('180');
     if (path === '/admin.webmanifest') return manifest('admin');
     if (path === '/app.webmanifest') return manifest('app');
+    if (path === '/admin/google/callback') { await ensureSchema(env); return googleCallback(url, env); }
     return new Response('Not found', { status: 404 });
   }
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
@@ -940,6 +941,9 @@ const ADMIN_FUNCS = {
   bookAsk: adminBookAsk,
   txExclude: adminTxExclude,
   txUnhide: adminTxUnhide,
+  googleStart: adminGoogleStart,
+  google: adminGoogle,
+  googleOff: adminGoogleOff,
   sqUnentered: adminSqUnentered,
   sqEnter: adminSqEnter,
   saveCustomer: async (env, b) => {

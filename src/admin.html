@@ -371,6 +371,8 @@
   .adjhow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; } .adjhow .chip { margin: 0; border-radius: 10px; padding: 8px 10px; text-align: left; } .adjhow .chip small { display: block; font-size: 10px; opacity: .75; margin-top: 2px; }
   .cashadj label { display: block; font-size: 11px; color: var(--sub); } .cashadj label input { margin-top: 4px; font-size: 15px; padding: 7px 9px; }
   .tipbox { margin-top: 6px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.6; } .tipbox b { display: block; font-size: 13px; } .tipbox span { color: var(--sub); }
+  .gline { width: 100%; height: 70px; display: block; margin-top: 6px; }
+  .grev { padding: 10px 0; border-top: 1px solid var(--line); } .grev:first-of-type { border-top: 0; } .grev .stars { color: #C9962C; font-size: 13px; letter-spacing: 1px; } .grev .stars .off { color: var(--line2); } .gtext { font-size: 13px; line-height: 1.7; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .golink { display: flex; width: 100%; align-items: center; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid var(--line2); border-radius: 12px; background: none; text-align: left; } .golink span { flex: 1; min-width: 0; } .golink b { display: block; font-size: 14px; } .golink small { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; } .golink em { font-style: normal; font-size: 12px; color: var(--blue); white-space: nowrap; }
   .askans { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0 2px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.6; } .askans svg.spark { flex-shrink: 0; margin-top: 3px; }
   .cdate { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub); margin-top: 2px; } .cdate input { -webkit-appearance: none; appearance: none; width: auto; min-width: 0; max-width: 60%; font-size: 14px; padding: 6px 8px; }
@@ -632,6 +634,8 @@ async function boot() {
     $('loginView').classList.add('hidden');
     $('appView').classList.remove('hidden');
     prepareDrafts();
+    // Googleとつないで戻ってきたとき：分析のGoogleを開く
+    if (location.hash === '#google') { history.replaceState(null, '', '/admin'); S.tab = 'set'; S.setPart = 'stats'; S.anView = 'google'; S.google = null; setTimeout(() => { loadGoogle(); loadDash(); }, 0); }
     showTab(S.tab);
   } catch (e) {
     if (e.message !== 'ログインしてください。') {
@@ -2341,9 +2345,10 @@ VIEWS.set = {
     if (S.setPart === 'acct') h += acctHtml();
     if (S.setPart === 'stats') {
       const views = [['dash', 'まとめ'], ['site', '予約'], ['ig', 'Instagram']];
-      if (S.features.square || S.features.mf) views.push(['money', '売上・経費']);
+      if (S.features.square || S.features.mf) views.push(['money', '売上']);
+      if (S.features.google) views.push(['google', 'Google']);
       h += `<div class="seg anseg" data-mg="anview" data-mgs="button.on">${views.map(v => `<button class="${S.anView === v[0] ? 'on' : ''}" data-act="anView" data-v="${v[0]}">${v[1]}</button>`).join('')}</div>`;
-      h += S.anView === 'dash' ? dashHtml() : S.anView === 'ig' ? igHtml() : S.anView === 'money' ? moneyHtml() : statsHtml();
+      h += S.anView === 'dash' ? dashHtml() : S.anView === 'ig' ? igHtml() : S.anView === 'money' ? moneyHtml() : S.anView === 'google' ? googleHtml() : statsHtml();
     }
     if (S.setPart === 'line') h += `
     <div class="card"><h2>LINEの送信数（今月）</h2>
@@ -3001,12 +3006,20 @@ ACTIONS.set = async (a, b) => {
     renderSet();
     return;
   }
+  if (a === 'googleConnect') {
+    const mo = M.busy(b);
+    try { const r = await api('googleStart', { origin: location.origin }); location.href = r.url; } catch (e) { mo.fail(); fail(e); }
+    return;
+  }
+  if (a === 'googleReload') { await loadGoogle(true, b); return; }
+  if (a === 'googleOff') { if (!confirm('Googleとのつながりを切ります。よろしいですか？（Googleの情報は消えません）')) return; try { await api('googleOff'); S.google = null; await loadGoogle(); toast('つながりを切りました'); } catch (e) { fail(e); } return; }
   if (a === 'anView') {
     S.anView = b.dataset.v; refresh();
     if (b.classList.contains('dtile') || b.classList.contains('secrow')) window.scrollTo({ top: 0, behavior: M.reduce() ? 'auto' : 'smooth' });
     if (!S.dash) loadDash(); else ensureSection(VIEW_SEC[S.anView]);
     if (S.anView === 'dash') return;
     if (S.anView === 'money') { loadMoney(); return; }
+    if (S.anView === 'google') { if (!S.google) loadGoogle(); return; }
     if (S.anView === 'ig' && S.features.ai && !S.igd) loadIg();
     if (S.anView === 'ig' && !S.ig) { try { S.ig = await api('igStats', { days: S.anDays }); refresh(); } catch (e) { fail(e); } }
     if (S.anView === 'site' && !S.an) { try { S.an = await api('analytics', { days: S.anDays }); refresh(); } catch (e) { fail(e); } }
@@ -4057,6 +4070,39 @@ const SEC_NOTE = {
   ig: 'Instagramの数字だけを見ています。毎週月曜の朝に新しくします。'
 };
 const VIEW_SEC = { dash: 'summary', site: 'booking', ig: 'ig', money: 'money' };
+/* ---------- 分析＞Google：Googleマップ・検索での見られ方と口コミ（ビジネスプロフィール） ---------- */
+async function loadGoogle(force, btn) {
+  if (!S.features.google) return;
+  const mo = btn ? M.busy(btn) : null;
+  try { S.google = await api('google', { force: !!force }); if (mo) await mo.ok(); }
+  catch (e) { if (mo) mo.fail(); S.google = { configured: true, connected: true, err: e.message }; }
+  renderSet();
+}
+function googleHtml() {
+  const G = S.google;
+  if (!G) return `<div class="card">${aiThink('Googleのデータを読んでいます')}</div>`;
+  if (!G.connected) return `<div class="card" data-key="gconnect"><h2>Googleマップ・検索</h2><div class="sub">${phr('Googleマップや検索で、お店が何回表示されたか、ルート検索や電話が何回あったか、どんな言葉で探されたか、口コミを、ここで見られるようにします。\nお店のオーナーか管理者のGoogleアカウントで、1回だけログインしてください。読むだけで、Googleの情報は書き換えません。')}</div>${G.err ? `<div class="warn">${phr(G.err)}</div>` : ''}<button class="btn primary wide" data-act="googleConnect" style="margin-top:10px">Googleとつなぐ</button></div>`;
+  const D = G.data;
+  if (!D) return `<div class="card"><h2>Googleマップ・検索</h2><div class="warn">${phr(G.err || '読めませんでした')}</div><div class="acts"><button class="btn small" data-act="googleReload">もう一度読む</button><button class="btn small ghost" data-act="googleOff">つながりを切る</button></div></div>`;
+  const c = D.cur, p = D.prev;
+  const ch = (a, b) => { if (!(b > 0)) return ['', '']; const r = Math.round((a - b) / b * 100); return ['前の28日 ' + b + '（' + (r > 0 ? '+' : '') + r + '%）', r === 0 ? '' : r > 0 ? 'up' : 'down']; };
+  const tile = (k, v, b) => { const x = ch(v, b); return `<div class="dtile"><span class="k">${k}</span><span class="v">${v}<small>回</small></span><span class="c ${x[1]}">${x[0] || '&nbsp;'}</span></div>`; };
+  let h = `<div class="row" style="margin-bottom:8px"><span class="sub">${phr((D.title ? D.title + '　' : '') + '直近28日（' + jdShort(addDays(D.to, -27)) + '〜' + jdShort(D.to) + '）')}</span><button class="btn small" data-act="googleReload" style="margin-left:auto;flex-shrink:0">${icon('i-refresh')}最新にする</button></div>`;
+  h += `<div class="dtiles">${tile('マップで表示', c.maps, p.maps)}${tile('検索で表示', c.search, p.search)}${tile('ルート検索', c.dir, p.dir)}${tile('電話', c.calls, p.calls)}${tile('ウェブサイト', c.web, p.web)}</div>`;
+  // 日ごとの表示回数（マップ＋検索）
+  const vals = D.days.map(x => x.maps + x.search), mx = Math.max(1, ...vals);
+  const pts = vals.map((v, i) => (i / Math.max(1, vals.length - 1) * 300).toFixed(1) + ',' + (56 - v / mx * 50).toFixed(1)).join(' ');
+  h += `<div class="card" data-key="gdaily"><h2>日ごとの表示回数</h2><svg class="gline" viewBox="0 0 300 60" preserveAspectRatio="none" role="img" aria-label="日ごとの表示回数"><polyline points="${pts}" fill="none" stroke="var(--ink)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg><div class="row sub"><span>${jdShort(D.from)}</span><span style="margin-left:auto">${jdShort(D.to)}</span></div><div class="sub" style="margin-top:4px">${phr('Googleの数字は、2〜3日遅れて届きます。')}</div></div>`;
+  if (D.words.length) h += `<div class="card" data-key="gwords"><h2>${D.wordsMonth}月に検索された言葉</h2><div class="gcalc">${D.words.slice(0, 10).map(w => `<div><span>${esc(w.k)}</span><b>${w.v ? w.v + '回' : w.lt + '回未満'}</b></div>`).join('')}</div></div>`;
+  const R = D.reviews;
+  if (R) {
+    const un = R.recent.filter(r => !r.replied).length;
+    h += `<div class="card" data-key="greviews"><h2>口コミ <span class="cnt">★${R.avg.toFixed(1)}　${R.total}件</span></h2>${un ? `<div class="sub" style="margin-bottom:6px"><span class="tag amber">返信していない ${un}件</span></div>` : ''}${R.recent.slice(0, 6).map(r => `<div class="grev"><div class="row"><span class="stars" aria-label="星${r.stars}">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span><span class="sub" style="margin-left:auto">${jdShort(r.date)}${r.replied ? '' : '　返信なし'}</span></div>${r.text ? `<div class="gtext">${esc(r.text)}</div>` : ''}</div>`).join('')}</div>`;
+  } else if (D.revErr) h += `<div class="card"><h2>口コミ</h2><div class="sub">${phr('口コミは読めませんでした（' + D.revErr + '）')}</div></div>`;
+  if (S.features.ai) h += `<div class="sub" style="margin:0 4px 12px">${phr('この数字は、Claudeの「予約」と「まとめ」の気づきにも使います。')}</div>`;
+  h += `<div style="text-align:center;margin-bottom:12px"><button class="btn small ghost" data-act="googleOff">Googleとのつながりを切る</button></div>`;
+  return h;
+}
 async function loadDash(btn) {
   const mo = btn ? M.busy(btn) : null;
   try {
@@ -4067,6 +4113,7 @@ async function loadDash(btn) {
     if (mo) await mo.ok();
     renderSet();
     ensureSection(VIEW_SEC[S.anView]);
+    if (S.features.google && !S.google) loadGoogle();
   } catch (e) { if (mo) mo.fail(); fail(e); }
 }
 async function loadSection(sec) {
@@ -4155,6 +4202,8 @@ function dashHtml() {
   tiles.push(dtile('予約（今月）', d.booking.groups + '<small>組</small> ' + d.booking.guests + '<small>名</small>', '先月 ' + d.booking.groupsPrev + '組', 'site'));
   tiles.push(dtile('予約ページ', d.booking.opens + '<small>回</small>', d.booking.requests + '人がリクエスト', 'site'));
   if (d.ig) tiles.push(dtile('Instagramのリーチ', String(d.ig.reach), d.ig.followers ? 'フォロワー ' + d.ig.followers + '人' : '', 'ig'));
+  const G = S.google && S.google.data;
+  if (G) { const a = G.cur.maps + G.cur.search, b = G.prev.maps + G.prev.search; tiles.push(dtile('Googleで表示', a + '<small>回</small>', 'ルート検索 ' + G.cur.dir + '・電話 ' + G.cur.calls, 'google', b ? (a >= b ? 'up' : 'down') : '')); }
   h += `<div class="dtiles">${tiles.join('')}</div>`;
   if (m && m.err) h += `<div class="warn" style="margin-bottom:10px">${phr(m.err)}</div>`;
   h += aiSectionHtml('summary', '今週の大事なこと');

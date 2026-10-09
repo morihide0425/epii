@@ -453,6 +453,38 @@ try {
   const in1 = res.body.income.find(t => t.id === 'IN1');
   check(in1 && in1.tip.act === 'exclude' && in1.tip.why.includes('もう帳簿に入っています'), 'after the payout is entered ' + JSON.stringify(in1));
 
+  // Google（ビジネスプロフィール）：つなぐ前 → つなぐ（署名つき state、1回だけ）→ 読む → Claudeの分析に入る（口コミの名前・電話番号は送らない）
+  res = await post('/admin/api/google', {}, A);
+  check(res.body.configured && !res.body.connected, 'google not connected yet');
+  res = await post('/admin/api/googleStart', { origin: B }, A);
+  const gu = new URL(res.body.url);
+  check(gu.pathname === '/g/auth/o/oauth2/v2/auth' && gu.searchParams.get('client_id') === 'gid' && gu.searchParams.get('scope') === 'https://www.googleapis.com/auth/business.manage' && gu.searchParams.get('access_type') === 'offline' && gu.searchParams.get('redirect_uri') === B + '/admin/google/callback', 'google auth url ' + res.body.url);
+  let gr = await fetch(B + '/admin/google/callback?code=good&state=forged.sig');
+  check(gr.status === 400, 'forged state refused');
+  gr = await fetch(B + '/admin/google/callback?code=good&state=' + encodeURIComponent(gu.searchParams.get('state')));
+  check(gr.status === 200 && (await gr.text()).includes('つながりました'), 'google connected');
+  gr = await fetch(B + '/admin/google/callback?code=good&state=' + encodeURIComponent(gu.searchParams.get('state')));
+  check(gr.status === 400, 'state used only once');
+  res = await post('/admin/api/google', {}, A);
+  const gd2 = res.body.data;
+  check(res.body.connected && gd2.title === '薬膳レストラン épii' && gd2.days.length === 56 && gd2.cur.maps > 500 && gd2.cur.search === 8 * 28 && gd2.cur.dir > 0, 'google performance ' + JSON.stringify(gd2 && gd2.cur));
+  check(gd2.words[0].k === '薬膳 大阪' && gd2.words[0].v === 120 && gd2.words.some(w => w.lt === 15) && gd2.reviews.avg === 4.6 && gd2.reviews.recent[0].stars === 5 && !gd2.reviews.recent[0].replied && gd2.reviews.recent[1].replied, 'keywords & reviews');
+  // とってある分を使う（6時間）
+  const ng = calls.g.length;
+  res = await post('/admin/api/google', {}, A);
+  check(calls.g.length === ng, 'google data cached');
+  res = await post('/admin/api/analysisAi', { section: 'booking' }, A);
+  const gai = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
+  check(gai.includes('【Googleマップ・Google検索') && gai.includes('薬膳 大阪 120回') && gai.includes('体にやさしい') && !gai.includes('山田 花子') && !gai.includes('1234-5678'), 'google facts for Claude ' + gai.slice(gai.indexOf('【Google'), gai.indexOf('【Google') + 300));
+  // 口コミが読めなくても、ほかは出す
+  opts.noReviews = true;
+  res = await post('/admin/api/google', { force: true }, A);
+  check(res.body.data.reviews === null && res.body.data.revErr && res.body.data.cur.maps > 0, 'reviews optional');
+  opts.noReviews = false;
+  res = await post('/admin/api/googleOff', {}, A);
+  res = await post('/admin/api/google', {}, A);
+  check(!res.body.connected, 'google disconnected');
+
   // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
   res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);
   check(res.body.answer.includes('売上') && res.body.remember === '', 'chat ' + JSON.stringify(res.body));

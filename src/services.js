@@ -11,7 +11,7 @@ const BRK = '｜';
 const AI_BREAK_RULE = '画面で変なところで改行されないよう、文節の切れ目に「｜」を入れてください（例：ご来店を｜心より｜お待ちして｜おります。）。句読点のあとには必ず入れます。数字・金額・日付・割合・カタカナ語・ハッシュタグ・URLの途中には入れません。';
 
 function features(env) {
-  return { ai: !!env.ANTHROPIC_API_KEY, square: !!env.SQUARE_ACCESS_TOKEN, mf: !!env.MF_API_KEY };
+  return { ai: !!env.ANTHROPIC_API_KEY, square: !!env.SQUARE_ACCESS_TOKEN, mf: !!env.MF_API_KEY, google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) };
 }
 function plain(v) { return String(v || '').split(BRK).join(''); }
 // Claude の文：制御文字を除き、区切りの印の重なりや端の印を整える
@@ -1689,7 +1689,7 @@ async function factsIg(env) {
 const SECTION = {
   summary: { label: 'まとめ', focus: 'お店全体（売上・経費・予約・Instagram）を見て、今週いちばん大事なことを3つ選ぶ。できるだけ違う分野から選び、利益（売上－経費）につながる順に並べる（売上を増やす・経費を減らす・空席を埋める）。月の目標があれば、その進み具合も考える。' },
   money: { label: '売上・経費', focus: '売上と経費だけを見る（予約ページの閲覧やInstagramには触れない）。いちばん大事なのは利益（売上－経費）。売上の増減と理由（曜日・時間帯・予約の会計と予約なしの会計・1人あたり・1会計あたり）、経費（食材費の割合・大きい科目・増えた科目・主な支払先）を数字ではっきり示し、そのうえで「利益をどう増やすか」（売上を増やす・食材費の割合を下げる・毎月の経費を見直す・値付け）を少なくとも1つ、具体的な金額の目安つきで書く。月の目標があれば、届きそうかと、残りの営業日で何をするかにも触れる。ひとりで回せる範囲（席数・仕込みの量）を前提にする。3〜4つ。' },
-  booking: { label: '予約', focus: '予約と予約ページだけを見る（売上の金額やInstagramには触れない）。混む・空く曜日と時間帯、キャンセル・来店なし、満席で断った需要、予約ページのどこで離れているか、受付の期間や締切。3〜4つ。' },
+  booking: { label: '予約', focus: '予約と予約ページだけを見る（売上の金額やInstagramには触れない）。混む・空く曜日と時間帯、キャンセル・来店なし、満席で断った需要、予約ページのどこで離れているか、受付の期間や締切。Googleマップ・検索のデータがあれば、表示回数・ルート検索・電話の動きと検索された言葉、返信していない口コミにも触れる。3〜4つ。' },
   ig: { label: 'Instagram', focus: 'Instagramだけを見る。届いている人数の動き、どんな投稿・ストーリーが予約ページにつながったか、出す頻度や時間、空きの告知。3〜4つ。' }
 };
 const ANALYSIS_SYSTEM = [
@@ -1713,8 +1713,8 @@ const ANALYSIS_SCHEMA = strSchema({
 
 async function makeSection(env, sec, effort) {
   const head = await factsHead(env);
-  const body = sec === 'money' ? await factsMoney(env) : sec === 'booking' ? await factsBooking(env) : sec === 'ig' ? await factsIg(env)
-    : [await factsMoney(env), await factsBooking(env), await factsIg(env)].join('\n\n');
+  const body = sec === 'money' ? await factsMoney(env) : sec === 'booking' ? [await factsBooking(env), await factsGoogle(env)].filter(Boolean).join('\n\n') : sec === 'ig' ? await factsIg(env)
+    : [await factsMoney(env), await factsBooking(env), await factsGoogle(env), await factsIg(env)].filter(Boolean).join('\n\n');
   const prev = await kvGet(env, 'ai:' + sec);
   const before = prev && prev.items && prev.items.length
     ? '\n\n前回（' + prev.at.slice(5, 10).replace('-', '/') + '）の気づきとやること：\n' + prev.items.map(x => '・' + plain(x.title) + ' → ' + plain(x.todo)).join('\n') : '';
@@ -3214,4 +3214,161 @@ async function adminSqEnter(env, b) {
   for (const ym of Object.keys(months)) await mfTouched(env, ym + '-01');
   if (done.length) await kvPut(env, 'sqEnterTried', { at: jstStamp(Date.now()) });
   return { done: done, failed: failed, list: Object.assign(await sqUnentered(env), { tried: !!done.length || !!(await kvGet(env, 'sqEnterTried')) }) };
+}
+
+/* ---------- (8) Googleビジネスプロフィール（Googleマップ・検索での見られ方と口コミ） ----------
+ * 店主が管理画面の「Googleとつなぐ」で一度ログインすると、読み取り用の鍵（リフレッシュトークン）を手元に置き、あとは自動で読む。
+ * クライアントIDとシークレットは Cloudflare のシークレット（GOOGLE_CLIENT_ID・GOOGLE_CLIENT_SECRET）。読むだけで、書き込みはしない */
+const G_SCOPE = 'https://www.googleapis.com/auth/business.manage';
+function gUrl(env, host, path) { return (env.GOOGLE_API_BASE ? env.GOOGLE_API_BASE + '/' + host : 'https://' + host) + path; }
+function gOn(env) { return !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET); }
+// つなぐボタン：Googleのログイン画面のURL（state は署名つきで10分だけ使える）
+async function adminGoogleStart(env, b) {
+  if (!gOn(env)) fail('GoogleのクライアントIDとシークレットが、Cloudflareに登録されていません。');
+  const origin = String(b.origin || '');
+  if (!/^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(origin) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) fail('画面のURLが読み取れませんでした。');
+  const nonce = crypto.randomUUID();
+  await kvPut(env, 'gState', { n: nonce, origin: origin, at: Date.now() });
+  const state = await signToken(env, { k: 'g', n: nonce, e: Date.now() + 600000 });
+  const q = new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, redirect_uri: origin + '/admin/google/callback', response_type: 'code', scope: G_SCOPE, access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state: state });
+  return { url: (env.GOOGLE_AUTH_BASE || 'https://accounts.google.com') + '/o/oauth2/v2/auth?' + q.toString() };
+}
+// Googleから戻ってきたところ：鍵を受け取って保存し、管理画面に戻る
+async function googleCallback(url, env) {
+  const page = (msg, ok) => new Response('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Google</title><body style="font-family:sans-serif;padding:24px;line-height:1.7">' +
+    String(msg).replace(/[<>&]/g, '') + '<p><a href="/admin#google">管理画面に戻る</a></p>' + (ok ? '<script>location.replace("/admin#google")</script>' : '') + '</body>', { status: ok ? 200 : 400, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+  if (!gOn(env)) return page('GoogleのクライアントIDとシークレットが、Cloudflareに登録されていません。');
+  if (url.searchParams.get('error')) return page('Googleとつなぐのをやめました（' + url.searchParams.get('error') + '）。');
+  const st = await verifyToken(env, url.searchParams.get('state') || '');
+  const saved = await kvGet(env, 'gState');
+  if (!st || st.k !== 'g' || !saved || saved.n !== st.n) return page('時間がたったか、別の画面から開かれました。管理画面の「Googleとつなぐ」から、もう一度お試しください。');
+  await env.DB.prepare("DELETE FROM kv WHERE k = 'gState'").run();
+  const res = await fetch((env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token'), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ code: url.searchParams.get('code') || '', client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: url.origin + '/admin/google/callback', grant_type: 'authorization_code' }).toString() });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.refresh_token) { console.error('Google token', res.status, JSON.stringify(j).slice(0, 200)); return page('Googleから鍵を受け取れませんでした（' + (j.error_description || j.error || res.status) + '）。もう一度お試しください。'); }
+  await kvPut(env, 'google', { refresh: j.refresh_token, at: jstStamp(Date.now()) });
+  await kvPut(env, 'gTok', { t: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 - 60000 });
+  await env.DB.prepare("DELETE FROM kv WHERE k = 'gData'").run();
+  return page('Googleとつながりました。', true);
+}
+async function gToken(env) {
+  const tok = await kvGet(env, 'gTok');
+  if (tok && tok.exp > Date.now()) return tok.t;
+  const g = await kvGet(env, 'google');
+  if (!g || !g.refresh) fail('Googleとつながっていません。', 400, 'G_NONE');
+  const res = await fetch((env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token'), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ refresh_token: g.refresh, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, grant_type: 'refresh_token' }).toString() });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.access_token) {
+    if (j.error === 'invalid_grant') { await env.DB.prepare("DELETE FROM kv WHERE k = 'google'").run(); fail('Googleとのつながりが切れました。「Googleとつなぐ」から、もう一度つないでください。', 400, 'G_NONE'); }
+    fail('Googleにつながりませんでした（' + (j.error || res.status) + '）。', 502, 'G_ERROR');
+  }
+  await kvPut(env, 'gTok', { t: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 - 60000 });
+  return j.access_token;
+}
+async function gApi(env, host, path) {
+  let res;
+  try { res = await fetch(gUrl(env, host, path), { headers: { authorization: 'Bearer ' + await gToken(env), accept: 'application/json' } }); }
+  catch (e) { if (e && e.userFacing) throw e; fail('Googleにつながりませんでした（通信エラー）。', 502, 'G_NET'); }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error('Google API', host, path.slice(0, 80), res.status, JSON.stringify(j).slice(0, 200));
+    const msg = (j.error && j.error.message) || '';
+    fail(res.status === 429 ? 'Googleの利用回数の上限です。少し待ってからお試しください。'
+      : /quota|has not been used|disabled/i.test(msg) ? 'GoogleのAPIがまだ使えません（' + clean(msg, 80) + '）'
+      : 'Googleでエラーになりました（' + (clean(msg, 80) || 'エラーコード ' + res.status) + '）。', 502, 'G_ERROR');
+  }
+  return j;
+}
+// お店（ビジネスプロフィール）を探す：最初のアカウントの最初のお店。1日1回だけ探し直す
+async function gLocation(env) {
+  const hit = await kvGet(env, 'gLoc');
+  if (hit && Date.now() - hit.t < 86400000) return hit;
+  const acc = await gApi(env, 'mybusinessaccountmanagement.googleapis.com', '/v1/accounts');
+  const accounts = acc.accounts || [];
+  for (const a of accounts) {
+    const l = await gApi(env, 'mybusinessbusinessinformation.googleapis.com', '/v1/' + a.name + '/locations?readMask=name,title&pageSize=10');
+    const loc = (l.locations || [])[0];
+    if (loc) { const out = { account: a.name, location: loc.name, title: loc.title || '', t: Date.now() }; await kvPut(env, 'gLoc', out); return out; }
+  }
+  fail('このGoogleアカウントで管理しているお店が見つかりませんでした。お店のオーナーか管理者のアカウントでつないでください。', 400, 'G_ERROR');
+}
+const G_METRICS = {
+  BUSINESS_IMPRESSIONS_MOBILE_MAPS: 'maps', BUSINESS_IMPRESSIONS_DESKTOP_MAPS: 'maps',
+  BUSINESS_IMPRESSIONS_MOBILE_SEARCH: 'search', BUSINESS_IMPRESSIONS_DESKTOP_SEARCH: 'search',
+  CALL_CLICKS: 'calls', WEBSITE_CLICKS: 'web', BUSINESS_DIRECTION_REQUESTS: 'dir'
+};
+const STARS = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
+// 読む（6時間とっておく）：日ごとの表示・電話・ルート・サイト、先月の検索語句、口コミ
+async function googleData(env, force) {
+  const hit = await kvGet(env, 'gData');
+  if (!force && hit && Date.now() - hit.t < 6 * 3600000) return hit;
+  const loc = await gLocation(env);
+  const today = jstStamp(Date.now()).slice(0, 10);
+  const from = addDays(today, -57), to = addDays(today, -2);
+  const dp = (k, d) => { const p = d.split('-').map(Number); return k + '.year=' + p[0] + '&' + k + '.month=' + p[1] + '&' + k + '.day=' + p[2]; };
+  const q = Object.keys(G_METRICS).map(m => 'dailyMetrics=' + m).join('&') + '&' + dp('dailyRange.start_date', from) + '&' + dp('dailyRange.end_date', to);
+  const perf = await gApi(env, 'businessprofileperformance.googleapis.com', '/v1/' + loc.location + ':fetchMultiDailyMetricsTimeSeries?' + q);
+  const days = {};
+  for (let d = from; d <= to; d = addDays(d, 1)) days[d] = { d: d, maps: 0, search: 0, calls: 0, web: 0, dir: 0 };
+  (perf.multiDailyMetricTimeSeries || []).forEach(s => (s.dailyMetricTimeSeries || []).forEach(ts => {
+    const key = G_METRICS[ts.dailyMetric];
+    if (!key) return;
+    ((ts.timeSeries || {}).datedValues || []).forEach(v => {
+      if (!v.date) return;
+      const d = v.date.year + '-' + pad(v.date.month) + '-' + pad(v.date.day);
+      if (days[d]) days[d][key] += Number(v.value) || 0;
+    });
+  }));
+  const list = Object.keys(days).sort().map(d => days[d]);
+  const sum = arr => arr.reduce((a, x) => ({ maps: a.maps + x.maps, search: a.search + x.search, calls: a.calls + x.calls, web: a.web + x.web, dir: a.dir + x.dir }), { maps: 0, search: 0, calls: 0, web: 0, dir: 0 });
+  const cur = sum(list.slice(-28)), prev = sum(list.slice(-56, -28));
+  // 検索された言葉（先月）。少ないものは「15未満」のように範囲で返ってくる
+  let words = [];
+  try {
+    const lm = addMonths(today.slice(0, 7), -1).split('-').map(Number);
+    const kq = 'monthlyRange.start_month.year=' + lm[0] + '&monthlyRange.start_month.month=' + lm[1] + '&monthlyRange.end_month.year=' + lm[0] + '&monthlyRange.end_month.month=' + lm[1] + '&pageSize=100';
+    const kw = await gApi(env, 'businessprofileperformance.googleapis.com', '/v1/' + loc.location + '/searchkeywords/impressions/monthly?' + kq);
+    words = (kw.searchKeywordsCounts || []).map(x => ({ k: clean(x.searchKeyword, 40), v: Number((x.insightsValue || {}).value) || 0, lt: (x.insightsValue || {}).threshold ? Number(x.insightsValue.threshold) || 0 : 0 }))
+      .sort((a, b) => (b.v || b.lt - 0.5) - (a.v || a.lt - 0.5)).slice(0, 15);
+  } catch (e) { console.error('検索語句', e && e.message); }
+  // 口コミ（古いAPI。使えないときは出さない）
+  let reviews = null, revErr = '';
+  try {
+    const r = await gApi(env, 'mybusiness.googleapis.com', '/v4/' + loc.account + '/' + loc.location + '/reviews?pageSize=20&orderBy=updateTime%20desc');
+    reviews = { avg: Number(r.averageRating) || 0, total: Number(r.totalReviewCount) || 0,
+      recent: (r.reviews || []).slice(0, 20).map(x => ({ stars: STARS[x.starRating] || 0, text: clean(x.comment || '', 400).replace(/\(Translated by Google\)[\s\S]*$/, '').trim(), date: jstStamp(Date.parse(x.createTime) || Date.now()).slice(0, 10), name: clean((x.reviewer || {}).displayName || '', 30), replied: !!x.reviewReply })) };
+  } catch (e) { revErr = e.message; }
+  const out = { t: Date.now(), title: loc.title, from: from, to: to, days: list, cur: cur, prev: prev, words: words, wordsMonth: Number(addMonths(today.slice(0, 7), -1).slice(5)), reviews: reviews, revErr: revErr };
+  await kvPut(env, 'gData', out);
+  return out;
+}
+async function adminGoogle(env, b) {
+  if (!gOn(env)) return { configured: false };
+  const g = await kvGet(env, 'google');
+  if (!g) return { configured: true, connected: false };
+  try { return { configured: true, connected: true, since: g.at, data: await googleData(env, b && b.force) }; }
+  catch (e) {
+    if (!e.userFacing) throw e;
+    return { configured: true, connected: e.code !== 'G_NONE', err: e.message };
+  }
+}
+async function adminGoogleOff(env) { await env.DB.prepare("DELETE FROM kv WHERE k IN ('google','gTok','gLoc','gData')").run(); return { ok: true }; }
+// Claude に渡す：Googleマップ・検索での見られ方（とってある分だけ。口コミの書いた人の名前は送らない）
+async function factsGoogle(env) {
+  if (!gOn(env)) return '';
+  let d = null;
+  try { if (await kvGet(env, 'google')) d = await googleData(env); } catch (e) { return ''; }
+  if (!d) return '';
+  const c = d.cur, p = d.prev;
+  const lines = ['【Googleマップ・Google検索（ビジネスプロフィール、直近28日とその前の28日）】',
+    'お店が表示された回数：マップ' + c.maps + '回（前' + p.maps + '）・検索' + c.search + '回（前' + p.search + '）',
+    '電話' + c.calls + '回（前' + p.calls + '）・ルート検索' + c.dir + '回（前' + p.dir + '）・ウェブサイト' + c.web + '回（前' + p.web + '）'];
+  if (d.words.length) lines.push(d.wordsMonth + '月に検索された言葉：' + d.words.slice(0, 10).map(w => w.k + (w.v ? ' ' + w.v + '回' : ' ' + w.lt + '回未満')).join('、'));
+  if (d.reviews) {
+    lines.push('口コミ：平均' + d.reviews.avg.toFixed(1) + '（' + d.reviews.total + '件）、返信していないもの' + d.reviews.recent.filter(r => !r.replied).length + '件');
+    d.reviews.recent.slice(0, 5).forEach(r => lines.push('・' + r.date + ' ★' + r.stars + ' ' + noPrivate(r.text, 120)));
+  }
+  return lines.join('\n');
 }

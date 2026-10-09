@@ -1,6 +1,6 @@
 // Claude・Square・マネーフォワードの代わりに応答するテスト用サーバー
 import http from 'node:http';
-export const calls = { ai: [], sq: [], mf: [] };
+export const calls = { ai: [], sq: [], mf: [], g: [] };
 export const journals = [];
 export const txs = [];
 export const opts = { aiDelay: 0, aiFail: 0 };
@@ -228,6 +228,43 @@ export function startSvcMock(port) {
         return send({ id: 'msg_1', type: 'message', role: 'assistant', model: body.model, stop_reason: 'end_turn',
           content: [{ type: 'thinking', thinking: '', signature: 'x' }, { type: 'text', text: JSON.stringify(aiAnswer(body)) }], usage: { input_tokens: 10, output_tokens: 10 } });
       }
+      // Google（ビジネスプロフィール）
+      if (u.pathname.startsWith('/g/')) {
+        calls.g.push(req.method + ' ' + u.pathname);
+        if (u.pathname === '/g/token') {
+          const f = new URLSearchParams(raw);
+          if (f.get('client_id') !== 'gid' || f.get('client_secret') !== 'gsec') return send({ error: 'invalid_client' }, 401);
+          if (f.get('grant_type') === 'authorization_code') return f.get('code') === 'good' ? send({ access_token: 'gat', refresh_token: 'grt', expires_in: 3600 }) : send({ error: 'invalid_grant' }, 400);
+          if (f.get('grant_type') === 'refresh_token') return f.get('refresh_token') === 'grt' ? send({ access_token: 'gat2', expires_in: 3600 }) : send({ error: 'invalid_grant' }, 400);
+          return send({ error: 'unsupported_grant_type' }, 400);
+        }
+        if (!/^Bearer gat2?$/.test(req.headers.authorization || '')) return send({ error: { code: 401, message: 'Request had invalid authentication credentials.' } }, 401);
+        const gp = u.pathname.slice(3);
+        if (gp === 'mybusinessaccountmanagement.googleapis.com/v1/accounts') return send({ accounts: [{ name: 'accounts/111', accountName: 'épii' }] });
+        if (gp === 'mybusinessbusinessinformation.googleapis.com/v1/accounts/111/locations') return send({ locations: [{ name: 'locations/222', title: '薬膳レストラン épii' }] });
+        if (gp === 'businessprofileperformance.googleapis.com/v1/locations/222:fetchMultiDailyMetricsTimeSeries') {
+          const q = u.searchParams;
+          const d0 = new Date(Date.UTC(+q.get('dailyRange.start_date.year'), +q.get('dailyRange.start_date.month') - 1, +q.get('dailyRange.start_date.day')));
+          const d1 = new Date(Date.UTC(+q.get('dailyRange.end_date.year'), +q.get('dailyRange.end_date.month') - 1, +q.get('dailyRange.end_date.day')));
+          const series = q.getAll('dailyMetrics').map(m => {
+            const vals = [];
+            for (let d = new Date(d0), i = 0; d <= d1; d.setUTCDate(d.getUTCDate() + 1), i++) {
+              const v = m === 'BUSINESS_IMPRESSIONS_MOBILE_MAPS' ? 20 + (i % 7) : m === 'BUSINESS_IMPRESSIONS_MOBILE_SEARCH' ? 8 : m === 'BUSINESS_DIRECTION_REQUESTS' ? (i % 3 ? 0 : 2) : m === 'CALL_CLICKS' ? (i % 10 ? 0 : 1) : 0;
+              vals.push(Object.assign({ date: { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() } }, v ? { value: String(v) } : {}));
+            }
+            return { dailyMetric: m, timeSeries: { datedValues: vals } };
+          });
+          return send({ multiDailyMetricTimeSeries: [{ dailyMetricTimeSeries: series }] });
+        }
+        if (gp === 'businessprofileperformance.googleapis.com/v1/locations/222/searchkeywords/impressions/monthly') return send({ searchKeywordsCounts: [{ searchKeyword: '阿倍野 ランチ', insightsValue: { value: '64' } }, { searchKeyword: '薬膳 大阪', insightsValue: { value: '120' } }, { searchKeyword: '薬膳 カレー 阿倍野', insightsValue: { threshold: '15' } }] });
+        if (gp === 'mybusiness.googleapis.com/v4/accounts/111/locations/222/reviews') {
+          if (opts.noReviews) return send({ error: { code: 403, message: 'Google My Business API has not been used in project 1 before or it is disabled.' } }, 403);
+          return send({ averageRating: 4.6, totalReviewCount: 23, reviews: [
+            { reviewId: 'r1', reviewer: { displayName: '山田 花子' }, starRating: 'FIVE', comment: '体にやさしいランチでした。連絡は090-1234-5678まで', createTime: new Date(Date.now() - 3 * 86400000).toISOString() },
+            { reviewId: 'r2', reviewer: { displayName: '佐藤' }, starRating: 'FOUR', comment: 'スープがおいしい', createTime: new Date(Date.now() - 20 * 86400000).toISOString(), reviewReply: { comment: 'ありがとうございます' } }] });
+        }
+        return send({ error: { code: 404, message: 'not found ' + gp } }, 404);
+      }
       // Square
       const pom = u.pathname.match(/^\/v2\/payouts\/([^/]+)(\/payout-entries)?$/);
       if (pom) {
@@ -358,5 +395,6 @@ export function startSvcMock(port) {
 export const SVC_ENV = port => ({
   ANTHROPIC_API_KEY: 'sk-test', ANTHROPIC_API_BASE: 'http://127.0.0.1:' + port,
   SQUARE_ACCESS_TOKEN: 'sq-test', SQUARE_API_BASE: 'http://127.0.0.1:' + port,
-  MF_API_KEY: 'mf-test', MF_AUTH_BASE: 'http://127.0.0.1:' + port, MF_API_BASE: 'http://127.0.0.1:' + port + '/api/v3'
+  MF_API_KEY: 'mf-test', MF_AUTH_BASE: 'http://127.0.0.1:' + port, MF_API_BASE: 'http://127.0.0.1:' + port + '/api/v3',
+  GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gsec', GOOGLE_API_BASE: 'http://127.0.0.1:' + port + '/g', GOOGLE_TOKEN_URL: 'http://127.0.0.1:' + port + '/g/token', GOOGLE_AUTH_BASE: 'http://127.0.0.1:' + port + '/g/auth'
 });
