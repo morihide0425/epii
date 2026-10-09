@@ -3275,7 +3275,8 @@ async function gApi(env, host, path) {
   if (!res.ok) {
     console.error('Google API', host, path.slice(0, 80), res.status, JSON.stringify(j).slice(0, 200));
     const msg = (j.error && j.error.message) || '';
-    fail(res.status === 429 ? 'Googleの利用回数の上限です。少し待ってからお試しください。'
+    // 申請の承認が反映される前は、上限が0なので最初の1回から429になる
+    fail(res.status === 429 ? (/per minute|quota/i.test(msg) ? 'Googleとはつながりましたが、データを読む上限がまだ0のようです（申請の承認が、このプロジェクトにまだ反映されていません）。反映されると、ここに出ます。' : 'Googleの利用回数の上限です。少し待ってからお試しください。')
       : /quota|has not been used|disabled/i.test(msg) ? 'GoogleのAPIがまだ使えません（' + clean(msg, 80) + '）'
       : 'Googleでエラーになりました（' + (clean(msg, 80) || 'エラーコード ' + res.status) + '）。', 502, 'G_ERROR');
   }
