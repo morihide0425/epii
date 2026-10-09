@@ -1536,7 +1536,7 @@ async function factsSettings(env, from, to) {
   lines.push('メニュー（予約ページに出ているもの）：');
   courses.filter(c => c.visible).forEach(c => {
     const wd = c.weekdays.length === 7 ? '毎日' : c.weekdays.map(i => WD[i]).join('') + '曜';
-    lines.push('・' + c.name + '：¥' + Number(c.price).toLocaleString() + (c.price_type === 'from' ? '〜' : '') + '、' + wd + 'の' + c.sessions.map(k => sessionLabel(s, k)).join('・') +
+    lines.push('・' + c.name + '：¥' + Number(c.price).toLocaleString() + (c.price_type === 'from' ? '〜' : '') + '、' + (periodText(c) ? periodText(c) + 'の期間限定、' + (c.date_to && c.date_to < from ? '（終わっている）、' : '') : '') + wd + 'の' + c.sessions.map(k => sessionLabel(s, k)).join('・') +
       '、予約の締切 ' + ruleText(cutoffRule(c, s)) + '、' + (Number(c.min_guests) > 1 ? c.min_guests + '名から、' : '') + (c.cap ? '同じ時間に' + c.cap + '名まで' : '席数まで'));
   });
   const hidden = courses.filter(c => !c.visible).map(c => c.name);

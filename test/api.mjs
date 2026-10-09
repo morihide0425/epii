@@ -109,6 +109,21 @@ try {
   const brunch = res.body.courses.find(c => c.name === '週末ブランチ');
   res = await req({ ...base, name: '佐藤 太郎', date: nextWd(add(T, 3), 3), time: '12:00', courseId: brunch.id }, auth2);
   check(res.body.message.includes('曜日'), 'course weekday ' + res.body.message);
+  // 期間限定：期間外の日は予約できない。終わったメニューは予約ページに出ない
+  const ev0 = nextWd(add(T, 8), 6);
+  res = await post('/admin/api/saveCourse', { name: 'イベントランチ', price: 4000, sessions: ['lunch'], weekdays: [0, 1, 2, 3, 4, 5, 6], min_guests: 1, date_from: ev0, date_to: add(ev0, 6) }, A);
+  const ev = res.body.courses.find(c => c.name === 'イベントランチ');
+  check(ev && ev.date_from === ev0 && ev.date_to === add(ev0, 6), 'period saved');
+  res = await post('/admin/api/saveCourse', Object.assign({}, ev, { date_from: add(ev0, 7), date_to: ev0 }), A);
+  check(res.status >= 400 && res.body.message.includes('終わり'), 'period order checked');
+  res = await req({ ...base, name: '佐藤 太郎', date: add(ev0, -1), time: '12:00', courseId: ev.id }, auth2);
+  check(res.body.message.includes('期間限定'), 'outside period refused ' + res.body.message);
+  res = await post('/api/login', { idToken: 'hana' });
+  check(res.body.data.courses.some(c => c.id === ev.id && c.date_from === ev0), 'period course public');
+  res = await post('/admin/api/saveCourse', Object.assign({}, ev, { date_from: add(T, -20), date_to: add(T, -1) }), A);
+  res = await post('/api/login', { idToken: 'hana' });
+  check(!res.body.data.courses.some(c => c.id === ev.id), 'ended course hidden');
+  await post('/admin/api/deleteCourse', { id: ev.id }, A);
   res = await post('/admin/api/moveCourse', { id: brunch.id, dir: -1 }, A); check(res.body.courses[3].id === brunch.id, 'move');
   res = await post('/admin/api/toggleCourse', { id: brunch.id, visible: false }, A); check(!res.body.courses[3].visible, 'toggle');
   // day rules

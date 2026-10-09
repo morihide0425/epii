@@ -2142,6 +2142,9 @@ function courseForm(c) {
     <label class="f" for="cDesc">内容（予約ページに表示）</label><textarea id="cDesc" rows="2" placeholder="例）前菜から甘味まで全7皿">${esc(c.description)}</textarea>
     <label class="f">選べる時間帯</label>
     <div>${KEYS().map(k => `<button class="chip ${c.sessions.indexOf(k) >= 0 ? 'on' : ''}" data-act="cSession" data-k="${k}">${SN(k)}</button>`).join('')}</div>
+    <label class="f">期間限定（イベントランチなど）</label>
+    <div class="row" style="flex-wrap:wrap;gap:6px"><input id="cFrom" type="date" value="${esc(c.date_from || '')}" style="width:auto;flex:1;min-width:130px" aria-label="始まり"><span>〜</span><input id="cTo" type="date" value="${esc(c.date_to || '')}" style="width:auto;flex:1;min-width:130px" aria-label="終わり"></div>
+    <div class="sub">${phr('空のままなら、いつでも予約できます。終わりの日が過ぎると、予約ページに出なくなります')}</div>
     <label class="f">公開する曜日</label>
     <div>${[0, 1, 2, 3, 4, 5, 6].map(d => `<button class="chip ${c.weekdays.indexOf(d) >= 0 ? 'on' : ''}" data-act="cDay" data-d="${d}" style="min-width:40px">${WD[d]}</button>`).join('')}</div>
     <div class="row" style="margin-top:8px"><label for="cMin" style="flex:1">最少人数</label><input id="cMin" type="number" inputmode="numeric" value="${esc(c.min_guests)}" style="width:76px;text-align:right"><span>名から</span></div>
@@ -2174,6 +2177,7 @@ function readCourseForm() {
   c.description = $('cDesc').value;
   c.min_guests = $('cMin').value;
   c.cap = $('cCap') ? $('cCap').value : c.cap;
+  if ($('cFrom')) { c.date_from = $('cFrom').value; c.date_to = $('cTo').value; }
   if ($('cDays')) { c.cutoff_days = $('cDays').value; c.cutoff_time = $('cTime').value; }
   if ($('cChgDays')) { c.chg_days = $('cChgDays').value; c.chg_time = $('cChgTime').value; }
   return c;
@@ -2231,6 +2235,7 @@ ACTIONS.menu = async (a, b) => {
       if (c.price === '' || Number(c.price) < 0) { $('cErr').textContent = '料金を入力してください。'; return; }
       if (!c.sessions.length) { $('cErr').textContent = '選べる時間帯を1つ以上選んでください。'; return; }
       if (!c.weekdays.length) { $('cErr').textContent = '公開する曜日を1つ以上選んでください。'; return; }
+      if (c.date_from && c.date_to && c.date_from > c.date_to) { $('cErr').textContent = '期間の終わりを、始まりより後の日にしてください。'; return; }
       const mo = M.busy(b);
       try {
         S.courses = (await api('saveCourse', c)).courses;
@@ -2847,7 +2852,7 @@ function menuHtml() {
         <button class="icon" data-act="up" data-id="${esc(c.id)}" aria-label="上へ" ${i === 0 ? 'style="visibility:hidden"' : ''}>${icon('i-up')}</button>
         <button class="icon" data-act="down" data-id="${esc(c.id)}" aria-label="下へ" ${i === list.length - 1 ? 'style="visibility:hidden"' : ''}>${icon('i-down')}</button>
       </div>
-      <div class="body"><b>${esc(c.name)}</b>
+      <div class="body"><b>${esc(c.name)}</b>${periodText(c) ? `<span class="tag ${c.date_to && c.date_to < today() ? 'gray' : 'amber'}" style="margin-left:6px">${c.date_to && c.date_to < today() ? '終了' : '期間限定'} ${periodText(c)}</span>` : ''}
         <div class="sub">${priceText(c)}・${c.sessions.map(k => esc(SN(k))).join('/')}・${c.min_guests}名から${c.cap ? '・同じ時間に' + c.cap + '名まで' : ''}</div>
         <div class="sub">${c.weekdays.length === 7 ? '毎日' : c.weekdays.map(d => WD[d]).join('')}・予約は${ruleText(cutoffRule(c, S.settings))}・変更は${ruleText(changeRule(c, S.settings))}</div></div>
       <button class="btn small" data-act="edit" data-id="${esc(c.id)}" style="padding:6px 10px">${icon('i-pen')}編集</button>

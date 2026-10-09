@@ -99,6 +99,7 @@
   .course.sel { border: 2px solid var(--red); background: var(--red-l); padding: 11px 13px; box-shadow: 0 0 0 3px var(--red-l); }
   .course:disabled { background: var(--bg); border-color: transparent; color: var(--sub); cursor: default; }
   .course .name { font-family: var(--mincho); font-size: 16px; }
+  .course .limited { display: inline-block; font-size: 11px; padding: 2px 9px; margin: 3px 0 2px; border-radius: 999px; background: var(--red-l); color: var(--red); }
   .course .why { color: var(--red); font-size: 12px; }
   .course .sub, .course .why { display: block; }
   label.f { display: block; font-size: 13px; color: var(--sub); margin: 12px 0 4px; }
@@ -629,12 +630,13 @@ function coursesHtml() {
     const rule = cutoffRule(c, st());
     const reason = why === 'deadline' ? '受付終了（' + ruleText(rule) + '）'
       : why === 'weekday' ? 'この曜日はご用意していません'
+      : why === 'period' ? periodText(c) + 'の期間限定です'
       : why === 'guests' ? c.min_guests + '名様から承ります'
       : why === 'seat' ? 'この時間は満席です'
       : why === 'cap' ? 'この時間はこのメニューのご予約がいっぱいです'
       : why ? 'ご予約いただけません' : '';
     return `<button class="course ${S.courseId === c.id ? 'sel' : ''}" data-act="course" data-id="${esc(c.id)}" ${why ? 'disabled' : ''}>
-      <div class="name">${esc(c.name)}</div>
+      <div class="name">${esc(c.name)}</div>${periodText(c) ? `<div class="limited">期間限定　${periodText(c)}</div>` : ''}
       <div>${priceText(c)}<span class="sub"> ／1名</span></div>
       ${c.description ? `<div class="sub">${esc(c.description)}</div>` : ''}
       <div class="sub">${P('ご予約は' + ruleText(rule), c.min_guests > 1 ? '・' + c.min_guests + '名様から' : '')}</div>

@@ -119,8 +119,19 @@ function deadlineOf(date, rule) {
   return addDays(date, -Number(rule.days)) + ' ' + rule.time;
 }
 
+// 期間限定のメニュー：「10/1〜10/31」「10/1から」「10/31まで」（決めていなければ空）
+function periodText(c) {
+  const md = d => Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10));
+  if (c.date_from && c.date_to) return md(c.date_from) + '〜' + md(c.date_to);
+  if (c.date_from) return md(c.date_from) + 'から';
+  if (c.date_to) return md(c.date_to) + 'まで';
+  return '';
+}
+function inPeriod(c, date) { return !(c.date_from && date < c.date_from) && !(c.date_to && date > c.date_to); }
+
 // このメニューを、この日時・人数で予約できるか（できない場合は理由を返す）
 function courseCheck(c, date, time, session, guests, now, s, ignoreDeadline) {
+  if (!inPeriod(c, date)) return 'period';
   if (c.sessions.indexOf(session) < 0) return 'session';
   if (c.weekdays.indexOf(weekday(date)) < 0) return 'weekday';
   if (guests < c.min_guests) return 'guests';

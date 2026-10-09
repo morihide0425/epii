@@ -63,7 +63,7 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS idx_res_hold ON reservations (hold_date, status)',
   'CREATE INDEX IF NOT EXISTS idx_res_user ON reservations (user_id, hold_date)',
   'CREATE INDEX IF NOT EXISTS idx_res_status ON reservations (status, created_at)',
-  'CREATE TABLE IF NOT EXISTS courses (id TEXT PRIMARY KEY, sort INTEGER NOT NULL, visible INTEGER NOT NULL, name TEXT NOT NULL, price INTEGER NOT NULL, price_type TEXT NOT NULL, description TEXT, sessions TEXT NOT NULL, weekdays TEXT NOT NULL, min_guests INTEGER NOT NULL, cutoff_mode TEXT NOT NULL, cutoff_days INTEGER NOT NULL, cutoff_time TEXT NOT NULL, chg_mode TEXT NOT NULL DEFAULT \'default\', chg_days INTEGER NOT NULL DEFAULT 2, chg_time TEXT NOT NULL DEFAULT \'23:59\', cap INTEGER)',
+  'CREATE TABLE IF NOT EXISTS courses (id TEXT PRIMARY KEY, sort INTEGER NOT NULL, visible INTEGER NOT NULL, name TEXT NOT NULL, price INTEGER NOT NULL, price_type TEXT NOT NULL, description TEXT, sessions TEXT NOT NULL, weekdays TEXT NOT NULL, min_guests INTEGER NOT NULL, cutoff_mode TEXT NOT NULL, cutoff_days INTEGER NOT NULL, cutoff_time TEXT NOT NULL, chg_mode TEXT NOT NULL DEFAULT \'default\', chg_days INTEGER NOT NULL DEFAULT 2, chg_time TEXT NOT NULL DEFAULT \'23:59\', cap INTEGER, date_from TEXT NOT NULL DEFAULT \'\', date_to TEXT NOT NULL DEFAULT \'\')',
   'CREATE TABLE IF NOT EXISTS day_rules (date TEXT PRIMARY KEY, kind TEXT NOT NULL, sessions TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS blocks (id TEXT PRIMARY KEY, date TEXT NOT NULL, type TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, seats INTEGER, memo TEXT, created_at TEXT NOT NULL)',
   'CREATE INDEX IF NOT EXISTS idx_blocks_date ON blocks (date)',
@@ -129,7 +129,7 @@ const SEED_COURSES = [
   ['季節の薬膳フレンチ', 9800, 'fixed', '前菜から甘味まで全7皿', 'dinner', 1, 'default', 2, '23:59', 'default', 2, '23:59'],
   ['シェフおまかせ', 14000, 'from', '全9皿・薬膳酒のペアリング付き', 'dinner', 2, 'default', 2, '23:59', 'default', 2, '23:59']
 ];
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 let schemaReady = false;
 
@@ -279,6 +279,12 @@ async function ensureSchema(env) {
   } catch (e) {
     version = 0;
   }
+  if (version > 0 && version < 11) {
+    // 期間限定のメニュー（何月何日〜何月何日）
+    for (const sql of ["ALTER TABLE courses ADD COLUMN date_from TEXT NOT NULL DEFAULT ''", "ALTER TABLE courses ADD COLUMN date_to TEXT NOT NULL DEFAULT ''"]) {
+      try { await env.DB.prepare(sql).run(); } catch (e) { /* すでにある */ }
+    }
+  }
   if (version > 0 && version < 10) {
     await env.DB.batch(MONEY_SCHEMA_SQL().map(sql => env.DB.prepare(sql)));
     try { await env.DB.prepare('ALTER TABLE receipts ADD COLUMN data TEXT').run(); } catch (e) { /* すでにある */ }
@@ -381,7 +387,8 @@ function parseCourse(r) {
     min_guests: r.min_guests, cutoff_mode: r.cutoff_mode, cutoff_days: r.cutoff_days, cutoff_time: r.cutoff_time,
     chg_mode: r.chg_mode || 'default', chg_days: r.chg_days === null || r.chg_days === undefined ? 2 : r.chg_days,
     chg_time: r.chg_time || '23:59',
-    cap: r.cap ? Number(r.cap) : null
+    cap: r.cap ? Number(r.cap) : null,
+    date_from: r.date_from || '', date_to: r.date_to || ''
   };
 }
 
@@ -489,7 +496,8 @@ async function customerData(env, userId) {
       seats: s.seats, maxGuests: s.maxGuests, aheadDays: s.aheadDays, openUntil: s.openUntil || '', cancelDays: s.cancelDays,
       replyHint: s.replyHint, cutoff: s.cutoff, changeCutoff: s.changeCutoff, weekly: s.weekly, sessions: s.sessions
     },
-    courses: w.courses.filter(c => c.visible).map(publicCourse),
+    // 期間が終わったメニューは出さない
+    courses: w.courses.filter(c => c.visible && !(c.date_to && c.date_to < now.slice(0, 10))).map(publicCourse),
     rules: w.rules,
     holds: w.holds.map(h => ({ id: h.id, date: h.date, time: h.time, session: h.session, guests: h.guests, course: h.course || '', stay: h.stay || null })),
     blocks: w.blocks.map(b => ({ id: b.id, date: b.date, type: b.type, start: b.start, end: b.end, seats: b.seats })),
@@ -510,7 +518,7 @@ function publicCourse(c) {
     id: c.id, name: c.name, price: c.price, price_type: c.price_type, description: c.description,
     sessions: c.sessions, weekdays: c.weekdays, min_guests: c.min_guests,
     cutoff_mode: c.cutoff_mode, cutoff_days: c.cutoff_days, cutoff_time: c.cutoff_time,
-    chg_mode: c.chg_mode, chg_days: c.chg_days, chg_time: c.chg_time, cap: c.cap
+    chg_mode: c.chg_mode, chg_days: c.chg_days, chg_time: c.chg_time, cap: c.cap, date_from: c.date_from, date_to: c.date_to
   };
 }
 
@@ -647,6 +655,7 @@ async function createRequest(env, user, d) {
 function reasonText(why, c, s) {
   if (why === 'session') return 'このメニューは選んだ時間帯にはご用意していません。';
   if (why === 'weekday') return 'このメニューは選んだ曜日にはご用意していません。';
+  if (why === 'period') return '「' + c.name + '」は' + periodText(c) + 'の期間限定です。';
   if (why === 'guests') return '「' + c.name + '」は' + c.min_guests + '名様から承ります。';
   if (why === 'past') return 'この時間はすでに過ぎています。';
   if (why === 'deadline') return '「' + c.name + '」のご予約は' + ruleText(cutoffRule(c, s)) + 'です。この日時の受付は終了しました。';
@@ -1366,6 +1375,7 @@ async function adminEdit(env, b) {
     const why = courseCheck(c, date, time, slot.session, guests, now, s, true);
     if (why === 'session') warnings.push('「' + c.name + '」は' + sessionLabel(s, slot.session) + 'では出していないメニューです。');
     if (why === 'weekday') warnings.push('「' + c.name + '」は' + WD[weekday(date)] + '曜日に出していないメニューです。');
+    if (why === 'period') warnings.push('「' + c.name + '」は' + periodText(c) + 'の期間限定のメニューです。');
     if (why === 'guests') warnings.push('「' + c.name + '」は' + c.min_guests + '名様からのメニューです。');
   }
   const idx = buildIndex(w.holds, w.blocks, s);
@@ -1869,17 +1879,21 @@ async function adminSaveCourse(env, c) {
   if (chgMode === 'custom' && !isTime(c.chg_time)) fail('変更の締切の時刻を「10:00」の形で入力してください。');
   const chgTime = isTime(c.chg_time) ? c.chg_time : '23:59';
   const cap = c.cap === '' || c.cap === null || c.cap === undefined || Number(c.cap) <= 0 ? null : Math.min(200, Math.round(Number(c.cap)));
+  // 期間限定（どちらか片方だけでもよい。空ならいつでも）
+  const dFrom = String(c.date_from || ''), dTo = String(c.date_to || '');
+  if ((dFrom && !isDate(dFrom)) || (dTo && !isDate(dTo))) fail('期間の日付を選び直してください。');
+  if (dFrom && dTo && dFrom > dTo) fail('期間の終わりを、始まりより後の日にしてください。');
 
   const dup = await env.DB.prepare('SELECT id FROM courses WHERE name = ? AND id != ?').bind(name, String(c.id || '')).first();
   if (dup) fail('同じ名前のメニューがすでにあります。');
   const cur = c.id ? await env.DB.prepare('SELECT id FROM courses WHERE id = ?').bind(String(c.id)).first() : null;
   if (cur) {
-    await env.DB.prepare('UPDATE courses SET name = ?, price = ?, price_type = ?, description = ?, sessions = ?, weekdays = ?, min_guests = ?, cutoff_mode = ?, cutoff_days = ?, cutoff_time = ?, chg_mode = ?, chg_days = ?, chg_time = ?, cap = ? WHERE id = ?')
-      .bind(name, price, priceType, clean(c.description, 120), sessions.join(','), weekdays.join(','), minGuests, mode, days, cutoffTime, chgMode, chgDays, chgTime, cap, cur.id).run();
+    await env.DB.prepare('UPDATE courses SET name = ?, price = ?, price_type = ?, description = ?, sessions = ?, weekdays = ?, min_guests = ?, cutoff_mode = ?, cutoff_days = ?, cutoff_time = ?, chg_mode = ?, chg_days = ?, chg_time = ?, cap = ?, date_from = ?, date_to = ? WHERE id = ?')
+      .bind(name, price, priceType, clean(c.description, 120), sessions.join(','), weekdays.join(','), minGuests, mode, days, cutoffTime, chgMode, chgDays, chgTime, cap, dFrom, dTo, cur.id).run();
   } else {
     const max = await env.DB.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM courses').first();
-    await env.DB.prepare('INSERT INTO courses (id, sort, visible, name, price, price_type, description, sessions, weekdays, min_guests, cutoff_mode, cutoff_days, cutoff_time, chg_mode, chg_days, chg_time, cap) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(newId('C'), max.m + 1, name, price, priceType, clean(c.description, 120), sessions.join(','), weekdays.join(','), minGuests, mode, days, cutoffTime, chgMode, chgDays, chgTime, cap).run();
+    await env.DB.prepare('INSERT INTO courses (id, sort, visible, name, price, price_type, description, sessions, weekdays, min_guests, cutoff_mode, cutoff_days, cutoff_time, chg_mode, chg_days, chg_time, cap, date_from, date_to) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(newId('C'), max.m + 1, name, price, priceType, clean(c.description, 120), sessions.join(','), weekdays.join(','), minGuests, mode, days, cutoffTime, chgMode, chgDays, chgTime, cap, dFrom, dTo).run();
   }
   return { courses: await allCourses(env) };
 }
