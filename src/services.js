@@ -3261,7 +3261,8 @@ async function gToken(env) {
     body: new URLSearchParams({ refresh_token: g.refresh, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, grant_type: 'refresh_token' }).toString() });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j.access_token) {
-    if (j.error === 'invalid_grant') { await env.DB.prepare("DELETE FROM kv WHERE k = 'google'").run(); fail('Googleとのつながりが切れました。「Googleとつなぐ」から、もう一度つないでください。', 400, 'G_NONE'); }
+    // 鍵が無効、またはクライアントを作り直した（別のプロジェクトに移した）ときは、つなぎ直してもらう
+    if (/^(invalid_grant|invalid_client|unauthorized_client)$/.test(j.error || '')) { await env.DB.prepare("DELETE FROM kv WHERE k = 'google'").run(); fail('Googleとのつながりが切れました。「Googleとつなぐ」から、もう一度つないでください。', 400, 'G_NONE'); }
     fail('Googleにつながりませんでした（' + (j.error || res.status) + '）。', 502, 'G_ERROR');
   }
   await kvPut(env, 'gTok', { t: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 - 60000 });
