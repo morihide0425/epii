@@ -141,6 +141,7 @@ function aiAnswer(body) {
   if (sys.includes('帳簿の気になる仕訳1件')) {
     const t = String(body.messages[0].content[0].text);
     if (t.includes('手数料の候補')) return { choice: 'fee', why: '近い日に440円少ない入金があります' };
+    if (t.includes('店主の説明：お店で着るエプロン')) return { choice: '消耗品費', why: 'お店で使う作業着なので消耗品費' };
     return { choice: '', why: '前後の通帳に同じ金額の入金がないか見てください' };
   }
   if (sys.includes('帳簿を確定申告の前に見直す')) {

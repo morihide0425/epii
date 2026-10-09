@@ -3031,11 +3031,12 @@ async function adminBookIgnore(env, b) {
 // 1件ずつ Claude に相談：選べる直し方の中から、根拠つきで1つすすめてもらう（根拠がなければ、何を確かめればよいか）
 const BOOK_ASK_SYSTEM = [
   'あなたは、小さな飲食店（薬膳レストラン）の帳簿を手伝っています。店主は会計に詳しくありません。',
-  '帳簿の気になる仕訳1件について、渡した「選べる直し方」から、いちばんありそうなものを1つ選びます。',
-  '- 根拠にしてよいもの：近い日の銀行の明細の金額・日付／同じ摘要の前の仕訳／摘要の言葉。',
+  '帳簿の気になる仕訳1件について、渡した「選べる直し方」から、いちばん合うものを1つ選びます。',
+  '- 店主の説明（何に使ったか・どんなときに買ったか）があれば、それをいちばんの根拠にして、勘定科目の一覧の説明と照らして最適な科目を選ぶ（例：お店で着る服・エプロン → 消耗品費、自分の普段着 → 事業主貸）。説明と今の科目が合っていれば keep。',
+  '- ほかに根拠にしてよいもの：近い日の銀行の明細の金額・日付／同じ摘要の前の仕訳／摘要の言葉。',
   '- 根拠がはっきりしないときは choice を空にし、why に、店主が何を確かめればよいかを書く（例「6/10の銀行の明細に10,480円の入金がないか見てください」）。',
   '- choice は、選べる直し方の記号（｜の左）をそのまま返す。',
-  '- why：50文字以内。日付と金額を入れて具体的に。推測を事実のように書かない。'
+  '- why：50文字以内。店主の説明があれば、なぜその科目かを説明に結びつけて書く。なければ日付と金額を入れて具体的に。推測を事実のように書かない。'
 ].join('\n');
 async function adminBookAsk(env, b) {
   const r = await adminBook(env, {});
@@ -3043,7 +3044,16 @@ async function adminBookAsk(env, b) {
   if (!x) fail('この知らせは、もうありません。画面を更新してください。');
   // 選べる直し方（直すところの種類ごと）。どれも「このままでいい」を選べる
   let opts = x.opts;
-  if (!opts && x.kind === 'same') { const m = await mfMaster(env); opts = txOptions(m, await expenseOptions(env, m)).map(a => ({ v: a.name, label: a.name + 'にする' })); }
+  const note = clean(b.note || '', 200);
+  // 科目を選ぶもの（中身が空・科目のまちがい・返金）は、科目の一覧から何でも選べる（説明つき）
+  let accts = '';
+  if (!opts && (x.kind === 'same' || x.kind === 'acct' || x.kind === 'vs')) {
+    const m = await mfMaster(env);
+    const list = txOptions(m, await expenseOptions(env, m));
+    accts = accountList(list);
+    opts = list.map(a => ({ v: a.name, label: a.name + 'にする' }));
+    if (x.from || x.detail) opts = opts.filter(o => o.v !== x.from);
+  }
   if (!opts && x.kind === 'pair') opts = [{ v: 'del', label: '消す' }];
   if (!opts && x.to) opts = [{ v: x.to, label: x.to + 'にする' }];
   opts = (opts || []).concat([{ v: 'keep', label: 'このままでいい' }]);
@@ -3057,13 +3067,15 @@ async function adminBookAsk(env, b) {
     x.kind === 'bank' ? '近い日の、まだ帳簿と結びついていない銀行の明細（同じ向き）：' + ((x.near || []).map(t => t.d + ' ¥' + t.v + ' ' + maskRemark(t.c)).join('／') || 'なし') : '',
     x.fee ? '手数料の候補：' + x.fee.d + 'に ¥' + x.fee.net + ' の入金（差 ¥' + x.fee.v + '）' : '',
     '同じ摘要の前の仕訳：' + (hist.join('／') || 'なし'),
+    accts ? '勘定科目の一覧（説明つき）：' + accts : '',
+    note ? '店主の説明：' + noPrivate(note, 200) : '',
     '選べる直し方：\n' + opts.map(o => o.v + '｜' + o.label).join('\n')
   ].filter(Boolean);
   const out = await claude(env, { system: BOOK_ASK_SYSTEM, effort: 'medium', maxTokens: 4000, timeout: 90000, content: [{ type: 'text', text: lines.join('\n') }],
     schema: strSchema({ choice: { type: 'string' }, why: { type: 'string' } }) });
   const hit = opts.find(o => o.v === out.choice);
   const asked = (await kvGet(env, 'bookAsk')) || {};
-  asked[x.key] = { to: hit ? hit.v : '', label: hit ? hit.label : '', why: plain(clean(out.why || '', 80)), at: jstStamp(Date.now()) };
+  asked[x.key] = { to: hit ? hit.v : '', label: hit ? hit.label : '', why: plain(clean(out.why || '', 80)), note: note, at: jstStamp(Date.now()) };
   await kvPut(env, 'bookAsk', asked);
   return await adminBook(env, {});
 }

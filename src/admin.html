@@ -373,6 +373,7 @@
   .tipbox { margin-top: 6px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.6; } .tipbox b { display: block; font-size: 13px; } .tipbox span { color: var(--sub); }
   .gline { width: 100%; height: 70px; display: block; margin-top: 6px; }
   .grev { padding: 10px 0; border-top: 1px solid var(--line); } .grev:first-of-type { border-top: 0; } .grev .stars { color: #C9962C; font-size: 13px; letter-spacing: 1px; } .grev .stars .off { color: var(--line2); } .gtext { font-size: 13px; line-height: 1.7; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .askbox { margin: 6px 0 2px; padding: 10px; border-radius: 10px; background: var(--bg); } .askbox textarea { font-size: 15px; } .askbox .acts { margin-top: 6px; } .askbox .sub { margin-top: 4px; font-size: 11px; }
   .golink { display: flex; width: 100%; align-items: center; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid var(--line2); border-radius: 12px; background: none; text-align: left; } .golink span { flex: 1; min-width: 0; } .golink b { display: block; font-size: 14px; } .golink small { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; } .golink em { font-style: normal; font-size: 12px; color: var(--blue); white-space: nowrap; }
   .askans { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0 2px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.6; } .askans svg.spark { flex-shrink: 0; margin-top: 3px; }
   .cdate { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub); margin-top: 2px; } .cdate input { -webkit-appearance: none; appearance: none; width: auto; min-width: 0; max-width: 60%; font-size: 14px; padding: 6px 8px; }
@@ -1547,10 +1548,13 @@ ACTIONS.today = async (a, b) => {
   if (a === 'bookUnhide') { await bookCall(b, 'bookIgnore', { reset: true }, '隠したものを、もう一度出しました'); return; }
   if (a === 'bookAi') { await bookAi(); return; }
   if (a === 'bookMore') { S.rcpt.bookAll = true; refresh(); return; }
+  if (a === 'bookAskOpen') { const R = S.rcpt; R.bookAskOpen = Object.assign({}, R.bookAskOpen, { [b.dataset.k]: true }); refresh(); const el = document.querySelector(`[data-bkq="${CSS.escape(b.dataset.k)}"]`); if (el) el.focus(); return; }
+  if (a === 'bookAskClose') { delete (S.rcpt.bookAskOpen || {})[b.dataset.k]; refresh(); return; }
   if (a === 'bookAsk') {
     const k = b.dataset.k, R = S.rcpt;
+    const note = ((R.bookAskText || {})[k] || '').trim();
     R.bookAsking = Object.assign({}, R.bookAsking, { [k]: true }); refresh();
-    try { R.book = await api('bookAsk', { key: k }); delete (R.bookSel || {})[k]; } catch (e) { fail(e); }
+    try { R.book = await api('bookAsk', { key: k, note: note }); delete (R.bookSel || {})[k]; delete (R.bookAskOpen || {})[k]; } catch (e) { fail(e); }
     delete R.bookAsking[k];
     if (R === S.rcpt) refresh();
     return;
@@ -3689,10 +3693,16 @@ function bookRow(x) {
   } else if (x.kind === 'pair') {
     acts = `<button class="btn small" data-act="bookFix" data-k="${k}">消す</button>`;
   } else if (x.fix) {
-    acts = `<button class="btn small primary" data-act="bookFix" data-k="${k}">${esc(x.to)}にする</button>`;
+    const alt = ask && ask.to && ask.to !== 'keep' && ask.to !== x.to ? ask.to : '';
+    acts = (alt ? `<button class="btn small primary" data-act="bookFix" data-k="${k}" data-to="${esc(alt)}">${esc(alt)}にする</button>` : '') + `<button class="btn small${alt ? '' : ' primary'}" data-act="bookFix" data-k="${k}">${esc(x.to)}にする</button>`;
   }
   const wait = (S.rcpt.bookAsking || {})[x.key];
-  const consult = x.fix && S.features.ai ? (wait ? aiThink('Claudeが調べています') : ask ? `<div class="askans">${spark()}<span>${ask.label ? '<b>' + esc(ask.label) + '</b>　' : ''}${phr(ask.why)}</span></div>` : `<button class="btn small ghost" data-act="bookAsk" data-k="${k}">${spark()}Claudeに相談</button>`) : '';
+  // Claudeに相談：何に使ったか・どんなときに買ったかを書いて聞く（書かなくても聞ける）
+  const open = (S.rcpt.bookAskOpen || {})[x.key];
+  const box = `<div class="askbox"><textarea rows="2" data-bkq="${k}" placeholder="${x.kind === 'bank' || x.kind === 'sqsale' ? '例）知人から店の手伝い代を受け取った' : '例）お店で着るエプロンを買った'}">${esc((S.rcpt.bookAskText || {})[x.key] || '')}</textarea><div class="acts"><button class="btn small primary" data-act="bookAsk" data-k="${k}">${spark()}Claudeに聞く</button><button class="btn small ghost" data-act="bookAskClose" data-k="${k}">やめる</button></div><div class="sub">${phr('何に使ったか、どんなときに買ったかを書くと、合う科目を答えます。空のままでも聞けます。')}</div></div>`;
+  const consult = !(x.fix && S.features.ai) ? '' : wait ? aiThink('Claudeが考えています') : open ? box
+    : (ask ? `<div class="askans">${spark()}<span>${ask.note ? '<span class="sub">あなたの説明：' + esc(ask.note) + '</span><br>' : ''}${ask.label ? '<b>' + esc(ask.label) + '</b>　' : ''}${phr(ask.why)}</span></div>` : '') +
+      `<button class="btn small ghost" data-act="bookAskOpen" data-k="${k}">${spark()}${ask ? '説明して聞き直す' : 'Claudeに相談'}</button>`;
   return `<div class="bk" data-key="bk:${k}">
     <div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.remark || '（摘要なし）')}</span><span class="am">${yen(x.amount)}</span></div>
     <div class="why">${x.ai ? spark() : ''}<b>${esc(x.title)}</b><span>${esc(x.detail)}</span></div>
@@ -4466,6 +4476,7 @@ $('view').addEventListener('click', async e => {
 });
 
 $('view').addEventListener('input', e => {
+  if (e.target.dataset.bkq && S.rcpt) { S.rcpt.bookAskText = Object.assign({}, S.rcpt.bookAskText, { [e.target.dataset.bkq]: e.target.value }); return; }
   if (e.target.dataset.adjamt && S.acctAdj && S.acctAdj[e.target.dataset.adjamt]) { S.acctAdj[e.target.dataset.adjamt].amt = e.target.value; adjCheck(e.target.dataset.adjamt); return; }
   if (S.tab === 'set' && e.target.id === 'goalAmt' && S.goal) {
     S.goal.form.amount = e.target.value;

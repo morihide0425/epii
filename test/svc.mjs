@@ -287,6 +287,10 @@ try {
   res = await post('/admin/api/bookAsk', { key: bkOf0(res, 'BK1').key }, A);
   const askT = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
   check(bkOf0(res, 'BK1').ask && askT.includes('仕入高｜仕入高にする') && askT.includes('keep｜このままでいい') && !askT.includes('近い日の'), 'consult for any fix ' + askT.slice(-200));
+  // 説明を書いて聞く：何に使ったかから、科目の一覧の中で合う科目を答える（電話番号は送らない）
+  res = await post('/admin/api/bookAsk', { key: bkOf0(res, 'BK1').key, note: 'お店で着るエプロンを買った。090-3333-4444' }, A);
+  const ntx = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
+  check(bkOf0(res, 'BK1').ask.to === '消耗品費' && bkOf0(res, 'BK1').ask.note.includes('エプロン') && ntx.includes('勘定科目の一覧（説明つき）') && !ntx.includes('3333-4444'), 'consult with an explanation ' + JSON.stringify(bkOf0(res, 'BK1').ask));
   // 手数料を引かれた入金に直す：普通預金5,560＋支払手数料440／売上高6,000
   res = await post('/admin/api/bookFix', { id: 'BK21', kind: 'bank', to: 'fee', fee: 440, date: b21.date, key: b21.key }, A);
   const j21 = journals.find(j => j.id === 'BK21');
