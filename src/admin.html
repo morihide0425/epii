@@ -4067,14 +4067,15 @@ async function txSave(b) {
 /* ---------- 分析：まとめ と、分野ごとの Claude の気づき ----------
  * まとめ＝お店全体でいちばん大事なこと。予約・Instagram・売上経費のタブには、それぞれの分野だけを見た気づき
  */
-const SEC_LABEL = { summary: 'お店全体', money: '売上・経費', booking: '予約', ig: 'Instagram' };
+const SEC_LABEL = { summary: 'お店全体', money: '売上・経費', booking: '予約', ig: 'Instagram', google: 'Google' };
 const SEC_NOTE = {
-  summary: '売上・経費・予約・Instagramをまとめて見て、いちばん大事なことを選んでいます。毎週月曜の朝に新しくして、お店のLINEにも送ります。',
+  summary: 'Googleマップ・Instagram・予約ページ・予約・売上・経費を、ひとつの流れとして見て、いちばん効くことを選んでいます。毎週月曜の朝に新しくして、お店のLINEにも送ります。',
+  google: 'Googleマップ・検索の数字と口コミを中心に、予約とのつながりも見ています。毎週月曜の朝に新しくします。',
   money: '売上（Square）と経費（マネーフォワード）だけを見ています。毎週月曜の朝に新しくします。',
   booking: '予約と予約ページの数字だけを見ています。毎週月曜の朝に新しくします。',
   ig: 'Instagramの数字だけを見ています。毎週月曜の朝に新しくします。'
 };
-const VIEW_SEC = { dash: 'summary', site: 'booking', ig: 'ig', money: 'money' };
+const VIEW_SEC = { dash: 'summary', site: 'booking', ig: 'ig', money: 'money', google: 'google' };
 /* ---------- 分析＞Google：Googleマップ・検索での見られ方と口コミ（ビジネスプロフィール） ---------- */
 async function loadGoogle(force, btn) {
   if (!S.features.google) return;
@@ -4082,6 +4083,7 @@ async function loadGoogle(force, btn) {
   try { S.google = await api('google', { force: !!force }); if (mo) await mo.ok(); }
   catch (e) { if (mo) mo.fail(); S.google = { configured: true, connected: true, err: e.message }; }
   renderSet();
+  if (S.anView === 'google') ensureSection('google');
 }
 function googleHtml() {
   const G = S.google;
@@ -4094,6 +4096,7 @@ function googleHtml() {
   const tile = (k, v, b) => { const x = ch(v, b); return `<div class="dtile"><span class="k">${k}</span><span class="v">${v}<small>回</small></span><span class="c ${x[1]}">${x[0] || '&nbsp;'}</span></div>`; };
   let h = `<div class="row" style="margin-bottom:8px"><span class="sub">${phr((D.title ? D.title + '　' : '') + '直近28日（' + jdShort(addDays(D.to, -27)) + '〜' + jdShort(D.to) + '）')}</span><button class="btn small" data-act="googleReload" style="margin-left:auto;flex-shrink:0">${icon('i-refresh')}最新にする</button></div>`;
   h += `<div class="dtiles">${tile('マップで表示', c.maps, p.maps)}${tile('検索で表示', c.search, p.search)}${tile('ルート検索', c.dir, p.dir)}${tile('電話', c.calls, p.calls)}${tile('ウェブサイト', c.web, p.web)}</div>`;
+  h += aiSectionHtml('google', 'Googleの気づきとやること');
   // 日ごとの表示回数（マップ＋検索）
   const vals = D.days.map(x => x.maps + x.search), mx = Math.max(1, ...vals);
   const pts = vals.map((v, i) => (i / Math.max(1, vals.length - 1) * 300).toFixed(1) + ',' + (56 - v / mx * 50).toFixed(1)).join(' ');
@@ -4103,8 +4106,8 @@ function googleHtml() {
   if (R) {
     const un = R.recent.filter(r => !r.replied).length;
     h += `<div class="card" data-key="greviews"><h2>口コミ <span class="cnt">★${R.avg.toFixed(1)}　${R.total}件</span></h2>${un ? `<div class="sub" style="margin-bottom:6px"><span class="tag amber">返信していない ${un}件</span></div>` : ''}${R.recent.slice(0, 6).map(r => `<div class="grev"><div class="row"><span class="stars" aria-label="星${r.stars}">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span><span class="sub" style="margin-left:auto">${jdShort(r.date)}${r.replied ? '' : '　返信なし'}</span></div>${r.text ? `<div class="gtext">${esc(r.text)}</div>` : ''}</div>`).join('')}</div>`;
-  } else if (D.revErr) h += `<div class="card"><h2>口コミ</h2><div class="sub">${phr('口コミは読めませんでした（' + D.revErr + '）')}</div></div>`;
-  if (S.features.ai) h += `<div class="sub" style="margin:0 4px 12px">${phr('この数字は、Claudeの「予約」と「まとめ」の気づきにも使います。')}</div>`;
+  } else if (D.revErr) h += `<div class="card"><h2>口コミ</h2><div class="sub">${phr(/My Business API|has not been used|disabled|使えません/.test(D.revErr) ? '口コミを見るには、Google Cloudで「Google My Business API」を有効にしてから「最新にする」を押してください。' : '口コミは読めませんでした（' + D.revErr + '）')}</div></div>`;
+  if (S.features.ai) h += `<div class="sub" style="margin:0 4px 12px">${phr('この数字は、Claudeの「まとめ」と「予約」の気づきにも使います。')}</div>`;
   h += `<div style="text-align:center;margin-bottom:12px"><button class="btn small ghost" data-act="googleOff">Googleとのつながりを切る</button></div>`;
   return h;
 }
@@ -4132,6 +4135,7 @@ async function loadSection(sec) {
 }
 // まだ一度も分析していない分野は、開いたときに Claude に読んでもらう
 function ensureSection(sec) {
+  if (sec === 'google' && !(S.google && S.google.data)) return;
   if (sec && S.features.ai && S.dash && !(S.ai && S.ai[sec]) && !S.aiWait[sec] && !S.aiErr[sec]) loadSection(sec);
 }
 function aiSectionHtml(sec, title) {
@@ -4150,7 +4154,7 @@ function aiSectionHtml(sec, title) {
 function chatHtml() {
   const c = S.chat;
   let h = `<div class="card" data-key="chat"><h2>${spark(c.wait)}Claudeと話す</h2>
-    <div class="sub" style="margin-bottom:4px">${phr('売上・経費・予約・Instagramの数字について、ふだんの言葉で聞けます。やりとりは、この画面を開いているあいだだけ覚えています。')}</div>`;
+    <div class="sub" style="margin-bottom:4px">${phr('売上・経費・予約・Instagram・Googleマップの数字について、ふだんの言葉で聞けます。やりとりは、この画面を開いているあいだだけ覚えています。')}</div>`;
   h += c.thread.map((t, i) => `<div class="ask-q">${esc(t.q)}</div><div class="ask-a" data-appear="chat:${i}:${hashStr(t.a)}">${t.a ? '<span class="who">' + spark() + 'Claude</span>' + phr(t.a) : aiThink('Claudeが数字を見ています', true)}${t.remember ? `<div class="remember"><span class="sub">${phr('覚えておくとよいこと：' + t.remember)}</span><button class="btn small" data-act="chatRemember" data-i="${i}" ${t.saved ? 'disabled' : ''}>${t.saved ? 'メモに足しました' : 'メモに足す'}</button></div>` : ''}</div>`).join('');
   h += `<div class="row" style="margin-top:8px"><input type="text" id="chatIn" value="${esc(c.input)}" placeholder="例）先月より売上が落ちたのはなぜ？"><button class="btn small primary" data-act="chatSend" style="flex-shrink:0">聞く</button></div>`;
   if (!c.thread.length) h += `<div class="acts">${['先月と比べてどう？', '空いている席を埋めるには？', '食材費を下げるには？'].map(x => `<button class="chip" data-act="chatPreset" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
@@ -4214,7 +4218,7 @@ function dashHtml() {
   h += aiSectionHtml('summary', '今週の大事なこと');
   if (S.features.ai) {
     h += chatHtml();
-    const secs = ['booking', 'ig'].concat(S.features.square || S.features.mf ? ['money'] : []);
+    const secs = ['booking', 'ig'].concat(S.features.square || S.features.mf ? ['money'] : [], S.google && S.google.data ? ['google'] : []);
     h += `<div class="card"><h2>${icon('i-leaf')}分野ごとの気づき ${aiTag('Claudeの分析')}</h2>${secs.map(sec => {
       const x = S.ai[sec];
       const it = x && x.items && x.items[0];

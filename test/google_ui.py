@@ -27,6 +27,8 @@ async def main():
         await a.wait_for_selector('[data-key=greviews]', timeout=20000); await a.wait_for_timeout(600)
         print('戻ったURL:', a.url, '／開いている:', await a.locator('.anseg button.on').inner_text())
         print('タイル:', ' / '.join([t.replace('\n',' ') for t in await a.locator('.dtile').all_inner_texts()]))
+        await a.wait_for_selector('[data-key="ai:google"] .ins', timeout=15000)
+        print('Googleの気づき:', (await a.locator('[data-key="ai:google"]').inner_text()).replace('\n',' / ')[:200])
         print('検索語句:', (await a.locator('[data-key=gwords]').inner_text()).replace('\n',' / '))
         print('口コミ:', (await a.locator('[data-key=greviews]').inner_text()).replace('\n',' / ')[:300])
         await a.screenshot(path=SHOTS+'/google_view.png', full_page=True)

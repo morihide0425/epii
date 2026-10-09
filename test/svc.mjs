@@ -476,6 +476,16 @@ try {
   res = await post('/admin/api/analysisAi', { section: 'booking' }, A);
   const gai = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
   check(gai.includes('【Googleマップ・Google検索') && gai.includes('薬膳 大阪 120回') && gai.includes('体にやさしい') && !gai.includes('山田 花子') && !gai.includes('1234-5678'), 'google facts for Claude ' + gai.slice(gai.indexOf('【Google'), gai.indexOf('【Google') + 300));
+  // Googleの気づき（Googleを中心に、予約とのつながりも）。まとめは全部の分野をひとつの流れとして見る
+  res = await post('/admin/api/analysisAi', { section: 'google' }, A);
+  const gsec = calls.ai[calls.ai.length - 1].body;
+  const gtx = String(gsec.messages[0].content[0].text);
+  check(res.body.section === 'google' && res.body.insight.items.length > 0 && gtx.includes('ビジネスプロフィール') && gtx.includes('【Googleマップ') && gtx.includes('【予約と予約ページ】'), 'google insight ' + gtx.slice(0, 120));
+  res = await post('/admin/api/analysisAi', { section: 'summary' }, A);
+  const stext = String(calls.ai[calls.ai.length - 1].body.messages[0].content[0].text);
+  check(stext.includes('1本の流れ') && stext.includes('【Googleマップ') && stext.includes('【予約と予約ページ】'), 'summary sees everything as one flow');
+  res = await post('/admin/api/dash', {}, A);
+  check(res.body.ai.google && res.body.ai.google.items.length, 'google insight kept for the dashboard');
   // 口コミが読めなくても、ほかは出す
   opts.noReviews = true;
   res = await post('/admin/api/google', { force: true }, A);
@@ -484,6 +494,8 @@ try {
   res = await post('/admin/api/googleOff', {}, A);
   res = await post('/admin/api/google', {}, A);
   check(!res.body.connected, 'google disconnected');
+  res = await post('/admin/api/analysisAi', { section: 'google' }, A);
+  check(res.status >= 400, 'no google insight when not connected');
 
   // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
   res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);

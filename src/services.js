@@ -1687,9 +1687,10 @@ async function factsIg(env) {
 }
 
 const SECTION = {
-  summary: { label: 'まとめ', focus: 'お店全体（売上・経費・予約・Instagram）を見て、今週いちばん大事なことを3つ選ぶ。できるだけ違う分野から選び、利益（売上－経費）につながる順に並べる（売上を増やす・経費を減らす・空席を埋める）。月の目標があれば、その進み具合も考える。' },
+  summary: { label: 'まとめ', focus: 'お店全体を「見つけてもらう（Googleマップ・検索、Instagram）→ 予約ページを見る → 予約する → 来店する → 売上 → 利益（売上－経費）」の1本の流れとして見る。分野ごとに数字を並べるのではなく、分野をまたいだ数字を組み合わせて、どこで詰まっているか・何が効いているかを示す（例：Googleの表示やルート検索は増えたのに予約ページの閲覧が増えていない→プロフィールの予約リンクやメニューの見せ方／Instagramのリーチは減ったが予約は増えた→Google経由が支えている／空いている曜日と検索された言葉を合わせた打ち手）。今週いちばん大事なこと（いちばん効く行動）を3つ、利益につながる順に。それぞれ根拠の数字を2つ以上の分野から挙げ、やることは具体的に（どこで・何を・いつ）。月の目標があれば、その進み具合も考える。' },
   money: { label: '売上・経費', focus: '売上と経費だけを見る（予約ページの閲覧やInstagramには触れない）。いちばん大事なのは利益（売上－経費）。売上の増減と理由（曜日・時間帯・予約の会計と予約なしの会計・1人あたり・1会計あたり）、経費（食材費の割合・大きい科目・増えた科目・主な支払先）を数字ではっきり示し、そのうえで「利益をどう増やすか」（売上を増やす・食材費の割合を下げる・毎月の経費を見直す・値付け）を少なくとも1つ、具体的な金額の目安つきで書く。月の目標があれば、届きそうかと、残りの営業日で何をするかにも触れる。ひとりで回せる範囲（席数・仕込みの量）を前提にする。3〜4つ。' },
   booking: { label: '予約', focus: '予約と予約ページだけを見る（売上の金額やInstagramには触れない）。混む・空く曜日と時間帯、キャンセル・来店なし、満席で断った需要、予約ページのどこで離れているか、受付の期間や締切。Googleマップ・検索のデータがあれば、表示回数・ルート検索・電話の動きと検索された言葉、返信していない口コミにも触れる。3〜4つ。' },
+  google: { label: 'Google', focus: 'Googleマップ・Google検索（ビジネスプロフィール）を中心に見る。表示回数の増減（マップ・検索）、表示からルート検索・電話・ウェブサイトへ動いた割合、検索された言葉（薬膳・ランチ・地名など、どんな言葉で探されているか、出ていない言葉）、口コミ（評価、返信していないもの、内容から分かる良い点・直す点）。予約ページへのGoogleからの流入や予約の数字があれば、つながりも見る。ビジネスプロフィールでできること（写真の追加、投稿、メニュー、営業時間、説明文に検索語句を入れる、口コミへの返信）を具体的に。3〜4つ。' },
   ig: { label: 'Instagram', focus: 'Instagramだけを見る。届いている人数の動き、どんな投稿・ストーリーが予約ページにつながったか、出す頻度や時間、空きの告知。3〜4つ。' }
 };
 const ANALYSIS_SYSTEM = [
@@ -1714,6 +1715,7 @@ const ANALYSIS_SCHEMA = strSchema({
 async function makeSection(env, sec, effort) {
   const head = await factsHead(env);
   const body = sec === 'money' ? await factsMoney(env) : sec === 'booking' ? [await factsBooking(env), await factsGoogle(env)].filter(Boolean).join('\n\n') : sec === 'ig' ? await factsIg(env)
+    : sec === 'google' ? [await factsGoogle(env), await factsBooking(env)].filter(Boolean).join('\n\n')
     : [await factsMoney(env), await factsBooking(env), await factsGoogle(env), await factsIg(env)].filter(Boolean).join('\n\n');
   const prev = await kvGet(env, 'ai:' + sec);
   const before = prev && prev.items && prev.items.length
@@ -1733,6 +1735,7 @@ async function makeSection(env, sec, effort) {
 }
 async function adminAnalysisAi(env, b) {
   const sec = SECTION[b.section] ? b.section : 'summary';
+  if (sec === 'google' && !(gOn(env) && await kvGet(env, 'google'))) fail('Googleとつながっていません。');
   return { section: sec, insight: await makeSection(env, sec) };
 }
 // 分析のまとめ：主な数字と、Claude の気づき（4つの分野ぶん）
@@ -1791,7 +1794,7 @@ const CHAT_SYSTEM = [
 async function chatFacts(env) {
   const saved = await kvGet(env, 'aiChatFacts');
   if (saved && Date.now() - saved.at < 1800000) return saved.text;
-  const parts = [await factsHead(env), await factsMoney(env), await factsBooking(env), await factsIg(env)];
+  const parts = [await factsHead(env), await factsMoney(env), await factsBooking(env), await factsGoogle(env), await factsIg(env)].filter(Boolean);
   const secs = [];
   for (const sec of Object.keys(SECTION)) {
     const x = await kvGet(env, 'ai:' + sec);
@@ -1869,7 +1872,8 @@ async function weeklyReport(env, force) {
   let todos = [];
   if (f.ai) {
     try {
-      const secs = await Promise.allSettled(['summary', 'money', 'booking', 'ig'].map(s => makeSection(env, s, 'high')));
+      const list = ['summary', 'money', 'booking', 'ig'].concat(gOn(env) && await kvGet(env, 'google') ? ['google'] : []);
+      const secs = await Promise.allSettled(list.map(s => makeSection(env, s, 'high')));
       if (secs[0].status === 'fulfilled') todos = secs[0].value.items.map(x => plain(x.todo)).filter(Boolean).slice(0, 3);
     } catch (e) { console.error('週のまとめ：分析', e.message); }
   }
