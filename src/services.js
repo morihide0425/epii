@@ -2528,7 +2528,7 @@ async function bookIssues(env, force) {
     j.b.forEach(br => {
       if (br[2] !== '未収金') return;
       ar -= br[3];
-      if (ar < 0) { add({ key: 'arneg:' + j.i, kind: 'info', id: j.i, date: j.d, amount: -ar, remark: bookRemark(j, 0), title: '入金が売上より多い', detail: '未収金がマイナス ' + (-ar).toLocaleString() + '円', why: 'この入金の前のカード売上が' + (-ar).toLocaleString() + '円分、登録されていないかも', fix: false }); ar = 0; }
+      if (ar < 0) { add({ key: 'arneg:' + j.i, kind: 'info', id: j.i, date: j.d, amount: -ar, remark: bookRemark(j, 0), title: '入金が売上より多い', detail: '未収金がマイナス ' + (-ar).toLocaleString() + '円', why: '入金が二重に登録されているか、カードの売上' + (-ar).toLocaleString() + '円分の登録漏れかも', fix: false }); ar = 0; }
       if (ar === 0) arSince = '';
     });
   });
@@ -2682,7 +2682,7 @@ async function bookBank(env, js, months) {
   });
   const sum = list => list.reduce((a, x) => a + (x.in ? x.v : -x.v), 0);
   // 銀行の明細が登録済みの分まで返ってこないとき（半分も合わない）は、照らし合わせない（まちがった知らせを出さない）
-  if (book.length >= 4 && only.length > book.length / 2) return { unreliable: true, bankNet: 0, bookNet: sum(book), bookOnly: [], notYet: [], notYetAll: [] };
+  if (book.length >= 4 && only.length > book.length / 2) return { unreliable: true, bankNet: 0, bookNet: sum(book), bookOnly: [], notYet: [], notYetAll: [], po: all.filter(t => /入金\s*po_/.test(String(t.content || ''))).map(t => ({ d: t.date, v: Number(t.value) || 0 })) };
   const hid = await txHidden(env);
   const notYet = bank.filter(t => !t.used && (!t.st || t.st === 'none') && !hid[t.id]);
   return {
@@ -2695,7 +2695,8 @@ async function bookBank(env, js, months) {
       return { id: b.j.i, date: b.d, amount: b.v, in: b.in, remark: b.r, twin: !!twin, other: other, fee: b.fee || null, near: near };
     }),
     notYet: notYet.filter(t => t.in).map(t => ({ date: t.d, amount: t.v, content: t.c })),
-    notYetAll: notYet.map(t => ({ date: t.d, amount: t.v, in: t.in }))
+    notYetAll: notYet.map(t => ({ date: t.d, amount: t.v, in: t.in })),
+    po: all.filter(t => /入金\s*po_/.test(String(t.content || ''))).map(t => ({ d: t.date, v: Number(t.value) || 0 }))
   };
 }
 // 口座の動きで通帳にないもの：どうしたかの選び方（入金と出金で違う）
@@ -2727,8 +2728,11 @@ async function adminBook(env, b) {
   const issues = r.issues.filter(x => x.kind !== 'info');
   const notes = r.issues.filter(x => x.kind === 'info' && NOTE_TODO[x.key.split(':')[0]]).map(x => Object.assign({}, x, { todo: NOTE_TODO[x.key.split(':')[0]] }));
   const good = bank && !bank.unreliable;
+  // Squareの入金：同じ入金が2回（Squareの明細と銀行の明細の両方から）／入金を売上にしている（売上が二重）
+  const sq = bookSqDeposit(r.js, bank ? bank.po : []);
+  sq.issues.forEach(x => { if (!ign[x.key]) issues.push(x); });
   if (good) {
-    bank.bookOnly.forEach(x => { const k = 'bk:' + x.id + ':' + x.amount; if (!ign[k]) issues.push(x.twin
+    bank.bookOnly.forEach(x => { const k = 'bk:' + x.id + ':' + x.amount; if (!ign[k] && !sq.ids[x.id]) issues.push(x.twin
       ? { key: k, kind: 'pair', id: x.id, date: x.date, amount: x.amount, remark: x.remark, title: '二重に登録されているかも', detail: '同じ日・同じ金額の口座の仕訳が2つ', why: '銀行の明細には1回分しかありません', fix: true, dupBank: true }
       : { key: k, kind: 'bank', id: x.id, date: x.date, amount: x.amount, remark: x.remark, in: x.in, title: '銀行の明細にない' + (x.in ? '入金' : '出金'), detail: x.other.join('・'),
         why: x.fee ? jdShort(x.fee.d) + 'に' + x.fee.net.toLocaleString() + '円の入金があります（差' + x.fee.v.toLocaleString() + '円は振込手数料かも）' : '同じ金額の銀行の' + (x.in ? '入金' : '出金') + 'が前後1か月にありません。どうしたか選んでください',
@@ -2738,8 +2742,57 @@ async function adminBook(env, b) {
   const close = await bookClose(env, r, bank && good ? bank : null, sales);
   const n = issues.length;
   await kvPut(env, 'bookCount', { n: n, at: Date.now() });
-  return { connected: true, issues: issues, notes: notes, sales: sales, close: close, bankOk: !!good,
+  return { connected: true, issues: issues, notes: notes, sales: sales, close: close, bankOk: !!good, sqFlow: await sqFlow(env, r, sq.issues.length),
     balanced: r.balanced, total: r.total, from: r.months[0], aiAt: ((await kvGet(env, 'bookAi')) || {}).at || '', hidden: Object.keys(ign).length };
+}
+// Squareの売上と入金：売上は会計ごとに「未収金／売上高」で1回だけ。入金は「普通預金＋支払手数料／未収金」でお金が移るだけ。
+// 二重になるのは、①同じ入金を Squareの明細と銀行の明細の両方から登録したとき、②銀行の入金を「売上高」で登録したとき
+function bookSqDeposit(js, po) {
+  const dep = [];
+  js.forEach(j => {
+    let inV = 0, fromAr = 0, sales = 0, fee = false;
+    j.b.forEach(br => { if (br[0] === '普通預金') inV += br[1]; if (br[2] === '未収金') fromAr += br[3]; if (br[0] === '普通預金' && br[2] === '売上高') sales += br[3]; if (br[0] === '支払手数料') fee = true; });
+    if (!inV || !(fromAr || sales)) return;
+    const text = j.b.map(br => br[4]).join(' ') + ' ' + j.m;
+    dep.push({ j: j, d: j.d, v: inV, ar: fromAr > 0, sales: sales > 0 && !fromAr, fee: fee, po: /po_/.test(text), pid: (text.match(/po_[\w-]+/) || [''])[0], word: /ｽｸｴｱ|スクエア|SQUARE|po_/i.test(text), r: bookRemark(j, 0) });
+  });
+  const near = (a, b) => Math.abs(diffDays(a, b)) <= 4;
+  const issues = [], ids = {};
+  // ① 同じ金額・前後4日の入金が2つ以上（どちらも未収金から、または片方が売上）。手数料の行やSquareの入金番号があるほうを残す
+  dep.forEach(x => {
+    if (x.done) return;
+    // 入金番号がちがえば、同じ金額でも別の入金
+    const g = dep.filter(o => !o.done && o.v === x.v && near(o.d, x.d) && (o.ar || o.word) && (x.ar || x.word) && !(o.pid && x.pid && o.pid !== x.pid));
+    if (g.length < 2 || !g.some(o => o.ar)) return;
+    g.sort((a, b) => (b.ar * 4 + b.fee * 2 + b.po) - (a.ar * 4 + a.fee * 2 + a.po));
+    const keep = g[0];
+    g.forEach(o => { o.done = true; ids[o.j.i] = true; });
+    g.slice(1).forEach(o => issues.push({ key: 'sqdup:' + o.j.i, kind: 'pair', id: o.j.i, date: o.d, amount: o.v, remark: o.r, title: 'Squareの入金が二重', detail: '同じ入金が' + jdShort(keep.d) + 'にも入っています',
+      why: 'Squareの明細と銀行の明細の両方から登録すると、同じお金が2回入ります。' + (keep.fee ? '手数料の行がある' : '') + jdShort(keep.d) + 'の方を残して、こちらを消します', fix: true, sqDup: true }));
+  });
+  // ② 銀行の入金を売上にしている：Squareの売上は会計ごとに入っているので、売上が二重になる
+  dep.filter(x => !x.done && x.sales && (x.word || po.some(p => p.v === x.v && near(p.d, x.d)))).forEach(x => {
+    ids[x.j.i] = true;
+    issues.push({ key: 'sqsale:' + x.j.i, kind: 'sqsale', id: x.j.i, date: x.d, amount: x.v, remark: x.r, title: 'Squareの入金を売上にしている', detail: '普通預金／売上高',
+      why: 'Squareの売上は会計ごとに入っているので、入金も売上にすると売上が二重になります', fix: true,
+      opts: [{ v: '未収金', label: '未収金にする（売上の二重をなくす）' }, { v: 'del', label: '消す（同じ入金が別に入っているとき）' }] });
+  });
+  return { issues: issues, ids: ids };
+}
+// 月ごとの流れ：カードの売上（未収金に入る）→ 入金（未収金から銀行へ）→ 月末の入金待ち。マイナスなら入金が二重、増え続けるなら入金の登録漏れ
+async function sqFlow(env, r, dupN) {
+  let open = 0;
+  try { const a = await openAuto(env, r.months[0]); if (a && a.ar !== undefined && a.ar !== null) open = a.ar; } catch (e) { /* 0から */ }
+  let bal = open;
+  const out = r.months.map(ym => {
+    let sales = 0, dep = 0, fee = 0;
+    r.js.filter(j => j.d.slice(0, 7) === ym).forEach(j => j.b.forEach(br => {
+      if (br[0] === '未収金') { sales += br[1]; bal += br[1]; }
+      if (br[2] === '未収金') { bal -= br[3]; if (br[0] === '支払手数料') fee += br[3]; else dep += br[3]; }
+    }));
+    return { ym: ym, sales: sales, dep: dep, fee: fee, left: bal };
+  }).filter(m => m.sales || m.dep || m.fee);
+  return { months: out, dupN: dupN };
 }
 // 締めの確認：選んだ日（月末・6月30日・12月31日など）の時点で、現金と口座の残高が、数えた現金・通帳と合っているか
 function bookBal(js, acct, open, upto) {
@@ -2783,7 +2836,7 @@ async function bookClose(env, r, bank, sales) {
   }
   bk.candSum = bk.cands.reduce((a, x) => a + x.v, 0);
   // 未収金（Squareの入金待ち）
-  const ar = bookBal(r.js, '未収金', 0, date).v;
+  const ar = bookBal(r.js, '未収金', auto && has(auto.ar) ? auto.ar : 0, date).v;
   const js = await bookJournals(env, [date.slice(0, 7)], false);
   const done = k => js.some(j => j.d === date && j.b.some(br => k.test(br[4] || '')));
   return { date: date, from: from, presets: presets, monthEnd: monthLast(date.slice(0, 7)) === date, yearEnd: /-12-31$/.test(date), cash: cash, bank: bk, bankOk: !!bank, ar: ar,
@@ -2798,7 +2851,7 @@ async function openAuto(env, firstMonth) {
   try {
     const tb = await mfApi(env, 'GET', '/reports/trial_balance_bs', { start_date: firstMonth + '-01', end_date: monthLast(firstMonth) });
     const c = tbOpening(tb, '現金', firstMonth + '-01'), k = tbOpening(tb, '普通預金', firstMonth + '-01');
-    if (c !== null || k !== null) out = { cash: c, bank: k, src: 'mf' };
+    if (c !== null || k !== null) out = { cash: c, bank: k, ar: tbOpening(tb, '未収金', firstMonth + '-01'), src: 'mf' };
   } catch (e) { console.error('残高試算表', e && e.message); }
   if (!out) {
     const m = await mfMaster(env);
@@ -2806,7 +2859,7 @@ async function openAuto(env, firstMonth) {
     if (first && first < firstMonth && monthsBetween(first, addMonths(firstMonth, -1)).length <= 36) {
       const js = await bookJournals(env, monthsBetween(first, addMonths(firstMonth, -1)), false);
       const end = addDays(firstMonth + '-01', -1);
-      out = { cash: bookBal(js, '現金', 0, end).v, bank: bookBal(js, '普通預金', 0, end).v, src: 'books' };
+      out = { cash: bookBal(js, '現金', 0, end).v, bank: bookBal(js, '普通預金', 0, end).v, ar: bookBal(js, '未収金', 0, end).v, src: 'books' };
     }
   }
   const rec = Object.assign({ month: firstMonth, t: Date.now(), src: '' }, out || {});
@@ -2892,7 +2945,20 @@ async function adminBookFix(env, b) {
   const m = await mfMaster(env);
   const byName = n => m.accounts.find(a => a.name === n);
   const pickSd = sd => { if (!sd) return sd; const o = { account_id: sd.account_id, value: (Number(sd.value) || 0) + (Number(sd.tax_value) || 0) }; if (sd.sub_account_id) o.sub_account_id = sd.sub_account_id; if (sd.tax_id) o.tax_id = sd.tax_id; if (sd.invoice_kind && sd.invoice_kind !== 'INVOICE_KIND_NOT_TARGET') o.invoice_kind = sd.invoice_kind; return o; };
-  if (b.kind === 'pair' || (b.kind === 'bank' && b.to === 'del')) {
+  if (b.kind === 'sqsale' && b.to !== 'del') {
+    // 銀行の入金を売上にしているもの：貸方の売上高を未収金に
+    const g = await mfApi(env, 'GET', '/journals/' + encodeURIComponent(id));
+    const jr = g.journal || {};
+    const sales = byName('売上高'), ar = byName('未収金');
+    if (!jr.branches || !sales || !ar) fail('仕訳が見つかりません。マネーフォワードで変わったかもしれません。画面を更新してください。');
+    const none = pickTax(m.taxes, 'none');
+    const branches = jr.branches.map(br => {
+      const nb = { debitor: pickSd(br.debitor), creditor: pickSd(br.creditor), remark: br.remark || '' };
+      if (nb.creditor && nb.creditor.account_id === sales.id) { nb.creditor = Object.assign({}, nb.creditor, { account_id: ar.id }); delete nb.creditor.sub_account_id; if (none) nb.creditor.tax_id = none; else delete nb.creditor.tax_id; }
+      return nb;
+    });
+    await mfApi(env, 'PUT', '/journals/' + encodeURIComponent(id), null, { journal: { transaction_date: jr.transaction_date, journal_type: jr.journal_type || 'journal_entry', memo: jr.memo || '', branches: branches } });
+  } else if (b.kind === 'pair' || ((b.kind === 'bank' || b.kind === 'sqsale') && b.to === 'del')) {
     await mfApi(env, 'DELETE', '/journals/' + encodeURIComponent(id));
   } else if (b.kind === 'bank') {
     // 通帳にない口座の動き：普通預金を、選んだ科目に置きかえる（手数料を引かれた入金なら、支払手数料の行を足す）

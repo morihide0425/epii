@@ -98,6 +98,16 @@ function seedJournals() {
   journals.push({ id: 'BK22', transaction_date: addDays(today, -20), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 3000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 3000, tax_value: 0 }, remark: 'No.4 il Centrino' }] });
   journals.push({ id: 'BK23', transaction_date: addDays(today, -19), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 2000, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 2000, tax_value: 0 }, remark: 'No.5 il Centrino' }] });
   txs.push({ id: 'TXS4', date: addDays(today, -12), value: 5000, side: 'INCOME', content: 'ﾌﾘｺﾐ ｲﾙｾﾝﾄﾘﾉ', journalizing_status: 'ignored' });
+  // カードの売上（未収金）。このうち入金された分を、2回登録してしまった（Squareの明細から：手数料の行あり／銀行の明細から）。銀行の明細は1回分
+  journals.push({ id: 'SQC1', transaction_date: addDays(today, -8), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D14', value: 17940, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 17940, tax_value: 0 }, remark: 'カード売上' }] });
+  journals.push({ id: 'SQD1', transaction_date: addDays(today, -6), journal_type: 'journal_entry', memo: '', branches: [
+    { debitor: { account_id: 'A%3D9', value: 8820, tax_value: 0 }, creditor: { account_id: 'A%3D14', value: 8820, tax_value: 0 }, remark: addDays(today, -6).replace(/-/g, '/') + ' 09:30 入金 po_dup1' },
+    { debitor: { account_id: 'A%3D17', value: 300, tax_value: 0 }, creditor: { account_id: 'A%3D14', value: 300, tax_value: 0 }, remark: '手数料' }] });
+  journals.push({ id: 'SQD2', transaction_date: addDays(today, -5), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 8820, tax_value: 0 }, creditor: { account_id: 'A%3D14', value: 8820, tax_value: 0 }, remark: 'ｽｸｴｱ' }] });
+  txs.push({ id: 'TXS5', date: addDays(today, -5), value: 8820, side: 'INCOME', content: 'ｽｸｴｱ', journalizing_status: 'registered' });
+  // 銀行の入金（Square）を売上高で登録
+  journals.push({ id: 'SQS1', transaction_date: addDays(today, -15), journal_type: 'journal_entry', memo: '', branches: [{ debitor: { account_id: 'A%3D9', value: 7700, tax_value: 0 }, creditor: { account_id: 'A%3D7', value: 7700, tax_value: 0 }, remark: 'ｽｸｴｱ ﾌﾘｺﾐ' }] });
+  txs.push({ id: 'TXS6', date: addDays(today, -15), value: 7700, side: 'INCOME', content: 'ｽｸｴｱ ﾌﾘｺﾐ', journalizing_status: 'registered' });
   // 口座の仕訳が二重（銀行の明細は1回分）
   jb('BK16', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);
   jb('BK17', today, [['A%3D2', 2200, 'A%3D9', 'ﾃｽﾄ ﾁｭｳﾌｸ']]);

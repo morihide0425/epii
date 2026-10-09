@@ -262,6 +262,18 @@ try {
   // 口座：帳簿の動きと銀行の明細を照らし合わせる（二重・通帳にない動き）
   const dupB = res.body.issues.find(x => x.dupBank);
   check(dupB && (dupB.id === 'BK16' || dupB.id === 'BK17') && res.body.bankOk, 'bank reconciliation');
+  // Squareの入金：同じ入金を2回（Squareの明細と銀行の明細の両方から）→ 手数料の行がある方を残して、もう一方を消す
+  const sd = res.body.issues.find(x => x.key === 'sqdup:SQD2');
+  check(sd && sd.kind === 'pair' && sd.title === 'Squareの入金が二重' && !res.body.issues.some(x => x.id === 'SQD1'), 'square payout entered twice ' + JSON.stringify(res.body.issues.filter(x => /^SQ/.test(x.id))));
+  // 銀行の入金を売上にしている → 売上が二重なので未収金に
+  const ss = res.body.issues.find(x => x.key === 'sqsale:SQS1');
+  check(ss && ss.kind === 'sqsale' && ss.opts[0].v === '未収金' && !res.body.issues.some(x => x.key === 'bk:SQS1:7700'), 'deposit booked as sales ' + JSON.stringify(ss));
+  check(res.body.sqFlow.dupN === 2 && res.body.sqFlow.months.some(m => m.sales >= 17940 && m.dep > 0 && m.fee === 300), 'square flow ' + JSON.stringify(res.body.sqFlow));
+  res = await post('/admin/api/bookFix', { id: 'SQS1', kind: 'sqsale', to: '未収金', date: ss.date, key: ss.key }, A);
+  check(journals.find(j => j.id === 'SQS1').branches[0].creditor.account_id === 'A%3D14' && !bkOf0(res, 'SQS1'), 'deposit no longer sales');
+  res = await post('/admin/api/bookFix', { id: 'SQD2', kind: 'pair', date: sd.date, key: sd.key }, A);
+  check(!journals.find(j => j.id === 'SQD2') && journals.find(j => j.id === 'SQD1') && !res.body.issues.some(x => /^sqdup|^sqsale/.test(x.key)) && res.body.sqFlow.dupN === 0, 'double payout removed');
+  res = await post('/admin/api/book', {}, A);
   const b4 = bkOf('BK4');
   check(b4 && b4.kind === 'bank' && b4.title === '銀行の明細にない出金' && b4.opts.map(o => o.v).join() === '現金,事業主借,del', 'bank-only item with choices ' + JSON.stringify(b4));
   check(!res.body.issues.some(x => ['BK19', 'BK20', 'BK22', 'BK23'].includes(x.id)), 'split deposit, late payment and combined deposit are not flagged');

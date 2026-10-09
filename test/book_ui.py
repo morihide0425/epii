@@ -40,6 +40,10 @@ async def main():
         await fee.screenshot(path=SHOTS+'/book_bank.png')
         await fee.locator('[data-act=bookFix]').click(); await a.wait_for_timeout(1500)
         print('直したあと:', await card.locator('.bk', has_text='No.3 il Centrino').count())
+        print('Squareの二重:', [(await x.inner_text()).replace('\n',' / ')[:160] for x in await card.locator('.bk', has_text='Square').all()])
+        ss=card.locator('.bk', has_text='Squareの入金を売上にしている')
+        await ss.screenshot(path=SHOTS+'/book_sqsale.png')
+        print('売上にしているものの選び方:', await ss.locator('select option').all_inner_texts())
         out=card.locator('.bk', has_text='SUBLINE')
         print('通帳にない出金の選び方:', await out.locator('select option').all_inner_texts())
         first=card.locator('.bk', has_text='八百鮮')
@@ -77,6 +81,9 @@ async def main():
         await cl.locator('[data-key="adj:cash"]').screenshot(path=SHOTS+'/acct_adj.png')
         await go.click(); await a.wait_for_timeout(2000)
         print('合わせたあと:', (await cl.locator('[data-key="cl:cash"]').inner_text()).replace('\n',' / '), '／確認:', dialogs[-1].replace('\n',' '))
+        sf=a.locator('[data-key=sqflow]')
+        print('Squareの売上と入金:', (await sf.inner_text()).replace('\n',' / ')[:400])
+        await sf.screenshot(path=SHOTS+'/acct_sqflow.png')
         sc=a.locator('[data-key=salescheck]')
         btn=sc.locator('[data-act=acctDays]').first
         if await btn.count():

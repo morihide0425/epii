@@ -3663,7 +3663,7 @@ function bookRow(x) {
   if (x.kind === 'same') {
     const list = bookAccounts();
     acts = `<select data-bk="${k}" aria-label="科目">${x.to ? '' : '<option value="">科目を選ぶ</option>'}${list.map(a => `<option value="${esc(a.name)}" ${a.name === ((S.rcpt.bookSel || {})[x.key] || (ask && ask.to && ask.to !== 'keep' ? ask.to : '') || x.to) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select><button class="btn small primary" data-act="bookFix" data-k="${k}">直す</button>`;
-  } else if (x.kind === 'bank') {
+  } else if (x.kind === 'bank' || x.kind === 'sqsale') {
     const sel = (S.rcpt.bookSel || {})[x.key] || (ask && ask.to !== 'keep' && ask.to) || '';
     acts = `<select class="wide" data-bk="${k}" aria-label="どうしたか">${sel ? '' : '<option value="">どうしたか選ぶ</option>'}${x.opts.map(o => `<option value="${esc(o.v)}" ${o.v === sel ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select><button class="btn small primary" data-act="bookFix" data-k="${k}">直す</button>`;
   } else if (x.kind === 'ap') {
@@ -3718,7 +3718,7 @@ function acctHtml() {
   if (!B) return `<div class="card">${aiThink('マネーフォワードの帳簿を読んでいます')}</div>`;
   if (B.err) return `<div class="card"><div class="warn">${phr(B.err)}</div></div>`;
   if (B.connected === false) return `<div class="card"><div class="sub">マネーフォワードとつながっていません。</div></div>`;
-  return closeHtml(B) + salesCheckHtml(B) + notesHtml(B);
+  return closeHtml(B) + sqFlowHtml(B) + salesCheckHtml(B) + notesHtml(B);
 }
 function closeHtml(B) {
   const C = B.close, has = v => v !== null && v !== undefined;
@@ -3787,6 +3787,17 @@ function adjReady(acct) {
   if (!st || !st.how || !X || !X.diff) return false;
   return Number(String(st.amt || '').replace(/[^\d]/g, '') || -1) === Math.abs(X.diff);
 }
+// Squareの売上と入金：売上は会計ごとに1回だけ、入金はお金が移るだけ（二重になっていないか）
+function sqFlowHtml(B) {
+  const F = B.sqFlow;
+  if (!F || !F.months.length) return '';
+  const ys = v => (v < 0 ? '−\u2060' + yen(-v) : yen(v));
+  let h = `<div class="card" data-key="sqflow"><h2>Squareの売上と入金</h2><div class="sub">${phr('カードの売上は、会計のたびに「入金待ち（未収金）」として1回だけ売上になります。\n銀行への入金は、入金待ちから銀行へお金が移るだけなので、売上は増えません。')}</div>`;
+  h += F.dupN ? `<div class="warn" style="margin-top:8px">${phr('二重になっているかもしれないものが' + F.dupN + '件あります。今日＞経費・明細を登録の「帳簿のチェック」で直せます')}</div><button class="btn small" data-act="goBook" style="margin-top:6px">直しに行く</button>` : `<div class="okbar" style="margin-top:8px">${icon('i-check-ink')}入金の二重はありません</div>`;
+  h += `<div class="gcalc">${F.months.map(m => `<div><span>${Number(m.ym.slice(5))}月</span><b>${m.left < 0 ? `<span class="neg">入金待ち ${ys(m.left)}</span>` : '入金待ち ' + ys(m.left)}<small>${phr('カードの売上 ' + yen(m.sales) + '\n入金 ' + yen(m.dep) + '・手数料 ' + yen(m.fee) + (m.left < 0 ? '\nマイナスは、入金が二重に入っているしるし' : ''))}</small></b></div>`).join('')}</div>`;
+  h += `<div class="sub" style="margin-top:6px">${phr('入金待ちは、月末の数日分のカードの売上くらいならふつうです。')}</div>`;
+  return h + '</div>';
+}
 function salesCheckHtml(B) {
   const sales = B.sales || [];
   if (!sales.length) return '';
@@ -3816,8 +3827,8 @@ async function bookFix(b) {
   const x = (S.rcpt.book.issues || []).find(i => i.key === b.dataset.k);
   if (!x) return;
   let to = b.dataset.to || x.to || '';
-  if (x.kind === 'same' || x.kind === 'bank') { const sel = document.querySelector(`[data-bk="${CSS.escape(x.key)}"]`); to = sel ? sel.value : to; if (!to) { toast(x.kind === 'bank' ? 'どうしたかを選んでください' : '科目を選んでください'); return; } }
-  const del = x.kind === 'pair' || (x.kind === 'bank' && to === 'del');
+  if (x.kind === 'same' || x.kind === 'bank' || x.kind === 'sqsale') { const sel = document.querySelector(`[data-bk="${CSS.escape(x.key)}"]`); to = sel ? sel.value : to; if (!to) { toast(x.kind === 'same' ? '科目を選んでください' : 'どうしたかを選んでください'); return; } }
+  const del = x.kind === 'pair' || ((x.kind === 'bank' || x.kind === 'sqsale') && to === 'del');
   if (del && !confirm('この仕訳をマネーフォワードから消します。よろしいですか？')) return;
   await bookCall(b, 'bookFix', { id: x.id, bi: x.bi, kind: x.kind, to: to, fee: x.fee ? x.fee.v : 0, date: x.date, key: x.key }, del ? '消しました' : '直しました');
 }
