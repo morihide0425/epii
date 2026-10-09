@@ -938,6 +938,8 @@ const ADMIN_FUNCS = {
   bookClose: adminBookClose,
   bookAdjust: adminBookAdjust,
   bookAsk: adminBookAsk,
+  txExclude: adminTxExclude,
+  txUnhide: adminTxUnhide,
   sqUnentered: adminSqUnentered,
   sqEnter: adminSqEnter,
   saveCustomer: async (env, b) => {

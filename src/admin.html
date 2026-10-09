@@ -370,6 +370,7 @@
   .cashadj.open { display: block; margin-top: 14px; padding: 12px; border: 1px solid var(--line2); border-radius: 12px; } .cashadj.open > b { display: block; font-size: 14px; margin-bottom: 2px; } .cashadj.open > small { display: block; }
   .adjhow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; } .adjhow .chip { margin: 0; border-radius: 10px; padding: 8px 10px; text-align: left; } .adjhow .chip small { display: block; font-size: 10px; opacity: .75; margin-top: 2px; }
   .cashadj label { display: block; font-size: 11px; color: var(--sub); } .cashadj label input { margin-top: 4px; font-size: 15px; padding: 7px 9px; }
+  .tipbox { margin-top: 6px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.6; } .tipbox b { display: block; font-size: 13px; } .tipbox span { color: var(--sub); }
   .golink { display: flex; width: 100%; align-items: center; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid var(--line2); border-radius: 12px; background: none; text-align: left; } .golink span { flex: 1; min-width: 0; } .golink b { display: block; font-size: 14px; } .golink small { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; } .golink em { font-style: normal; font-size: 12px; color: var(--blue); white-space: nowrap; }
   .askans { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0 2px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.6; } .askans svg.spark { flex-shrink: 0; margin-top: 3px; }
   .cdate { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub); margin-top: 2px; } .cdate input { -webkit-appearance: none; appearance: none; width: auto; min-width: 0; max-width: 60%; font-size: 14px; padding: 6px 8px; }
@@ -1557,6 +1558,11 @@ ACTIONS.today = async (a, b) => {
     return;
   }
   if (a === 'txSave') { await txSave(b); return; }
+  if (a === 'txExclude') { await txExclude(b); return; }
+  if (a === 'incSave') { await incSave(b); return; }
+  if (a === 'incOpen') { S.rcpt.incOpen = Object.assign({}, S.rcpt.incOpen, { [b.dataset.id]: true }); refresh(); return; }
+  if (a === 'sqAll') { S.rcpt.sqAll = true; refresh(); return; }
+  if (a === 'txUnhide') { try { await api('txUnhide'); toast('隠したものを、もう一度出しました'); loadTx(); loadSqUn(); } catch (e) { fail(e); } return; }
   if (a === 'txSaveAll') { await txSaveAll(b); return; }
   if (a === 'askOpen') { S.ask[b.dataset.k] = S.ask[b.dataset.k] || { thread: [], input: '' }; S.ask[b.dataset.k].open = true; refresh(); const el = $('askIn-' + b.dataset.k); if (el) el.focus(); return; }
   if (a === 'askClose') { if (S.ask[b.dataset.k]) S.ask[b.dataset.k].open = false; refresh(); return; }
@@ -3414,7 +3420,7 @@ function rcptButton() {
     else if (L.idle === null || L.idle >= 7) tag = `<span class="tag amber">${L.idle === null ? 'まだ登録なし' : L.idle + '日登録なし'}</span>`;
     else tag = `<span class="tag blue">今月 ${L.count}件</span>`;
   }
-  return `<button class="qbtn rcbtn" data-act="rcptOpen">${icon('i-receipt')}<div style="flex:1;min-width:0"><b>経費を登録</b><span>${phr('レシートを撮る・口座から出たお金を登録')}</span></div>${tag}</button>`;
+  return `<button class="qbtn rcbtn" data-act="rcptOpen">${icon('i-receipt')}<div style="flex:1;min-width:0"><b>経費・明細を登録</b><span>${phr('レシート・銀行とSquareの明細を、登録するか対象外にする')}</span></div>${tag}</button>`;
 }
 function accOptions(list, sel, short) {
   return list.map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}${a.help && !short ? '（' + esc(a.help) + '）' : ''}</option>`).join('');
@@ -3512,7 +3518,7 @@ function txHtml() {
   if (!T || !T.connected) return '';
   const list = T.list || [];
   const total = Math.max(T.total || 0, list.length);
-  let h = `<div class="card" data-key="txcard"><h2>${icon('i-coin')}口座から出たお金 <span class="cnt">まだ登録していないもの ${total}件</span></h2>
+  let h = `<div class="card" data-key="txcard"><h2>${icon('i-coin')}銀行から出たお金 <span class="cnt">まだ登録していないもの ${total}件</span></h2>
 `;
   if (!list.length) return h + '<div class="sub">ありません。すべて登録済みです。</div></div>';
   const bulk = txBulkItems();
@@ -3529,11 +3535,35 @@ function txHtml() {
       <div class="row" style="margin-top:6px"><select data-tx="${esc(t.id)}" data-tf="accountId" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accOptions((T.accounts || []).filter(a => !a.personal), sel.accountId, true)}${(T.accounts || []).filter(a => a.personal).map(a => `<optgroup label="経費ではないもの（自分のために使ったお金）"><option value="${esc(a.id)}" ${a.id === sel.accountId ? 'selected' : ''}>${esc(a.name)}</option></optgroup>`).join('')}</select>
         <select data-tx="${esc(t.id)}" data-tf="rate" aria-label="消費税" style="width:96px;flex-shrink:0">${['8', '10', 'none'].map(k => `<option value="${k}" ${sel.rate === k ? 'selected' : ''}>${{ '8': '8%', '10': '10%', none: '税なし' }[k]}</option>`).join('')}</select></div>
       ${t.ai ? `<div class="txai" data-appear="txai:${esc(t.id)}">${spark()}<span>${esc(plainJa(t.same ? '前と同じ科目' : t.ai.reason).replace(/[（(].*$/, ''))}</span>${t.ai.unsure ? '<span class="tag amber">要確認</span>' : ''}</div>` : S.rcpt.txWait ? `<div class="sub">${aiThink('Claudeが明細を読んで、科目を考えています')}</div>` : ''}
-      <div class="acts txacts">${ok ? `<label class="txpick"><input type="checkbox" data-txpick="${esc(t.id)}" ${on ? 'checked' : ''}>まとめて</label>` : ''}<button class="btn small" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : '登録'}</button>${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? '' : askHtml('tx:' + t.id, 'この明細')}</div>
+      <div class="acts txacts">${ok ? `<label class="txpick"><input type="checkbox" data-txpick="${esc(t.id)}" ${on ? 'checked' : ''}>まとめて</label>` : ''}<button class="btn small" data-act="txSave" data-id="${esc(t.id)}">${t.dupe ? '別の支払いなので登録' : '登録'}</button>${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? '' : askHtml('tx:' + t.id, 'この明細')}<button class="btn small ghost" data-act="txExclude" data-id="${esc(t.id)}" data-kind="out">対象外</button></div>
       ${S.ask['tx:' + t.id] && S.ask['tx:' + t.id].open ? askHtml('tx:' + t.id, 'この明細') : ''}`}
     </div>`;
   }).join('');
   if (total > list.length) h += `<div class="sub" style="margin-top:8px">${phr('新しい順に' + list.length + '件を出しています。登録すると、続きが出ます。')}</div>`;
+  return h + '</div>';
+}
+// 銀行に入ったお金（Squareの明細はのぞく）：登録するか、対象外にする
+function incomeHtml() {
+  const T = S.rcpt.tx;
+  if (!T || !T.connected || !T.income) return '';
+  const list = T.income;
+  let h = `<div class="card" data-key="inccard"><h2>${icon('i-coin')}銀行に入ったお金 <span class="cnt">まだ登録していないもの ${list.length}件</span></h2>`;
+  if (!list.length) h += '<div class="sub">ありません。すべて登録済みです。</div>';
+  const accs = T.incomeAccounts || [];
+  h += list.map(t => {
+    const ex = t.tip && t.tip.act === 'exclude';
+    const sel = (S.rcpt.incSel || {})[t.id] !== undefined ? S.rcpt.incSel[t.id] : (t.tip && t.tip.accountId) || '';
+    const open = !ex || (S.rcpt.incOpen || {})[t.id];
+    const a = accs.find(x => x.id === sel);
+    return `<div class="txr" data-key="inc:${esc(t.id)}"><div class="top"><span class="sub">${jdShort(t.date)}</span><span class="nm">${esc(t.content || '（内容なし）')}</span><span class="am">${yen(t.amount)}</span></div>
+      ${ex ? `<div class="tipbox"><b>対象外がおすすめ</b><span>${phr(t.tip.why)}</span></div>` : t.tip && t.tip.why ? `<div class="sub" style="margin-top:4px">${phr(t.tip.why)}</div>` : ''}
+      ${open ? `<div class="row" style="margin-top:6px"><select data-inc="${esc(t.id)}" aria-label="勘定科目"><option value="">科目を選ぶ</option>${accs.map(x => `<option value="${esc(x.id)}" ${x.id === sel ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>${a && !(t.tip && t.tip.why && t.tip.accountId === sel) ? `<div class="sub" style="margin-top:2px">${phr(a.name + '：' + a.help)}</div>` : ''}` : ''}
+      <div class="acts txacts">${ex
+        ? `<button class="btn small primary" data-act="txExclude" data-id="${esc(t.id)}" data-kind="in">対象外にする</button>${open ? `<button class="btn small" data-act="incSave" data-id="${esc(t.id)}">登録</button>` : `<button class="btn small ghost" data-act="incOpen" data-id="${esc(t.id)}">登録したいとき</button>`}`
+        : `<button class="btn small primary" data-act="incSave" data-id="${esc(t.id)}">登録</button><button class="btn small ghost" data-act="txExclude" data-id="${esc(t.id)}" data-kind="in">対象外</button>`}</div>
+    </div>`;
+  }).join('');
+  if (T.hiddenN) h += `<button class="more2" data-act="txUnhide">この画面で隠したもの ${T.hiddenN}件を、もう一度出す</button>`;
   return h + '</div>';
 }
 function rcptHtml() {
@@ -3555,6 +3585,7 @@ function rcptHtml() {
   }
   h += sqUnHtml();
   h += txHtml();
+  h += incomeHtml();
   h += bookHtml();
   const L = S.rcptInfo && S.rcptInfo.list;
   if (L) {
@@ -3591,7 +3622,11 @@ function sqUnHtml() {
   if (ok.length) h += Q.tried
     ? `<button class="btn primary wide" data-act="sqEnter" style="margin-top:8px">${ok.length}件をまとめて登録</button>`
     : `<button class="btn primary wide" data-act="sqEnter" data-one="1" style="margin-top:8px">まず1件だけ登録してみる</button><div class="sub" style="margin-top:4px">${phr('登録したら、マネーフォワードで形を確かめてください。次からまとめて登録できます。')}</div>`;
-  if (ng.length) h += `<h3>ここでは登録できないもの <span class="cnt">${ng.length}件</span></h3>` + ng.slice(0, 5).map(x => `<div class="bk"><div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.content)}</span><span class="am">${yen(x.amount)}</span></div><div class="basis">${esc(x.why)}</div></div>`).join('');
+  const exBtn = x => `<button class="btn small ghost" data-act="txExclude" data-id="${esc(x.id)}" data-kind="sq">対象外</button>`;
+  if (ok.length) h += S.rcpt.sqAll
+    ? `<h3>1件ずつ <span class="cnt">${ok.length}件</span></h3>` + ok.map(x => `<div class="bk" data-key="sq:${esc(x.id)}"><div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.content)}</span><span class="am">${yen(x.amount)}</span></div><div class="acts">${exBtn(x)}</div></div>`).join('')
+    : `<button class="more2" data-act="sqAll">1件ずつ見る（対象外にしたいものがあるとき）</button>`;
+  if (ng.length) h += `<h3>ここでは登録できないもの <span class="cnt">${ng.length}件</span></h3>` + ng.slice(0, 10).map(x => `<div class="bk" data-key="sq:${esc(x.id)}"><div class="top"><span class="sub">${jdShort(x.date)}</span><span class="nm">${esc(x.content)}</span><span class="am">${yen(x.amount)}</span></div><div class="basis">${esc(x.why)}</div><div class="acts">${exBtn(x)}</div></div>`).join('');
   return h + '</div>';
 }
 async function sqEnter(b) {
@@ -3946,6 +3981,40 @@ async function txSaveAll(b) {
     if (S.rcptInfo && S.rcptInfo.list) S.rcptInfo.list.txCount = R.tx.total;
     refresh();
     toast(r.done.length + '件を登録しました' + (r.failed.length ? '（' + r.failed.length + '件はできませんでした）' : ''));
+  } catch (e) { mo.fail(); fail(e); }
+}
+// 明細を対象外にする（銀行の出金・入金、Squareの明細）
+async function txExclude(b) {
+  const R = S.rcpt, kind = b.dataset.kind, id = b.dataset.id;
+  const t = kind === 'sq' ? (R.sq.items || []).find(x => x.id === id) : kind === 'in' ? (R.tx.income || []).find(x => x.id === id) : (R.tx.list || []).find(x => x.id === id);
+  if (!t) return;
+  if (!confirm(jdShort(t.date) + '　' + (t.content || '') + '　' + yen(t.amount) + '\nこの明細を対象外にします（帳簿に入れません）。よろしいですか？')) return;
+  const mo = M.busy(b);
+  try {
+    const r = await api('txExclude', { id: t.id, date: t.date, amount: t.amount, content: t.content, kind: kind });
+    await mo.ok();
+    await M.collapse(document.querySelector(`[data-key="${kind === 'sq' ? 'sq' : kind === 'in' ? 'inc' : 'tx'}:${CSS.escape(t.id)}"]`));
+    if (kind === 'sq') { R.sq.items = R.sq.items.filter(x => x !== t); if (S.rcptInfo && S.rcptInfo.list) S.rcptInfo.list.sqN = R.sq.items.length; }
+    else if (kind === 'in') { R.tx.income = R.tx.income.filter(x => x !== t); if (!r.mf) R.tx.hiddenN = (R.tx.hiddenN || 0) + 1; }
+    else { R.tx.list = R.tx.list.filter(x => x !== t); R.tx.total = Math.max(R.tx.list.length, (R.tx.total || 0) - 1); if (!r.mf) R.tx.hiddenN = (R.tx.hiddenN || 0) + 1; }
+    refresh();
+    toast(r.mf ? '対象外にしました' : 'この画面では隠しました（マネーフォワードの対象外にはできませんでした。帳簿には入りません）');
+  } catch (e) { mo.fail(); fail(e); }
+}
+async function incSave(b) {
+  const R = S.rcpt;
+  const t = (R.tx.income || []).find(x => x.id === b.dataset.id);
+  if (!t) return;
+  const accountId = (R.incSel || {})[t.id] !== undefined ? R.incSel[t.id] : (t.tip && t.tip.accountId) || '';
+  if (!accountId) { toast('科目を選んでください'); return; }
+  const mo = M.busy(b);
+  try {
+    await api('mfTxSave', { income: true, id: t.id, date: t.date, content: t.content, amount: t.amount, accountId: accountId });
+    await mo.ok();
+    await M.collapse(document.querySelector(`[data-key="inc:${CSS.escape(t.id)}"]`));
+    R.tx.income = R.tx.income.filter(x => x !== t);
+    refresh();
+    toast('登録しました');
   } catch (e) { mo.fail(); fail(e); }
 }
 async function txSave(b) {
@@ -4393,6 +4462,7 @@ $('view').addEventListener('change', e => {
   if (e.target.id === 'igPhoto') { igPhoto(e.target); return; }
   if (e.target.id === 'acctDate' && e.target.value) { S.acctAdj = null; acctCall(null, 'bookClose', { date: e.target.value }); return; }
   if (S.tab === 'today') {
+    if (e.target.dataset.inc && S.rcpt) { S.rcpt.incSel = Object.assign({}, S.rcpt.incSel, { [e.target.dataset.inc]: e.target.value }); refresh(); return; }
     if (e.target.dataset.bk && S.rcpt) { S.rcpt.bookSel = S.rcpt.bookSel || {}; S.rcpt.bookSel[e.target.dataset.bk] = e.target.value; return; }
     if (e.target.dataset.txpick && S.rcpt) {
       S.rcpt.txOff = S.rcpt.txOff || {};

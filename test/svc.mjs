@@ -390,6 +390,38 @@ try {
   check(res.status === 200 && calls.mf.slice(nErr).filter(c => c.startsWith('POST /journals')).length === 1, 'remembered: no failing first try');
   opts.exempt = false;
 
+  // 銀行への入金：Squareの入金と同じお金は対象外をすすめる。Square・利息・前と同じ相手は科目をすすめる
+  txs.push({ id: 'IN1', date: T, value: 9820, side: 'INCOME', content: 'ｽｸｴｱ ｶ)', journalizing_status: 'none' },
+    { id: 'IN2', date: add(T, -1), value: 12, side: 'INCOME', content: 'ﾘｿｸ', journalizing_status: 'none' },
+    { id: 'IN3', date: add(T, -2), value: 30000, side: 'INCOME', content: 'ﾌﾘｺﾐ ﾔﾏﾀﾞ ﾊﾅｺ', journalizing_status: 'none' });
+  res = await post('/admin/api/mfTx', { suggest: false }, A);
+  const inc = Object.fromEntries(res.body.income.map(t => [t.id, t]));
+  check(inc.IN1 && inc.IN1.tip.act === 'exclude' && inc.IN1.tip.why.includes('Squareの入金の明細'), 'same money as the Square payout -> exclude ' + JSON.stringify(inc.IN1));
+  check(inc['TX%3D4'].tip.accountId === 'A%3D14' && inc.IN2.tip.accountId === 'A%3D6' && inc.IN3.tip.accountId === '' && res.body.incomeAccounts.length >= 4, 'income suggestions ' + JSON.stringify(res.body.income.map(t => [t.id, t.tip])));
+  check(!res.body.income.some(t => /po_|お取引/.test(t.content)) && !res.body.list.some(t => t.id.startsWith('IN')), 'square lines and expenses kept apart');
+  res = await post('/admin/api/mfTxSave', { income: true, id: 'IN3', date: add(T, -2), content: 'ﾌﾘｺﾐ ﾔﾏﾀﾞ ﾊﾅｺ', amount: 30000, accountId: 'A%3D7' }, A);
+  const ij = journals.find(j => j.transaction_id === 'IN3');
+  check(res.status === 200 && ij.branches.length === 1 && ij.branches[0].debitor.account_id === 'A%3D9' && ij.branches[0].creditor.account_id === 'A%3D7' && ij.branches[0].debitor.value === 30000, 'income: 普通預金／売上高 ' + JSON.stringify(ij));
+  // 対象外：マネーフォワードで対象外にして、読み直して確かめる
+  res = await post('/admin/api/txExclude', { id: 'IN2', date: add(T, -1), amount: 12, content: 'ﾘｿｸ' }, A);
+  check(res.body.mf === true && txs.find(t => t.id === 'IN2').journalizing_status === 'excluded', 'excluded in MoneyForward');
+  // できないときは、この画面でだけ隠す（戻せる）
+  opts.noExclude = true;
+  await db.prepare("DELETE FROM kv WHERE k = 'mfExcludeWay'").run();
+  res = await post('/admin/api/txExclude', { id: 'IN1', date: T, amount: 9820, content: 'ｽｸｴｱ' }, A);
+  check(res.body.mf === false, 'falls back to hiding here');
+  res = await post('/admin/api/mfTx', { suggest: false }, A);
+  check(!res.body.income.some(t => t.id === 'IN1') && res.body.hiddenN === 1, 'hidden here');
+  await post('/admin/api/txUnhide', {}, A);
+  res = await post('/admin/api/mfTx', { suggest: false }, A);
+  check(res.body.income.some(t => t.id === 'IN1') && res.body.hiddenN === 0, 'shown again');
+  opts.noExclude = false;
+  await db.prepare("DELETE FROM kv WHERE k = 'mfExcludeWay'").run();
+  // Squareの明細も1件ずつ対象外にできる
+  res = await post('/admin/api/txExclude', { id: 'SQT4', date: add(T, -3), amount: 1234, content: 'お取引 No.ZZZZ', kind: 'sq' }, A);
+  check(res.body.mf === true && txs.find(t => t.id === 'SQT4').journalizing_status === 'excluded', 'square line excluded');
+  txs.find(t => t.id === 'SQT4').journalizing_status = 'none';
+
   // Squareの「未入力」の明細：Squareの会計と結びつけて、今までと同じ形で登録する（免税事業者：合計の金額だけ）
   res = await post('/admin/api/sqUnentered', {}, A);
   const su = Object.fromEntries(res.body.items.map(x => [x.id, x]));
@@ -404,6 +436,10 @@ try {
   const poj = jt('SQT3').branches;
   check(poj.length === 2 && poj[0].debitor.account_id === 'A%3D9' && poj[0].debitor.value === 9820 && poj[1].debitor.value === 330 && poj.every(b => b.creditor.account_id === 'A%3D14'), 'payout: 普通預金＋手数料／未収金 ' + JSON.stringify(poj));
   check(['SQT1', 'SQT2', 'SQT3'].every(id => txs.find(t => t.id === id).journalizing_status === 'registered'), 'marked as entered in MoneyForward');
+  // Squareの入金を登録したあとは、銀行の同じ入金は「もう帳簿に入っている」ので対象外をすすめる
+  res = await post('/admin/api/mfTx', { suggest: false }, A);
+  const in1 = res.body.income.find(t => t.id === 'IN1');
+  check(in1 && in1.tip.act === 'exclude' && in1.tip.why.includes('もう帳簿に入っています'), 'after the payout is entered ' + JSON.stringify(in1));
 
   // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
   res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);

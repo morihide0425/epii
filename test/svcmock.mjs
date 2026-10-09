@@ -119,6 +119,9 @@ function seedJournals() {
   txs.push({ id: 'TX%3D3', date: addDays(today, -5), value: 33000, side: 'EXPENSE', content: 'ｶﾝｻｲﾃﾞﾝﾘﾖｸ', journalizing_status: 'none', connected_account_id: 'CA1' });
   txs.push({ id: 'TX%3D11', date: addDays(today, -4), value: 16980, side: 'EXPENSE', content: 'ｺｸﾐﾝﾈﾝｷﾝ', journalizing_status: 'none', connected_account_id: 'CA1' });
   txs.push({ id: 'TX%3D4', date: addDays(today, -2), value: 120000, side: 'INCOME', content: 'ｽｸｴｱ', journalizing_status: 'none', connected_account_id: 'CA1' });
+  // 銀行への入金：Squareの入金（SQT3：手数料を引いて9,820円）と同じお金、預金の利息
+  txs.push({ id: 'TXI1', date: today, value: 9820, side: 'INCOME', content: 'ｽｸｴｱ ﾌﾘｺﾐ', journalizing_status: 'none', connected_account_id: 'CA1' });
+  txs.push({ id: 'TXI2', date: addDays(today, -1), value: 15, side: 'INCOME', content: 'ﾘｿｸ', journalizing_status: 'none', connected_account_id: 'CA1' });
 }
 
 // Claude：system の内容で何の依頼かを見分けて、それらしい JSON を返す
@@ -269,6 +272,16 @@ export function startSvcMock(port) {
           if (q.get('value_min')) list = list.filter(t => t.value >= Number(q.get('value_min')));
           if (q.get('value_max')) list = list.filter(t => t.value <= Number(q.get('value_max')));
           return send({ transactions: list, metadata: { total_count: list.length, total_pages: 1 } });
+        }
+        // 明細を対象外にする（本物の形は分からないので、1つめに試す形だけ受ける。opts.noExclude なら無い扱い）
+        const tm = p.match(/^\/transactions\/([^/]+)$/);
+        if (tm && req.method === 'PUT' && tm[1] !== 'journalize') {
+          if (opts.noExclude) return send({ errors: [{ message: 'not found' }] }, 404);
+          const t = txs.find(x => x.id === decodeURIComponent(tm[1]));
+          const b = JSON.parse(raw || '{}');
+          if (!t || b.journalizing_status !== 'excluded') return send({ errors: [{ message: 'bad request' }] }, 400);
+          t.journalizing_status = 'excluded';
+          return send({ transaction: t });
         }
         if (p === '/transactions/journalize' && req.method === 'POST') {
           const b = JSON.parse(raw);

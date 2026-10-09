@@ -1163,10 +1163,12 @@ async function adminMfTx(env, b) {
     const pages = j.metadata && Number(j.metadata.total_pages);
     if (!pages || page >= pages || !(j.transactions || []).length) break;
   }
-  let list = all.filter(t => (!t.side || t.side === 'EXPENSE') && (!t.journalizing_status || t.journalizing_status === 'none') && !SQ_TX.test(String(t.content || '')))
+  const hidden = await txHidden(env);
+  let list = all.filter(t => (!t.side || t.side === 'EXPENSE') && (!t.journalizing_status || t.journalizing_status === 'none') && !SQ_TX.test(String(t.content || '')) && !hidden[String(t.id)])
     .map(t => ({ id: String(t.id), date: t.date, amount: Number(t.value) || 0, content: clean(t.content, 60) }))
     .filter(t => t.amount > 0).sort((a, x) => x.date.localeCompare(a.date));
-  await kvPut(env, 'mfTxCount', { n: list.length, at: Date.now() });
+  const income = await bankIncome(env, m, today, y, hidden);
+  await kvPut(env, 'mfTxCount', { n: list.length + income.list.length, at: Date.now() });
   // レシートを預かっている（明細を待っている）ものは、レシートの側で登録するので印を付ける
   // 明細を待たずに登録したものも、レシートの側で付け替えるので同じ扱い
   const waits = (await env.DB.prepare("SELECT date, amount FROM receipts WHERE status = 'wait' OR (status = 'ok' AND data LIKE '%\"forced\":true%')").all()).results;
@@ -1222,8 +1224,100 @@ async function adminMfTx(env, b) {
     t.same = !!(acc && was && was === acc.name);
     t.sure = !t.ai.unsure && !TX_GENERIC.test(t.content) && (t.same || !!t.ai.sure);
   });
-  return { connected: true, list: list, total: total, accounts: expense };
+  return { connected: true, list: list, total: total, accounts: expense, income: income.list, incomeAccounts: income.accounts, hiddenN: Object.keys(hidden).length };
 }
+// 銀行への入金（Squareの明細はのぞく）。おすすめ：Squareの入金と同じお金なら対象外（二重になるので）、Square・利息・前と同じ相手は科目
+const INCOME_ACCOUNTS = [
+  ['売上高', '振込でもらった売上'], ['未収金', 'Square・カードの売上が入ってきた'], ['売掛金', '請求書の売上が入ってきた'],
+  ['雑収入', '売上以外の収入（補助金など）'], ['事業主借', '自分のお金を入れた・預金の利息']
+];
+function incomeOptions(m) { return INCOME_ACCOUNTS.map(x => { const a = m.accounts.find(o => o.name === x[0]); return a ? { id: a.id, name: a.name, help: x[1] } : null; }).filter(Boolean); }
+async function bankIncome(env, m, today, y, hidden) {
+  const all = [];
+  for (let page = 1; page <= 10; page++) {
+    const j = await mfApi(env, 'GET', '/transactions', { start_date: y + '-01-01', end_date: today, side: 'INCOME', journalizing_statuses: 'none', order: 'desc', per_page: 200, page: page });
+    all.push(...(j.transactions || []));
+    const pages = j.metadata && Number(j.metadata.total_pages);
+    if (!pages || page >= pages || !(j.transactions || []).length) break;
+  }
+  const accounts = incomeOptions(m);
+  const none = all.filter(t => (!t.side || t.side === 'INCOME') && (!t.journalizing_status || t.journalizing_status === 'none'));
+  // Squareの入金の明細（金額は、入金額か、手数料を引く前の額のことがある）
+  const po = [];
+  for (const x of none.filter(t => /入金\s*po_/.test(String(t.content || '')))) {
+    const vals = [Number(x.value) || 0];
+    const pid = (String(x.content).match(/入金\s*(po_[\w-]+)/) || [])[1];
+    if (pid && env.SQUARE_ACCESS_TOKEN) { try { const pp = await sqPayout(env, pid); vals.push(pp.net, pp.gross); } catch (e) { /* 読めなければ明細の金額だけで */ } }
+    po.push({ date: x.date, vals: vals });
+  }
+  const lines = none.filter(t => !SQ_TX.test(String(t.content || '')) && !/お取引/.test(String(t.content || '')) && !hidden[String(t.id)])
+    .map(t => ({ id: String(t.id), date: t.date, amount: Number(t.value) || 0, content: clean(t.content, 60) })).filter(t => t.amount > 0).sort((a, x) => x.date.localeCompare(a.date)).slice(0, 30);
+  if (!lines.length) return { list: [], accounts: accounts };
+  let js = [];
+  try { js = await bookJournals(env, bookMonths(today), false); } catch (e) { console.error('入金のおすすめ', e && e.message); }
+  const byName = n => accounts.find(a => a.name === n);
+  lines.forEach(t => {
+    const near = (d, n) => Math.abs(diffDays(d, t.date)) <= n;
+    const p = po.find(x => x.vals.indexOf(t.amount) >= 0 && near(x.date, 4));
+    const bj = !p && js.find(j => near(j.d, 4) && j.b.some(br => br[0] === '普通預金' && br[1] === t.amount && br[2] === '未収金'));
+    if (p) { t.tip = { act: 'exclude', why: jdShort(p.date) + 'のSquareの入金の明細と同じお金です。両方登録すると二重になるので、こちらは対象外に' }; return; }
+    if (bj) { t.tip = { act: 'exclude', why: jdShort(bj.d) + 'に同じ金額のSquareの入金が、もう帳簿に入っています。二重になるので対象外に' }; return; }
+    let name = '', why = '';
+    if (/ｽｸｴｱ|スクエア|SQUARE/i.test(t.content)) { name = '未収金'; why = 'Squareからの入金（カードの売上が入ってきたもの）'; }
+    else if (/利息|ﾘｿｸ|リソク/.test(t.content)) { name = '事業主借'; why = '預金の利息は、お店の収入にしません'; }
+    else {
+      const k = txKey(t.content);
+      const seen = {};
+      if (k) js.forEach(j => j.b.forEach(br => { if (br[0] === '普通預金' && br[2] && txKey(br[4] || j.m || '') === k) seen[br[2]] = (seen[br[2]] || 0) + 1; }));
+      const top = Object.keys(seen).sort((a, b) => seen[b] - seen[a])[0];
+      if (top && byName(top)) { name = top; why = '前と同じ科目'; }
+    }
+    const a = byName(name);
+    t.tip = a ? { act: 'save', accountId: a.id, why: why } : { act: 'save', accountId: '', why: '' };
+  });
+  return { list: lines, accounts: accounts };
+}
+
+/* ---------- マネーフォワードに届いた明細を「対象外」にする（帳簿に入れない） ----------
+ * 公開されている手順が見つからないので、ありそうな形を順に試し、本当に対象外になったかを読み直して確かめる（うまくいった形を覚える）。
+ * どれもだめなら、この画面でだけ隠す（マネーフォワードでは未登録のまま残るが、帳簿には入らない） */
+const MF_EXCLUDE_WAYS = [
+  { m: 'PUT', p: id => '/transactions/' + id, b: () => ({ journalizing_status: 'excluded' }) },
+  { m: 'PUT', p: id => '/transactions/' + id, b: () => ({ transaction: { journalizing_status: 'excluded' } }) },
+  { m: 'POST', p: () => '/transactions/exclude', b: id => ({ transaction_id: id }) },
+  { m: 'POST', p: id => '/transactions/' + id + '/exclude', b: () => ({}) }
+];
+async function mfExclude(env, id, date) {
+  const known = await kvGet(env, 'mfExcludeWay');
+  if (known && known.none && Date.now() - known.at < 7 * 86400000) return false;
+  const order = known && known.i !== undefined ? [known.i] : MF_EXCLUDE_WAYS.map((w, i) => i);
+  for (const i of order) {
+    const w = MF_EXCLUDE_WAYS[i];
+    try { await mfApi(env, w.m, w.p(encodeURIComponent(id)), null, w.b(id)); }
+    catch (e) { if (e.code === 'MF_NET') throw e; continue; }
+    if (known && known.i === i) return true;
+    const chk = await mfApi(env, 'GET', '/transactions', { start_date: date, end_date: date, journalizing_statuses: 'excluded', per_page: 500 });
+    if ((chk.transactions || []).some(t => String(t.id) === String(id))) { await kvPut(env, 'mfExcludeWay', { i: i, at: Date.now() }); return true; }
+  }
+  await kvPut(env, 'mfExcludeWay', { none: true, at: Date.now() });
+  return false;
+}
+async function txHidden(env) { return (await kvGet(env, 'txHidden')) || {}; }
+async function adminTxExclude(env, b) {
+  const id = String(b.id || ''), date = String(b.date || '');
+  if (!id || !isDate(date)) fail('明細が見つかりません。画面を更新してください。');
+  const mf = await mfExclude(env, id, date);
+  if (!mf) {
+    const h = await txHidden(env);
+    h[id] = { at: jstStamp(Date.now()), date: date, amount: Number(b.amount) || 0, content: clean(b.content, 60) };
+    await kvPut(env, 'txHidden', h);
+  }
+  const left = await kvGet(env, 'mfTxCount');
+  if (left && left.n && b.kind !== 'sq') await kvPut(env, 'mfTxCount', { n: left.n - 1, at: left.at });
+  return { mf: mf };
+}
+// この画面で隠したものを、もう一度出す
+async function adminTxUnhide(env) { await env.DB.prepare("DELETE FROM kv WHERE k = 'txHidden'").run(); return { ok: true }; }
 // Claude のおすすめのまま、まとめて登録する（迷うもの・二重の注意があるものは画面で外してから送る）
 async function adminMfTxSaveAll(env, b) {
   const items = (Array.isArray(b.items) ? b.items : []).slice(0, 50);
@@ -1238,6 +1332,7 @@ async function adminMfTxSaveAll(env, b) {
 }
 async function adminMfTxSave(env, b) {
   const m = await mfMaster(env);
+  if (b.income) return await saveIncome(env, m, b);
   const expense = txOptions(m, await expenseOptions(env, m));
   const acc = expense.find(a => a.id === b.accountId);
   if (!acc) fail('勘定科目を選んでください。');
@@ -1245,6 +1340,35 @@ async function adminMfTxSave(env, b) {
   if (!tx.id || !isDate(tx.date)) fail('明細が見つかりません。画面を更新してください。');
   const rate = acc.personal ? 'none' : ['8', '10', 'none'].indexOf(b.rate) >= 0 ? b.rate : '10';
   await mfFromTx(env, m, tx, { accountId: acc.id, rate: rate, remark: clean(b.memo || tx.content, 200) });
+  await mfTouched(env, tx.date);
+  const left = await kvGet(env, 'mfTxCount');
+  if (left && left.n) await kvPut(env, 'mfTxCount', { n: left.n - 1, at: left.at });
+  return { ok: true };
+}
+
+// 銀行への入金を登録：普通預金／選んだ科目（税なし）
+async function saveIncome(env, m, b) {
+  const acc = incomeOptions(m).find(a => a.id === b.accountId);
+  if (!acc) fail('科目を選んでください。');
+  const bank = m.accounts.find(a => a.name === '普通預金');
+  if (!bank) fail('マネーフォワードに「普通預金」の科目が見つかりませんでした。');
+  const tx = { id: String(b.id || ''), date: String(b.date || ''), content: clean(b.content, 60) };
+  if (!tx.id || !isDate(tx.date)) fail('明細が見つかりません。画面を更新してください。');
+  const amount = Math.round(Number(b.amount) || 0);
+  const r = await mfFromTx(env, m, tx, { accountId: acc.id, rate: 'none', remark: clean(b.memo || tx.content, 200) });
+  // 入金の形（借方：普通預金、貸方：選んだ科目）になっていなければ、そろえる
+  if (r.jid) {
+    const g = await mfApi(env, 'GET', '/journals/' + encodeURIComponent(r.jid));
+    const jr = g.journal || {};
+    const brs = jr.branches || [];
+    const okShape = brs.length === 1 && brs[0].debitor && brs[0].debitor.account_id === bank.id && brs[0].creditor && brs[0].creditor.account_id === acc.id;
+    if (!okShape) {
+      const v = amount || brs.reduce((a, br) => a + (Number(br.debitor && br.debitor.value) || 0) + (Number(br.debitor && br.debitor.tax_value) || 0), 0);
+      const none = pickTax(m.taxes, 'none');
+      const side = id => Object.assign({ account_id: id, value: v }, none ? { tax_id: none } : {});
+      await mfApi(env, 'PUT', '/journals/' + encodeURIComponent(r.jid), null, { journal: { transaction_date: jr.transaction_date || tx.date, journal_type: jr.journal_type || 'journal_entry', memo: jr.memo || '', branches: [{ debitor: side(bank.id), creditor: side(acc.id), remark: clean(b.memo || tx.content, 200) }] } });
+    }
+  }
   await mfTouched(env, tx.date);
   const left = await kvGet(env, 'mfTxCount');
   if (left && left.n) await kvPut(env, 'mfTxCount', { n: left.n - 1, at: left.at });
@@ -2513,7 +2637,7 @@ async function bookBank(env, js, months) {
     if (!pages || page >= pages || !(j.transactions || []).length) break;
   }
   // Squareの明細（お取引）はのぞき、銀行の明細だけにする
-  const bank = all.filter(t => !SQ_TX.test(String(t.content || '')) && !/お取引/.test(String(t.content || ''))).map(t => ({ d: t.date, v: Number(t.value) || 0, in: t.side === 'INCOME', c: clean(t.content, 40), st: t.journalizing_status || '', used: false }));
+  const bank = all.filter(t => !SQ_TX.test(String(t.content || '')) && !/お取引/.test(String(t.content || ''))).map(t => ({ id: String(t.id), d: t.date, v: Number(t.value) || 0, in: t.side === 'INCOME', c: clean(t.content, 40), st: t.journalizing_status || '', used: false }));
   // 1つの仕訳の中で普通預金が何行かに分かれていても、銀行の明細は1回分なので、仕訳ごとに合計して比べる
   const book = [];
   js.forEach(j => {
@@ -2559,7 +2683,8 @@ async function bookBank(env, js, months) {
   const sum = list => list.reduce((a, x) => a + (x.in ? x.v : -x.v), 0);
   // 銀行の明細が登録済みの分まで返ってこないとき（半分も合わない）は、照らし合わせない（まちがった知らせを出さない）
   if (book.length >= 4 && only.length > book.length / 2) return { unreliable: true, bankNet: 0, bookNet: sum(book), bookOnly: [], notYet: [], notYetAll: [] };
-  const notYet = bank.filter(t => !t.used && (!t.st || t.st === 'none'));
+  const hid = await txHidden(env);
+  const notYet = bank.filter(t => !t.used && (!t.st || t.st === 'none') && !hid[t.id]);
   return {
     bankNet: sum(bank.filter(t => t.used || !t.st || t.st === 'none')), bookNet: sum(book),
     bookOnly: only.map(b => {
@@ -2949,7 +3074,8 @@ async function sqUnentered(env) {
     const pages = j.metadata && Number(j.metadata.total_pages);
     if (!pages || page >= pages || !(j.transactions || []).length) break;
   }
-  const txs = all.filter(t => SQ_TX.test(String(t.content || '')) && (!t.journalizing_status || t.journalizing_status === 'none'));
+  const hidden = await txHidden(env);
+  const txs = all.filter(t => SQ_TX.test(String(t.content || '')) && (!t.journalizing_status || t.journalizing_status === 'none') && !hidden[String(t.id)]);
   if (!txs.length) { await kvPut(env, 'sqUnentered', { n: 0, at: Date.now() }); return { connected: true, items: [] }; }
   try { await sqEnsure(env, monthsBetween(txs.map(t => t.date).sort()[0], today), 6 * 3600000); } catch (e) { if (!e.userFacing) throw e; }
   const pays = (await env.DB.prepare("SELECT id, ts, date, amount, refunded, method FROM sq_payments WHERE status = 'COMPLETED' AND date BETWEEN ? AND ?").bind(txs.map(t => t.date).sort()[0], today).all()).results;
