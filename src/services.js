@@ -11,7 +11,7 @@ const BRK = '｜';
 const AI_BREAK_RULE = '画面で変なところで改行されないよう、文節の切れ目に「｜」を入れてください（例：ご来店を｜心より｜お待ちして｜おります。）。句読点のあとには必ず入れます。数字・金額・日付・割合・カタカナ語・ハッシュタグ・URLの途中には入れません。';
 
 function features(env) {
-  return { ai: !!env.ANTHROPIC_API_KEY, square: !!env.SQUARE_ACCESS_TOKEN, mf: !!env.MF_API_KEY, google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) };
+  return { ai: !!env.ANTHROPIC_API_KEY, square: !!env.SQUARE_ACCESS_TOKEN, mf: !!env.MF_API_KEY, google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET), takeout: !!(env.TAKEOUT_SQUARE_ACCESS_TOKEN || (env.TAKEOUT_SQUARE_ENVIRONMENT === 'production' && env.SQUARE_ACCESS_TOKEN)) };
 }
 function plain(v) { return String(v || '').split(BRK).join(''); }
 // Claude の文：制御文字を除き、区切りの印の重なりや端の印を整える

@@ -1,4 +1,4 @@
-import json, base64, io, re
+import json, base64, io, re, os
 from PIL import Image
 src = lambda f: open('src/' + f, encoding='utf-8').read()
 shared = src('shared.js')
@@ -25,10 +25,15 @@ assets = '\n'.join([
   'const CUSTOMER_HTML = ' + json.dumps(src('customer.html').replace('/*__MOTION__*/', motion), ensure_ascii=False) + ';',
   'const ADMIN_HTML = ' + json.dumps(src('admin.html').replace('/*__MOTION__*/', motion), ensure_ascii=False) + ';',
   "const LOGO_B64 = '" + logo + "';",
+  'const WEB_HOME_HTML = ' + json.dumps(open('src/web/home.html', encoding='utf-8').read(), ensure_ascii=False) + ';',
+  'const WEB_HOME_CSS = ' + json.dumps(open('src/web/home.css', encoding='utf-8').read(), ensure_ascii=False) + ';',
+  'const WEB_HOME_JS = ' + json.dumps(open('src/web/home.js', encoding='utf-8').read(), ensure_ascii=False) + ';',
+  'const WEB_TAKEOUT_JS = ' + json.dumps(open('src/web/takeout.js', encoding='utf-8').read(), ensure_ascii=False) + ';',
+  'const WEB_IMAGES = ' + json.dumps({os.path.splitext(f)[0]: base64.b64encode(open('src/web/img/' + f, 'rb').read()).decode() for f in sorted(os.listdir('src/web/img')) if f.endswith('.webp')}) + ';',
   'const ICONS = ' + json.dumps(icons) + ';',
   ''
 ])
-out = server.replace('/*__SHARED_CODE__*/', shared).replace('/*__SERVICES__*/', services).replace('/*__ASSETS__*/', assets)
+out = server.replace('/*__SHARED_CODE__*/', shared).replace('/*__SERVICES__*/', services).replace('/*__WEB__*/', src('web.js')).replace('/*__ASSETS__*/', assets)
 import os; os.makedirs('dist', exist_ok=True)
 open('dist/worker.js', 'w', encoding='utf-8').write(out)
 print('worker.js', len(out.encode()), 'bytes; logo', c.size, len(logo))

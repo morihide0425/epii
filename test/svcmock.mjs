@@ -4,6 +4,15 @@ export const calls = { ai: [], sq: [], mf: [], g: [] };
 export const journals = [];
 export const txs = [];
 export const opts = { aiDelay: 0, aiFail: 0 };
+// テイクアウトの決済（Squareのお支払いリンク）
+export const tk = { links: {}, orders: {}, payments: {}, deleted: [] };
+export function tkPay(orderId, amount) {
+  const o = tk.orders[orderId];
+  const pid = 'TKPAY' + Object.keys(tk.payments).length;
+  tk.payments[pid] = { id: pid, status: 'COMPLETED', order_id: orderId, location_id: o.location_id, amount_money: { amount: amount === undefined ? o.total : amount, currency: 'JPY' }, total_money: { amount: amount === undefined ? o.total : amount, currency: 'JPY' } };
+  o.tenders = [{ payment_id: pid }];
+  return tk.payments[pid];
+}
 
 const jst = (ms = Date.now()) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
 const addDays = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -229,6 +238,29 @@ export function startSvcMock(port) {
         return send({ id: 'msg_1', type: 'message', role: 'assistant', model: body.model, stop_reason: 'end_turn',
           content: [{ type: 'thinking', thinking: '', signature: 'x' }, { type: 'text', text: JSON.stringify(aiAnswer(body)) }], usage: { input_tokens: 10, output_tokens: 10 } });
       }
+      // テイクアウトのSquare（別のつなぎ先として /tk の下に）
+      if (u.pathname.startsWith('/tk/')) {
+        if (req.headers.authorization !== 'Bearer tk-test') return send({ errors: [{ code: 'UNAUTHORIZED' }] }, 401);
+        const tp = u.pathname.slice(3);
+        if (tp === '/v2/locations') return send({ locations: [{ id: 'LOC1', name: 'épii', status: 'ACTIVE', capabilities: ['CREDIT_CARD_PROCESSING'] }] });
+        if (tp === '/v2/online-checkout/payment-links' && req.method === 'POST') {
+          const b = JSON.parse(raw);
+          if (tk.links[b.idempotency_key]) return send({ payment_link: tk.links[b.idempotency_key] });
+          const li = b.order.line_items[0];
+          const oid = 'TKORD' + Object.keys(tk.orders).length;
+          tk.orders[oid] = { id: oid, location_id: b.order.location_id, state: 'OPEN', tenders: [], total: Number(li.base_price_money.amount) * Number(li.quantity), body: b };
+          const link = { id: 'TKLINK' + Object.keys(tk.links).length, url: 'https://sandbox.square.link/u/' + oid, order_id: oid };
+          tk.links[b.idempotency_key] = link;
+          return send({ payment_link: link });
+        }
+        const dl = tp.match(/^\/v2\/online-checkout\/payment-links\/(.+)$/);
+        if (dl && req.method === 'DELETE') { tk.deleted.push(dl[1]); const o = Object.values(tk.orders).find(x => Object.values(tk.links).some(l => l.id === dl[1] && l.order_id === x.id)); if (o) o.state = 'CANCELED'; return send({}); }
+        const om = tp.match(/^\/v2\/orders\/(.+)$/);
+        if (om) return tk.orders[om[1]] ? send({ order: tk.orders[om[1]] }) : send({ errors: [{ code: 'NOT_FOUND' }] }, 404);
+        const pm = tp.match(/^\/v2\/payments\/(.+)$/);
+        if (pm) return tk.payments[pm[1]] ? send({ payment: tk.payments[pm[1]] }) : send({ errors: [{ code: 'NOT_FOUND' }] }, 404);
+        return send({ errors: [{ code: 'NOT_FOUND' }] }, 404);
+      }
       // Google（ビジネスプロフィール）
       if (u.pathname.startsWith('/g/')) {
         calls.g.push(req.method + ' ' + u.pathname);
@@ -397,5 +429,6 @@ export const SVC_ENV = port => ({
   ANTHROPIC_API_KEY: 'sk-test', ANTHROPIC_API_BASE: 'http://127.0.0.1:' + port,
   SQUARE_ACCESS_TOKEN: 'sq-test', SQUARE_API_BASE: 'http://127.0.0.1:' + port,
   MF_API_KEY: 'mf-test', MF_AUTH_BASE: 'http://127.0.0.1:' + port, MF_API_BASE: 'http://127.0.0.1:' + port + '/api/v3',
+  TAKEOUT_SQUARE_ACCESS_TOKEN: 'tk-test', TAKEOUT_SQUARE_API_BASE: 'http://127.0.0.1:' + port + '/tk', TAKEOUT_SQUARE_WEBHOOK_SIGNATURE_KEY: 'whkey', TAKEOUT_SQUARE_ENVIRONMENT: 'sandbox',
   GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gsec', GOOGLE_API_BASE: 'http://127.0.0.1:' + port + '/g', GOOGLE_TOKEN_URL: 'http://127.0.0.1:' + port + '/g/token', GOOGLE_AUTH_BASE: 'http://127.0.0.1:' + port + '/g/auth'
 });

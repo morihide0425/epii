@@ -1,7 +1,8 @@
 // Claude・Square・マネーフォワードの連携のテスト（仮のサーバーで動かす）
 import assert from 'node:assert';
 import { start, pushes } from './env.mjs';
-import { startSvcMock, calls, journals, txs, opts, SVC_ENV } from './svcmock.mjs';
+import { startSvcMock, calls, journals, txs, opts, SVC_ENV, tk, tkPay } from './svcmock.mjs';
+import crypto from 'node:crypto';
 const B = 'http://127.0.0.1:8787';
 const mock = startSvcMock(8841);
 const env = await start({ extra: Object.assign(SVC_ENV(8841), { WEEKLY_ANY_DAY: '1' }) });
@@ -500,6 +501,89 @@ try {
   check(!res.body.connected, 'google disconnected');
   res = await post('/admin/api/analysisAi', { section: 'google' }, A);
   check(res.status >= 400, 'no google insight when not connected');
+
+  // ホームページ：中身を書き換えて保存すると、すぐ出る。写真はD1に置く
+  let hp = await fetch(B + '/home');
+  let ht = await hp.text();
+  check(hp.status === 200 && ht.includes('季節をいただく') && ht.includes('/web/img/plate.webp') && !ht.includes('href="/takeaway"') && !ht.includes('{{'), 'home page');
+  check((await fetch(B + '/web/img/plate.webp')).headers.get('content-type') === 'image/webp' && (await fetch(B + '/web/home.css')).status === 200, 'home assets');
+  res = await post('/admin/api/web', {}, A);
+  check(res.body.fields.length > 20 && res.body.content.lunchTitle === '季節のランチセット', 'web content');
+  res = await post('/admin/api/webPhoto', { image: 'data:image/jpeg;base64,' + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).toString('base64') }, A);
+  const purl = res.body.url;
+  check(/^\/media\/[a-f0-9-]{36}$/.test(purl) && (await fetch(B + purl)).headers.get('content-type') === 'image/jpeg', 'photo stored ' + purl);
+  res = await post('/admin/api/webSave', { content: { lunchTitle: '秋の薬膳ランチ', lunchPhoto: purl } }, A);
+  ht = await (await fetch(B + '/home')).text();
+  check(ht.includes('秋の薬膳ランチ') && ht.includes(purl), 'home updated');
+  res = await post('/admin/api/webSave', { content: { lunchPhoto: 'https://evil.example/x.jpg' } }, A);
+  check(res.status >= 400, 'outside photo refused');
+  // テイクアウト：止めているあいだは注文できない。テスト用リンクからだけ（Sandbox）
+  const tkd = add(T, 3);
+  res = await post('/admin/api/takeoutSave', { cfg: { state: 'test', title: '秋のオードブル', price: 3500, maxPerOrder: 5, allergens: '小麦・大豆', cancellation: '前日まで', cutoff: { days: 1, time: '18:00' }, slots: [{ d: tkd, t: '12:00', cap: 2 }, { d: tkd, t: '15:00', cap: 5 }] } }, A);
+  check(res.body.sq.env === 'sandbox' && !res.body.open && res.body.slots.length === 2, 'takeout saved (sandbox, not open) ' + JSON.stringify(res.body.sq));
+  res = await post('/admin/api/takeoutSave', { cfg: Object.assign({}, res.body.cfg, { state: 'on', price: 0 }) }, A);
+  check(res.status >= 400 && res.body.message.includes('価格'), 'cannot open without price');
+  let tp = await (await fetch(B + '/takeaway')).text();
+  check(tp.includes('準備中') && !tp.includes('checkout-data'), 'public page not open');
+  const tkb = { date: tkd, time: '12:00', quantity: 2, name: '山田 花子', email: 'hana@example.com', phone: '090-1234-5678', agreed: true };
+  const tok = () => crypto.randomBytes(32).toString('hex');
+  let r = await post('/api/takeaway/order', Object.assign({ token: tok() }, tkb));
+  check(r.status === 409, 'public order refused');
+  res = await post('/admin/api/takeoutTest', { origin: B }, A);
+  const turl = new URL(res.body.url);
+  tp = await (await fetch(turl)).text();
+  check(tp.includes('checkout-data') && tp.includes('Sandbox') && tp.includes('"left":2'), 'test page opens the order form');
+  const test = turl.searchParams.get('test');
+  const t1 = tok();
+  r = await post('/api/takeaway/order', Object.assign({ token: t1, test: test }, tkb));
+  check(r.status === 200 && r.body.order.status === 'pending' && r.body.order.payUrl.includes('square.link') && r.body.order.amount === 7000 && r.body.order.test, 'test order -> Square payment link ' + JSON.stringify(r.body));
+  const link1 = Object.values(tk.links)[0];
+  check(tk.orders[link1.order_id].body.checkout_options.redirect_url === B + '/takeaway/done#' + t1 && tk.orders[link1.order_id].total === 7000, 'payment link content');
+  r = await post('/api/takeaway/order', Object.assign({ token: t1, test: test }, tkb));
+  check(Object.keys(tk.links).length === 1 && r.body.order.payUrl === link1.url, 'same order not created twice');
+  r = await post('/api/takeaway/order', Object.assign({ token: tok(), test: test }, tkb, { quantity: 1 }));
+  check(r.status >= 400 && /満枠|選べません/.test(r.body.message), 'slot full -> refused ' + r.body.message);
+  // 戻ってきただけでは確定しない。Squareで支払いが完了して初めて確定（お店にLINE）
+  r = await post('/api/takeaway/status', { token: t1 });
+  check(r.body.order.status === 'pending', 'not paid yet');
+  const np = pushes.length;
+  tkPay(link1.order_id);
+  r = await post('/api/takeaway/status', { token: t1 });
+  check(r.body.order.status === 'paid' && pushes.length === np + 1 && JSON.stringify(pushes[pushes.length - 1]).includes('テイクアウトのご注文'), 'paid -> owner notified');
+  // Webhook：署名が正しいときだけ。支払いはSquareに聞き直して確かめる
+  const t2 = tok();
+  r = await post('/api/takeaway/order', Object.assign({ token: t2, test: test }, tkb, { time: '15:00', quantity: 1 }));
+  const link2 = Object.values(tk.links)[1];
+  tkPay(link2.order_id);
+  const ev = JSON.stringify({ type: 'payment.updated', data: { object: { payment: { id: 'x', order_id: link2.order_id } } } });
+  let wr = await fetch(B + '/api/square/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-square-hmacsha256-signature': 'AAAA' }, body: ev });
+  check(wr.status === 401, 'webhook bad signature');
+  const sig = crypto.createHmac('sha256', 'whkey').update(B + '/api/square/webhook' + ev).digest('base64');
+  wr = await fetch(B + '/api/square/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-square-hmacsha256-signature': sig }, body: ev });
+  r = await post('/api/takeaway/status', { token: t2 });
+  check(wr.status === 200 && r.body.order.status === 'paid', 'webhook confirms');
+  // 金額が違う支払いは「確認」にする
+  const t3 = tok();
+  r = await post('/api/takeaway/order', Object.assign({ token: t3, test: test }, tkb, { time: '15:00', quantity: 1 }));
+  tkPay(Object.values(tk.links)[2].order_id, 100);
+  r = await post('/api/takeaway/status', { token: t3 });
+  check(r.body.order.status === 'review', 'wrong amount -> review');
+  // 期限切れ：Squareのリンクを止めてから枠を戻す。取り消しも同じ
+  const t4 = tok();
+  r = await post('/api/takeaway/order', Object.assign({ token: t4, test: test }, tkb, { time: '15:00', quantity: 1 }));
+  await db.prepare('UPDATE web_orders SET expires_at = 1 WHERE status = ?').bind('pending').run();
+  r = await post('/api/takeaway/status', { token: t4 });
+  check(r.body.order.status === 'expired' && tk.deleted.length === 1, 'expired -> link removed');
+  const t5 = tok();
+  r = await post('/api/takeaway/order', Object.assign({ token: t5, test: test }, tkb, { time: '15:00', quantity: 1 }));
+  r = await post('/api/takeaway/cancel', { token: t5 });
+  check(r.body.order.status === 'cancelled' && tk.deleted.length === 2, 'cancelled before paying');
+  // 管理画面：注文の一覧・渡した
+  res = await post('/admin/api/takeout', {}, A);
+  const po = res.body.orders.find(o => o.status === 'paid' && o.quantity === 2);
+  check(po && res.body.slots.find(s => s.time === '12:00').left === 0 && res.body.slots.find(s => s.time === '15:00').left === 3, 'admin orders & remaining ' + JSON.stringify(res.body.slots));
+  res = await post('/admin/api/takeoutPick', { id: po.id, picked: true }, A);
+  check(res.body.orders.find(o => o.id === po.id).status === 'picked', 'picked');
 
   // 分析のところで Claude と話す（数字は30分ごとにまとめ直し、Claude側にとっておいてもらう）
   res = await post('/admin/api/aiChat', { messages: [{ role: 'user', text: '先月と比べてどう？' }] }, A);

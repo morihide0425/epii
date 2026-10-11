@@ -374,6 +374,13 @@
   .gline { width: 100%; height: 70px; display: block; margin-top: 6px; }
   .grev { padding: 10px 0; border-top: 1px solid var(--line); } .grev:first-of-type { border-top: 0; } .grev .stars { color: #C9962C; font-size: 13px; letter-spacing: 1px; } .grev .stars .off { color: var(--line2); } .gtext { font-size: 13px; line-height: 1.7; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .askbox { margin: 6px 0 2px; padding: 10px; border-radius: 10px; background: var(--bg); } .askbox textarea { font-size: 15px; } .askbox .acts { margin-top: 6px; } .askbox .sub { margin-top: 4px; font-size: 11px; }
+  .webimg { display: flex; gap: 12px; align-items: flex-start; margin: 12px 0 4px; padding-top: 12px; border-top: 1px solid var(--line); } .webimg img { width: 96px; height: 72px; object-fit: cover; border-radius: 10px; flex-shrink: 0; background: var(--bg); } .webimg b { display: block; font-size: 13px; }
+  .tksq { margin: 10px 0; padding: 10px 12px; border-radius: 12px; background: var(--bg); font-size: 12px; line-height: 1.6; } .tksq b { display: block; font-size: 13px; } .tksq span { color: var(--sub); } .tksq.production b { color: var(--green); } .tksq.none b { color: var(--amber); }
+  .tkstates { display: grid; gap: 6px; } .tkstates .chip { margin: 0; text-align: left; border-radius: 12px; padding: 8px 12px; } .tkstates .chip small { display: block; font-size: 11px; opacity: .75; } .tkstates .chip[disabled] { opacity: .45; }
+  .tkday { padding: 8px 0; border-top: 1px solid var(--line); } .tkday b { font-size: 13px; } .tkday > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .tkslot { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border: 1px solid var(--line2); border-radius: 999px; font-size: 13px; } .tkslot small { font-size: 10px; color: var(--sub); } .tkslot .icon { width: 26px; height: 26px; font-size: 14px; color: var(--sub); }
+  .tkrow { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); } .tkrow .t { font-weight: 700; font-size: 13px; min-width: 44px; } .tkrow .nm { flex: 1; min-width: 0; } .tkrow .nm b { margin-right: 4px; } .tkrow .nm .sub { display: block; } .tkrow.done { opacity: .55; }
+  .savebar { position: sticky; bottom: 76px; z-index: 5; margin-bottom: 12px; padding: 8px; border-radius: 14px; background: color-mix(in srgb, var(--bg) 88%, transparent); }
   .golink { display: flex; width: 100%; align-items: center; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid var(--line2); border-radius: 12px; background: none; text-align: left; } .golink span { flex: 1; min-width: 0; } .golink b { display: block; font-size: 14px; } .golink small { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; } .golink em { font-style: normal; font-size: 12px; color: var(--blue); white-space: nowrap; }
   .askans { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0 2px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.6; } .askans svg.spark { flex-shrink: 0; margin-top: 3px; }
   .cdate { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub); margin-top: 2px; } .cdate input { -webkit-appearance: none; appearance: none; width: auto; min-width: 0; max-width: 60%; font-size: 14px; padding: 6px 8px; }
@@ -958,6 +965,7 @@ VIEWS.today = {
     </div>`;
     h += openStatusHtml();
     if (S.features.ai && S.features.mf) h += rcptButton();
+    h += tkTodayHtml();
     h += requestCards();
     if (!pending) h += `<div class="card" style="text-align:center"><div class="sub">未返信のリクエストはありません。新しいリクエストはお店のLINEに届きます。</div></div>`;
     h += `<div class="card bars"><h2>${icon('i-clock')}今日の混み具合 <span class="cnt">${d.seats}席</span><button class="more" data-act="goDay" data-date="${today()}">押さえる・営業を変える ›</button></h2>${barsHtml(d)}</div>`;
@@ -1557,6 +1565,10 @@ ACTIONS.today = async (a, b) => {
     try { R.book = await api('bookAsk', { key: k, note: note }); delete (R.bookSel || {})[k]; delete (R.bookAskOpen || {})[k]; } catch (e) { fail(e); }
     delete R.bookAsking[k];
     if (R === S.rcpt) refresh();
+    return;
+  }
+  if (a === 'tkPick') {
+    try { await api('takeoutPick', { id: b.dataset.id, picked: !!b.dataset.v }); const o = (S.tkToday || []).find(x => x.id === b.dataset.id); if (o) o.status = b.dataset.v ? 'picked' : 'paid'; refresh(); } catch (e) { fail(e); }
     return;
   }
   if (a === 'goAcct') { S.setPart = 'acct'; S.acct = null; showTab('set'); loadAcct(); return; }
@@ -2300,7 +2312,7 @@ VIEWS.set = {
   render: () => {
     const s = S.settings;
     const q = S.quota;
-    const parts = [['rules', '受付'], ['hours', '時間帯'], ['weekly', '営業日'], ['menu', 'メニュー'], ['stats', '分析']].concat(S.features.mf ? [['acct', '会計']] : [], [['line', 'URL・LINE'], ['other', 'その他']]);
+    const parts = [['rules', '受付'], ['hours', '時間帯'], ['weekly', '営業日'], ['menu', 'メニュー'], ['stats', '分析']].concat(S.features.mf ? [['acct', '会計']] : [], [['web', 'ホームページ'], ['tk', 'テイクアウト'], ['line', 'URL・LINE'], ['other', 'その他']]);
     let h = `<div style="margin-bottom:10px" data-mg="setpart" data-mgs=".chip.on">${parts.map(p => `<button class="chip ${S.setPart === p[0] ? 'on' : ''}" data-act="setPart" data-v="${p[0]}">${p[1]}</button>`).join('')}</div>`;
     if (S.setPart === 'rules') h += `
     <div class="card"><h2>受付のルール</h2>
@@ -2352,6 +2364,8 @@ VIEWS.set = {
     if (S.setPart === 'menu') h += menuHtml();
     if (S.setPart === 'other') h += otherHtml();
     if (S.setPart === 'acct') h += acctHtml();
+    if (S.setPart === 'web') h += webHtml();
+    if (S.setPart === 'tk') h += tkHtml();
     if (S.setPart === 'stats') {
       const views = [['dash', 'まとめ'], ['site', '予約'], ['ig', 'Instagram']];
       if (S.features.square || S.features.mf) views.push(['money', '売上']);
@@ -2946,6 +2960,156 @@ ACTIONS.set = async (a, b) => {
 
 /* ---------- 操作の受け付け ---------- */
 
+/* ---------- 設定＞ホームページ：文と写真を書き換える（保存するとすぐホームページに出る） ---------- */
+async function loadWeb() {
+  try { const r = await api('web'); S.web = Object.assign(r, { form: Object.assign({}, r.content), group: (S.web && S.web.group) || 'hours', dirty: false }); }
+  catch (e) { S.web = { err: e.message }; }
+  renderSet();
+}
+function webHtml() {
+  const W = S.web;
+  if (!W) return '<div class="card"><div class="loading">読み込んでいます…</div></div>';
+  if (W.err) return `<div class="card"><div class="warn">${phr(W.err)}</div></div>`;
+  const F = W.form;
+  let h = `<div class="card" data-key="webcard"><div class="row" style="justify-content:space-between"><h2 style="margin:0">ホームページ</h2><a class="btn small" href="/home" target="_blank" rel="noopener">開いて見る ↗</a></div>
+    <div class="sub" style="margin:4px 0 10px">${phr('保存すると、すぐホームページに出ます。写真は、スマホの写真からそのまま選べます。')}</div>
+    <div class="chips">${W.groups.map(g => `<button class="chip ${W.group === g[0] ? 'on' : ''}" data-act="webGroup" data-v="${g[0]}">${esc(g[1])}</button>`).join('')}</div>`;
+  W.fields.filter(f => f.group === W.group && f.type !== 'alt' && f.type !== 'caption').forEach(f => {
+    if (f.type === 'image') {
+      h += `<div class="webimg"><img src="${esc(F[f.key])}" alt=""><div style="flex:1;min-width:0"><b>${esc(f.label)}</b>
+        <label class="btn small" for="wp-${f.key}" style="margin-top:6px">写真を変える</label><input type="file" accept="image/*" id="wp-${f.key}" data-wphoto="${f.key}" class="vh" tabindex="-1">
+        ${f.cap ? `<label class="f" for="wf-${f.cap}">ひと言</label><input type="text" id="wf-${f.cap}" data-wf="${f.cap}" value="${esc(F[f.cap])}" maxlength="40">` : ''}
+        ${f.alt ? `<label class="f" for="wf-${f.alt}">写真の説明（目の不自由な方の読み上げ用）</label><input type="text" id="wf-${f.alt}" data-wf="${f.alt}" value="${esc(F[f.alt])}" maxlength="150">` : ''}</div></div>`;
+    } else {
+      h += `<label class="f" for="wf-${f.key}">${esc(f.label)}</label>` + (f.type === 'textarea'
+        ? `<textarea id="wf-${f.key}" data-wf="${f.key}" rows="3" maxlength="${f.max}">${esc(F[f.key])}</textarea>`
+        : `<input type="text" id="wf-${f.key}" data-wf="${f.key}" value="${esc(F[f.key])}" maxlength="${f.max}">`);
+    }
+  });
+  h += `<div class="acts" style="margin-top:12px"><button class="btn primary" data-act="webSave">保存してホームページに出す</button>${W.dirty ? '<span class="sub" style="align-self:center">まだ保存していません</span>' : ''}</div></div>`;
+  return h;
+}
+// 写真：長いほうを1600pxに縮めてから送る
+async function webPhotoFile(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  const key = input.dataset.wphoto;
+  try {
+    toast('写真を送っています…');
+    const imgs = await receiptImages(f);
+    const r = await api('webPhoto', { image: imgs.full });
+    if (S.web) { S.web.form[key] = r.url; S.web.dirty = true; }
+    if (S.tk && key === 'tkPhoto') { S.tk.form.photo = r.url; S.tk.dirty = true; }
+    renderSet();
+    toast('写真を入れました。「保存」で出ます');
+  } catch (e) { fail(e); }
+}
+
+/* ---------- 設定＞テイクアウト：受付の状態・商品・受取枠・注文 ---------- */
+async function loadTk() {
+  try { const r = await api('takeout'); S.tk = { data: r, form: JSON.parse(JSON.stringify(r.cfg)), dirty: false, gen: (S.tk && S.tk.gen) || { from: addDays(today(), 1), to: addDays(today(), 14), days: [0, 1, 2, 3, 4, 5, 6].filter(d => ((S.settings.weekly || {})[d] || []).length), times: '12:00, 15:00', cap: 5 } }; }
+  catch (e) { S.tk = { err: e.message }; }
+  renderSet();
+}
+function tkHtml() {
+  const T = S.tk;
+  if (!T) return '<div class="card"><div class="loading">読み込んでいます…</div></div>';
+  if (T.err) return `<div class="card"><div class="warn">${phr(T.err)}</div></div>`;
+  const D = T.data, F = T.form, sq = D.sq;
+  const left = {};
+  (D.slots || []).forEach(s => { left[s.date + ' ' + s.time] = s.left; });
+  const states = [['off', '止める', 'お客様のページは「準備中」'], ['test', 'テスト（自分だけ）', 'テスト用のリンクからだけ注文できます'], ['on', '受け付ける', 'お客様が注文できます（本番の決済のときだけ）']];
+  let h = `<div class="card" data-key="tkstate"><div class="row" style="justify-content:space-between"><h2 style="margin:0">テイクアウト（店頭受取）</h2><a class="btn small" href="/takeaway" target="_blank" rel="noopener">ページを見る ↗</a></div>
+    <div class="tksq ${sq ? sq.env : 'none'}">${sq ? `<b>Squareの決済：${sq.env === 'production' ? '本番' : 'テスト（Sandbox）'}</b><span>${phr(sq.env === 'production' ? '実際にお金が動きます' : '実際には引き落とされません。テスト用のカード番号で試せます') + (sq.location ? '　お店：' + esc(sq.location) : '')}${sq.webhook ? '' : '<br>Squareからの知らせ（Webhook）はまだです。なくても動きますが、入れると確定が早くなります'}</span>` : `<b>Squareの決済がつながっていません</b><span>${phr('Cloudflareに TAKEOUT_SQUARE_ACCESS_TOKEN を入れると使えます')}</span>`}</div>
+    <label class="f">受付の状態</label><div class="tkstates">${states.map(x => `<button class="chip ${F.state === x[0] ? 'on' : ''}" data-act="tkState" data-v="${x[0]}"${x[0] === 'on' && !(sq && sq.env === 'production') ? ' disabled' : ''}><b>${x[1]}</b><small>${x[2]}</small></button>`).join('')}</div>
+    ${!(sq && sq.env === 'production') ? `<div class="sub">${phr('「受け付ける」は、Squareを本番に切り替えると選べます。それまではテストで確かめてください。')}</div>` : ''}
+    ${F.state === 'test' && sq ? `<div class="acts" style="margin-top:8px"><button class="btn small" data-act="tkTestLink">テスト用のリンクを開く（24時間）</button></div>` : ''}
+    ${D.open ? '<div class="okbar" style="margin-top:8px">' + icon('i-check-ink') + 'いま、お客様が注文できます</div>' : ''}</div>`;
+  // 商品
+  const fld = (k, label, type, max, hint) => `<label class="f" for="tk-${k}">${label}</label>` + (type === 'textarea' ? `<textarea id="tk-${k}" data-tk="${k}" rows="3" maxlength="${max}">${esc(F[k])}</textarea>` : `<input type="${type}" id="tk-${k}" data-tk="${k}" value="${esc(F[k])}" maxlength="${max}"${type === 'number' ? ' inputmode="numeric"' : ''}>`) + (hint ? `<div class="sub">${phr(hint)}</div>` : '');
+  h += `<div class="card" data-key="tkitem"><h2>商品</h2>
+    <div class="webimg"><img src="${esc(F.photo)}" alt=""><div style="flex:1;min-width:0"><label class="btn small" for="wp-tk">写真を変える</label><input type="file" accept="image/*" id="wp-tk" data-wphoto="tkPhoto" class="vh" tabindex="-1">${fld('photoNote', '写真の補足', 'text', 200, '')}</div></div>
+    ${fld('title', '商品名', 'text', 80)}
+    <div class="grid2"><div>${fld('price', '1セットの価格（税込・円）', 'number', 7)}</div><div>${fld('maxPerOrder', '1回に頼める数', 'number', 2)}</div></div>
+    ${fld('servings', '人数・量の目安', 'text', 80, '例）2〜3名様向け')}
+    ${fld('description', '商品の紹介', 'textarea', 700)}${fld('contents', 'セットの内容', 'textarea', 1000)}
+    ${fld('hours', '受取時間のご案内', 'text', 180, '例）12:00〜17:00のあいだで、選んだ時間にお越しください')}
+    ${fld('allergens', '原材料・アレルギー', 'textarea', 700)}${fld('care', '持ち帰り・保存', 'textarea', 500)}${fld('cancellation', '変更・キャンセルのご案内', 'textarea', 700, 'お支払いのあとの取り消し・返金は、Squareの管理画面で行います')}
+    <label class="f">受付の締切</label><div class="row" style="flex-wrap:wrap">受取日の<input type="number" inputmode="numeric" id="tk-cday" data-tkc="days" value="${esc(F.cutoff.days)}" style="width:64px;text-align:right">日前の<input type="time" id="tk-ctime" data-tkc="time" value="${esc(F.cutoff.time)}" style="width:120px">まで</div>
+    <div class="sub">${phr('当日の朝までなら「0」日前の「09:00」')}</div></div>`;
+  // 受取枠
+  const G = T.gen;
+  const byDate = {};
+  (F.slots || []).forEach((x, i) => { (byDate[x.d] = byDate[x.d] || []).push(Object.assign({ i: i }, x)); });
+  h += `<div class="card" data-key="tkslots"><h2>受取枠 <span class="cnt">${(F.slots || []).length}枠</span></h2>
+    <div class="sub">${phr('受け取れる日・時間と、1枠で何セット出せるかを決めます。まとめて足してから、いらない枠を消してください。')}</div>
+    <div class="panel"><div class="row" style="flex-wrap:wrap;gap:6px"><input type="date" id="tkg-from" value="${esc(G.from)}" style="width:auto;flex:1;min-width:130px"><span>〜</span><input type="date" id="tkg-to" value="${esc(G.to)}" style="width:auto;flex:1;min-width:130px"></div>
+      <div style="margin-top:6px">${[0, 1, 2, 3, 4, 5, 6].map(d => `<button class="chip ${G.days.indexOf(d) >= 0 ? 'on' : ''}" data-act="tkgDay" data-d="${d}" style="min-width:40px">${WD[d]}</button>`).join('')}</div>
+      <label class="f" for="tkg-times">時間（カンマで区切る）</label><input type="text" id="tkg-times" value="${esc(G.times)}" placeholder="12:00, 14:00, 17:00">
+      <div class="row" style="margin-top:8px"><label for="tkg-cap" style="flex:1">1枠のセット数</label><input type="number" inputmode="numeric" id="tkg-cap" value="${esc(G.cap)}" style="width:76px;text-align:right"><span>セット</span></div>
+      <button class="btn small" data-act="tkGen" style="margin-top:8px">この条件で枠を足す</button></div>
+    ${Object.keys(byDate).sort().map(d => `<div class="tkday"><b>${jdShort(d)}（${WD[weekday(d)]}）</b><div>${byDate[d].map(x => { const l = left[x.d + ' ' + x.t]; return `<span class="tkslot">${esc(x.t)}<small>${x.cap}セット${l !== undefined && l < x.cap ? '・残り' + l : ''}</small><button class="icon" data-act="tkDel" data-i="${x.i}" aria-label="${esc(x.t)}の枠を消す">×</button></span>`; }).join('')}</div></div>`).join('') || '<div class="sub" style="margin-top:8px">まだ枠がありません。</div>'}
+    ${(F.slots || []).length ? '<button class="more2" data-act="tkDelAll">すべての枠を消す</button>' : ''}</div>`;
+  h += `<div class="savebar"><button class="btn primary wide" data-act="tkSave">テイクアウトの設定を保存</button>${T.dirty ? '<div class="sub" style="text-align:center;margin-top:4px">まだ保存していません</div>' : ''}</div>`;
+  // 注文
+  const O = D.orders || [];
+  const st = { paid: '支払い済み', picked: '渡した', review: 'Squareで確認', pending: '支払い待ち' };
+  h += `<div class="card" data-key="tkorders"><h2>注文 <span class="cnt">${O.filter(o => o.status !== 'pending').length}件</span></h2>${O.length ? O.map(o => `<div class="tkrow ${o.status === 'picked' ? 'done' : ''}"><span class="t">${jdShort(o.date)}<br>${esc(o.time)}</span><div class="nm"><b>${esc(o.name)} 様</b>${o.test || o.env !== (sq && sq.env) ? '<span class="tag gray">テスト</span>' : ''}<span class="tag ${o.status === 'review' ? 'amber' : o.status === 'pending' ? 'gray' : 'blue'}">${st[o.status] || o.status}</span><span class="sub">${o.quantity}セット ${yen(o.amount)}・<a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></span></div>${o.status === 'paid' || o.status === 'picked' ? `<button class="btn small ${o.status === 'picked' ? 'ghost' : ''}" data-act="tkPickAdm" data-id="${esc(o.id)}" data-v="${o.status === 'picked' ? '' : '1'}">${o.status === 'picked' ? '渡した ✓' : '渡した'}</button>` : ''}</div>`).join('') : '<div class="sub">まだありません。</div>'}
+    <div class="sub" style="margin-top:8px">${phr('お支払いの取り消し・返金は、Squareの管理画面で行ってください。')}</div></div>`;
+  return h;
+}
+function tkRead() {
+  const T = S.tk;
+  if (!T || !T.form) return;
+  document.querySelectorAll('[data-tk]').forEach(el => { T.form[el.dataset.tk] = el.type === 'number' ? el.value : el.value; });
+  const cd = $('tk-cday'), ct = $('tk-ctime');
+  if (cd) T.form.cutoff = { days: cd.value, time: ct.value };
+  const g = T.gen;
+  if ($('tkg-from')) { g.from = $('tkg-from').value; g.to = $('tkg-to').value; g.times = $('tkg-times').value; g.cap = $('tkg-cap').value; }
+}
+const WEB_ACTS = {
+  webGroup: b => { S.web.group = b.dataset.v; refresh(); },
+  webSave: async b => {
+    const mo = M.busy(b);
+    try { const r = await api('webSave', { content: S.web.form }); S.web = Object.assign(r, { form: Object.assign({}, r.content), group: S.web.group, dirty: false }); await mo.ok(); refresh(); toast('保存しました。ホームページに出ています'); }
+    catch (e) { mo.fail(); fail(e); }
+  },
+  tkState: b => { tkRead(); S.tk.form.state = b.dataset.v; S.tk.dirty = true; refresh(); },
+  tkgDay: b => { tkRead(); const g = S.tk.gen, d = Number(b.dataset.d); g.days = g.days.indexOf(d) >= 0 ? g.days.filter(x => x !== d) : g.days.concat([d]); refresh(); },
+  tkGen: () => {
+    tkRead();
+    const g = S.tk.gen, F = S.tk.form;
+    const times = String(g.times).split(/[,、\s]+/).map(t => t.trim()).filter(t => /^\d{1,2}:\d{2}$/.test(t)).map(t => t.padStart(5, '0'));
+    const cap = Math.round(Number(g.cap) || 0);
+    if (!g.from || !g.to || g.from > g.to) { toast('日付を選び直してください'); return; }
+    if (!times.length) { toast('時間を「12:00」の形で入れてください'); return; }
+    if (cap < 1) { toast('1枠のセット数を入れてください'); return; }
+    const have = {}; (F.slots || []).forEach(x => { have[x.d + x.t] = 1; });
+    let n = 0;
+    for (let d = g.from; d <= g.to; d = addDays(d, 1)) {
+      if (g.days.indexOf(weekday(d)) < 0) continue;
+      times.forEach(t => { if (!have[d + t]) { F.slots.push({ d: d, t: t, cap: cap }); n++; } });
+    }
+    F.slots.sort((a, x) => (a.d + a.t).localeCompare(x.d + x.t));
+    S.tk.dirty = true; refresh(); toast(n + '枠を足しました。「保存」で決まります');
+  },
+  tkDel: b => { tkRead(); S.tk.form.slots.splice(Number(b.dataset.i), 1); S.tk.dirty = true; refresh(); },
+  tkDelAll: () => { if (!confirm('すべての受取枠を消します。よろしいですか？（保存するまでは戻せます）')) return; tkRead(); S.tk.form.slots = []; S.tk.dirty = true; refresh(); },
+  tkSave: async b => {
+    tkRead();
+    const mo = M.busy(b);
+    try { const r = await api('takeoutSave', { cfg: S.tk.form }); S.tk = { data: r, form: JSON.parse(JSON.stringify(r.cfg)), dirty: false, gen: S.tk.gen }; await mo.ok(); refresh(); toast('保存しました'); }
+    catch (e) { mo.fail(); fail(e); }
+  },
+  tkTestLink: async b => {
+    if (S.tk.dirty) { toast('先に「保存」を押してください'); return; }
+    try { const r = await api('takeoutTest', { origin: location.origin }); window.open(r.url, '_blank', 'noopener'); } catch (e) { fail(e); }
+  },
+  tkPickAdm: async b => {
+    try { const r = await api('takeoutPick', { id: b.dataset.id, picked: !!b.dataset.v }); S.tk.data = r; refresh(); } catch (e) { fail(e); }
+  }
+};
 // 設定＞会計の操作
 const ACCT_ACTS = {
   acctDate: b => { S.acctAdj = null; return acctCall(b, 'bookClose', { date: b.dataset.v }); },
@@ -2971,6 +3135,7 @@ const setActions = ACTIONS.set;
 ACTIONS.set = async (a, b) => {
   if (OTHER_ACTS[a]) { await OTHER_ACTS[a](b); return; }
   if (ACCT_ACTS[a]) { await ACCT_ACTS[a](b); return; }
+  if (WEB_ACTS[a]) { await WEB_ACTS[a](b); return; }
   if (a === 'openMode') { S.openMode = b.value; if (b.value === 'rolling') { const n = JSON.parse(JSON.stringify(S.settings)); n.openUntil = ''; S.settings.openUntil = ''; } else if (!S.settings.openUntil) { S.settings.openUntil = monthEnd(today(), 1); } refresh(); return; }
   if (a === 'openPick') { $('openUntil').value = b.dataset.v; toast(Number(b.dataset.v.slice(5, 7)) + '月末までにしました。「設定を保存する」で反映されます'); return; }
   if (a === 'setPart') {
@@ -2978,6 +3143,8 @@ ACTIONS.set = async (a, b) => {
     if (S.setPart === 'stats') loadDash();
     if (S.setPart === 'other') { loadOther(); return; }
     if (S.setPart === 'acct') { loadAcct(); return; }
+    if (S.setPart === 'web') { loadWeb(); return; }
+    if (S.setPart === 'tk') { loadTk(); return; }
     if (S.setPart === 'stats' && S.anView === 'money') { loadMoney(); return; }
     if (S.setPart === 'stats' && S.anView === 'ig' && S.features.ai) loadIg();
     if (S.setPart === 'stats' && S.anView === 'ig' && !S.ig) { try { S.ig = await api('igStats', { days: S.anDays }); refresh(); } catch (e) { fail(e); } }
@@ -3286,6 +3453,23 @@ function todayExtras() {
   if (S.features.ai && d && (d.aiMissing || []).length && !S.memoWait[d.date]) loadMemos(d.date);
   if (S.features.square && Date.now() - (S.salesAt || 0) > 60000) loadSales();
   if (S.features.ai && S.features.mf && !S.rcptInfo) loadRcpt();
+  if (S.features.takeout && Date.now() - (S.tkTodayAt || 0) > 60000) loadTkToday();
+}
+/* ---------- 今日の画面：お持ち帰り（今日と明日） ---------- */
+async function loadTkToday() {
+  S.tkTodayAt = Date.now();
+  try { S.tkToday = (await api('takeoutToday')).list; } catch (e) { S.tkToday = []; }
+  if (S.tab === 'today') renderWhenIdle('today');
+}
+function tkTodayHtml() {
+  const L = S.tkToday || [];
+  if (!L.length) return '';
+  const days = [today(), addDays(today(), 1)];
+  return `<div class="card" data-key="tktoday"><h2>${icon('i-coin')}お持ち帰り <span class="cnt">今日 ${L.filter(o => o.date === days[0]).reduce((a, o) => a + o.quantity, 0)}セット</span></h2>${days.map(d => {
+    const l = L.filter(o => o.date === d);
+    if (!l.length) return '';
+    return `<h3>${d === days[0] ? '今日' : '明日'}（${jdShort(d)}）</h3>` + l.map(o => `<div class="tkrow ${o.status === 'picked' ? 'done' : ''}" data-key="tko:${esc(o.id)}"><span class="t">${esc(o.time)}</span><div class="nm"><b>${esc(o.name)} 様</b>${o.test ? '<span class="tag gray">テスト</span>' : ''}${o.status === 'review' ? '<span class="tag amber">Squareで確認</span>' : ''}<span class="sub">${esc(o.title)}・${o.quantity}セット・<a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></span></div>${o.status === 'review' ? '' : `<button class="btn small ${o.status === 'picked' ? 'ghost' : ''}" data-act="tkPick" data-id="${esc(o.id)}" data-v="${o.status === 'picked' ? '' : '1'}">${o.status === 'picked' ? '渡した ✓' : '渡した'}</button>`}</div>`).join('');
+  }).join('')}</div>`;
 }
 async function loadMemos(date) {
   S.memoWait[date] = true;
@@ -4477,6 +4661,8 @@ $('view').addEventListener('click', async e => {
 
 $('view').addEventListener('input', e => {
   if (e.target.dataset.bkq && S.rcpt) { S.rcpt.bookAskText = Object.assign({}, S.rcpt.bookAskText, { [e.target.dataset.bkq]: e.target.value }); return; }
+  if (e.target.dataset.wf && S.web && S.web.form) { S.web.form[e.target.dataset.wf] = e.target.value; if (!S.web.dirty) { S.web.dirty = true; } return; }
+  if ((e.target.dataset.tk || e.target.dataset.tkc) && S.tk && S.tk.form) { S.tk.dirty = true; if (e.target.dataset.tk) S.tk.form[e.target.dataset.tk] = e.target.value; return; }
   if (e.target.dataset.adjamt && S.acctAdj && S.acctAdj[e.target.dataset.adjamt]) { S.acctAdj[e.target.dataset.adjamt].amt = e.target.value; adjCheck(e.target.dataset.adjamt); return; }
   if (S.tab === 'set' && e.target.id === 'goalAmt' && S.goal) {
     S.goal.form.amount = e.target.value;
@@ -4540,6 +4726,7 @@ $('view').addEventListener('input', e => {
 $('view').addEventListener('change', e => {
   if (e.target.id === 'rcptCam' || e.target.id === 'rcptLib') { rcptFiles(e.target); return; }
   if (e.target.id === 'igPhoto') { igPhoto(e.target); return; }
+  if (e.target.dataset.wphoto) { webPhotoFile(e.target); return; }
   if (e.target.id === 'acctDate' && e.target.value) { S.acctAdj = null; acctCall(null, 'bookClose', { date: e.target.value }); return; }
   if (S.tab === 'today') {
     if (e.target.dataset.inc && S.rcpt) { S.rcpt.incSel = Object.assign({}, S.rcpt.incSel, { [e.target.dataset.inc]: e.target.value }); refresh(); return; }

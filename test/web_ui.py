@@ -1,0 +1,76 @@
+import asyncio, datetime, os, re
+from playwright.async_api import async_playwright
+# ホームページ・テイクアウトの注文（Sandbox）・管理画面（node test/serve_svc.mjs の仮のサーバーで動かす）
+B='http://127.0.0.1:8787'
+SHOTS='shots'
+T=(datetime.datetime.now(datetime.UTC)+datetime.timedelta(hours=9)).date()
+os.makedirs(SHOTS, exist_ok=True)
+async def main():
+    async with async_playwright() as p:
+        b=await p.chromium.launch(); ctx=await b.new_context(viewport={'width':390,'height':844}, device_scale_factor=2)
+        await ctx.route('**/fonts.googleapis.com/**', lambda r: r.abort())
+        a=await ctx.new_page(); errs=[]; a.on('pageerror',lambda e:errs.append(str(e)))
+        dialogs=[]
+        def on_dialog(dg): dialogs.append(dg.message); asyncio.ensure_future(dg.accept())
+        a.on('dialog', on_dialog)
+        # ホームページ
+        await a.goto(B+'/home'); await a.wait_for_timeout(1200)
+        print('ホームの見出し:', (await a.locator('h1').inner_text()).replace('\n',' '), '／店頭受取のリンク:', await a.locator('a[href="/takeaway"]').count())
+        await a.screenshot(path=SHOTS+'/home_top.png')
+        await a.screenshot(path=SHOTS+'/home_full.png', full_page=True)
+        # 管理画面：ホームページ
+        await a.goto(B+'/admin'); await a.wait_for_timeout(600)
+        if await a.is_visible('#pw'): await a.fill('#pw','pw-test-123'); await a.click('#loginBtn')
+        await a.wait_for_selector('.kpis')
+        await a.click('.tab[data-tab=set]'); await a.wait_for_timeout(300)
+        await a.click('[data-act=setPart][data-v=web]')
+        await a.wait_for_selector('[data-key=webcard] [data-wf]', timeout=10000)
+        await a.fill('#wf-notice', '10月は火曜もランチ営業します。')
+        await a.click('[data-act=webGroup][data-v=photos]'); await a.wait_for_timeout(200)
+        print('写真の欄:', await a.locator('.webimg').count())
+        await a.locator('[data-key=webcard]').screenshot(path=SHOTS+'/admin_web.png')
+        await a.click('[data-act=webSave]'); await a.wait_for_timeout(1200)
+        # 管理画面：テイクアウト
+        await a.click('[data-act=setPart][data-v=tk]')
+        await a.wait_for_selector('[data-key=tkstate]', timeout=10000); await a.wait_for_timeout(300)
+        print('Squareのつなぎ先:', (await a.locator('.tksq').inner_text()).replace('\n',' / '))
+        print('受け付けるは押せない:', await a.locator('[data-act=tkState][data-v=on]').is_disabled())
+        await a.fill('#tk-title', '秋のオードブル'); await a.fill('#tk-price', '3500')
+        await a.fill('#tk-allergens', '小麦・大豆・ごま'); await a.fill('#tk-cancellation', '前日18時までにご連絡ください。お支払い後の取り消しは返金します。')
+        await a.fill('#tkg-from', (T+datetime.timedelta(days=2)).isoformat()); await a.fill('#tkg-to', (T+datetime.timedelta(days=8)).isoformat())
+        await a.fill('#tkg-times', '12:00, 15:00'); await a.fill('#tkg-cap', '4')
+        await a.click('[data-act=tkGen]'); await a.wait_for_timeout(300)
+        print('足した枠:', await a.locator('.tkslot').count())
+        await a.locator('.tkslot [data-act=tkDel]').first.click(); await a.wait_for_timeout(200)
+        await a.click('[data-act=tkState][data-v=test]'); await a.wait_for_timeout(200)
+        await a.click('[data-act=tkSave]'); await a.wait_for_timeout(1500)
+        print('保存後の枠:', await a.locator('.tkslot').count(), '／テスト用リンク:', await a.locator('[data-act=tkTestLink]').count())
+        await a.locator('[data-key=tkstate]').screenshot(path=SHOTS+'/admin_tk_state.png')
+        await a.locator('[data-key=tkslots]').screenshot(path=SHOTS+'/admin_tk_slots.png')
+        async with ctx.expect_page() as np:
+            await a.click('[data-act=tkTestLink]')
+        c=await np.value; c.on('pageerror',lambda e:errs.append(str(e)))
+        await c.wait_for_selector('.calendar-days', timeout=10000); await c.wait_for_timeout(500)
+        print('テストの注文画面:', (await c.locator('.pickup-sample').inner_text()).replace('\n',' / '))
+        await c.screenshot(path=SHOTS+'/takeaway_page.png', full_page=True)
+        await c.locator('.calendar-days button.available').first.click(); await c.wait_for_timeout(200)
+        await c.locator('.calendar-times button').first.click(); await c.wait_for_timeout(200)
+        await c.select_option('#tk-qty', '2')
+        await c.fill('#tk-name', '山田 花子'); await c.fill('#tk-email', 'hana@example.com'); await c.fill('#tk-phone', '090-1234-5678')
+        await c.click('[data-act=review]'); await c.wait_for_timeout(200)
+        print('チェックなし:', await c.locator('.checkout-error').inner_text())
+        await c.check('#tk-agree'); await c.click('[data-act=review]'); await c.wait_for_timeout(300)
+        print('確認画面:', (await c.locator('.order-review').inner_text()).replace('\n',' / '))
+        await c.locator('#checkout-root').screenshot(path=SHOTS+'/takeaway_review.png')
+        # Squareの画面の代わり：お支払いリンクを開いたら、戻り先に戻す（支払いはまだ）
+        async def fake(route):
+            await route.fulfill(status=200, body='<p>Square checkout (fake)</p>')
+        await c.route('https://sandbox.square.link/**', fake)
+        await c.click('[data-act=pay]'); await c.wait_for_timeout(1500)
+        print('Squareへ:', c.url)
+        await c.goto(B+'/takeaway/done'); await c.wait_for_selector('.checkout-form-card h2', timeout=10000); await c.wait_for_timeout(500)
+        print('戻ったとき:', (await c.locator('.checkout-form-card h2').inner_text()), '／続ける:', await c.locator('a.pickup-order').count())
+        await c.screenshot(path=SHOTS+'/takeaway_pending.png', full_page=True)
+        print('errors', errs)
+        await b.close()
+asyncio.run(main())

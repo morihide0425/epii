@@ -68,7 +68,7 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS blocks (id TEXT PRIMARY KEY, date TEXT NOT NULL, type TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, seats INTEGER, memo TEXT, created_at TEXT NOT NULL)',
   'CREATE INDEX IF NOT EXISTS idx_blocks_date ON blocks (date)',
   'CREATE TABLE IF NOT EXISTS login_fail (ip TEXT PRIMARY KEY, count INTEGER NOT NULL, until INTEGER NOT NULL)'
-].concat(CHANGE_SCHEMA()).concat(CUSTOMER_SCHEMA()).concat(EVENT_SCHEMA()).concat(IG_SCHEMA()).concat(MONEY_SCHEMA_SQL());
+].concat(CHANGE_SCHEMA()).concat(CUSTOMER_SCHEMA()).concat(EVENT_SCHEMA()).concat(IG_SCHEMA()).concat(MONEY_SCHEMA_SQL()).concat(WEB_SCHEMA_SQL());
 
 // 売上・経費とClaudeの下書き（あとから追加した表）
 function MONEY_SCHEMA_SQL() {
@@ -129,7 +129,7 @@ const SEED_COURSES = [
   ['季節の薬膳フレンチ', 9800, 'fixed', '前菜から甘味まで全7皿', 'dinner', 1, 'default', 2, '23:59', 'default', 2, '23:59'],
   ['シェフおまかせ', 14000, 'from', '全9皿・薬膳酒のペアリング付き', 'dinner', 2, 'default', 2, '23:59', 'default', 2, '23:59']
 ];
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 let schemaReady = false;
 
@@ -182,6 +182,12 @@ async function route(request, env, ctx) {
     if (path === '/app.webmanifest') return manifest('app');
     if (path === '/admin/google/callback') { await ensureSchema(env); return googleCallback(url, env); }
     if (path === '/privacy') return privacyPage();
+    // ホームページとテイクアウト
+    if (path.startsWith('/web/')) { const a = webAsset(path); if (a) return a; }
+    if (path.startsWith('/media/')) return webMedia(env, path.slice(7));
+    if (path === '/home') { await ensureSchema(env); return homePage(env); }
+    if (path === '/takeaway') { await ensureSchema(env); return takeawayPage(env, url); }
+    if (path === '/takeaway/done') return takeawayDonePage();
     return new Response('Not found', { status: 404 });
   }
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
@@ -189,7 +195,9 @@ async function route(request, env, ctx) {
   await ensureSchema(env);
   rememberOrigin(env, ctx, url.origin);
   if (path.startsWith('/admin/api/')) return adminApi(path.slice(11), request, env, ctx);
+  if (path === '/api/square/webhook') return squareWebhook(request, env, url);
   const body = await readJson(request);
+  if (path.startsWith('/api/takeaway/')) return json(Object.assign({ ok: true }, await takeawayApi(path.slice(14), body, request, env, url)));
 
   if (path.startsWith('/api/')) return customerApi(path.slice(5), body, request, env, ctx);
   return new Response('Not found', { status: 404 });
@@ -292,6 +300,10 @@ async function ensureSchema(env) {
     version = row ? Number(row.v) || 1 : 0;
   } catch (e) {
     version = 0;
+  }
+  if (version > 0 && version < 12) {
+    // ホームページの写真と、テイクアウトの注文
+    await env.DB.batch(WEB_SCHEMA_SQL().map(sql => env.DB.prepare(sql)));
   }
   if (version > 0 && version < 11) {
     // 期間限定のメニュー（何月何日〜何月何日）
@@ -885,7 +897,7 @@ async function declineOffer(env, user, id) {
 const ADMIN_COOKIE = 'epii_admin';
 
 // 写真を送る操作だけ、大きな送信を受け付ける（ログインを確かめてから読む）
-const ADMIN_BIG = { rcptRead: 1, rcptSave: 1, igDraft: 1, exportCsv: 1 };
+const ADMIN_BIG = { rcptRead: 1, rcptSave: 1, igDraft: 1, exportCsv: 1, webPhoto: 1 };
 
 async function adminApi(name, request, env, ctx) {
   if (name === 'login') return adminLogin(env, request, await readJson(request));
@@ -967,6 +979,14 @@ const ADMIN_FUNCS = {
   googleStart: adminGoogleStart,
   google: adminGoogle,
   googleOff: adminGoogleOff,
+  web: adminWeb,
+  webSave: adminWebSave,
+  webPhoto: adminWebPhoto,
+  takeout: adminTakeout,
+  takeoutSave: adminTakeoutSave,
+  takeoutPick: adminTakeoutPick,
+  takeoutTest: adminTakeoutTest,
+  takeoutToday: async env => ({ list: await takeoutToday(env) }),
   sqUnentered: adminSqUnentered,
   sqEnter: adminSqEnter,
   saveCustomer: async (env, b) => {
@@ -2053,6 +2073,7 @@ async function runSchedule(env) {
   } catch (e) { console.error('明細との結びつけのエラー', e && e.message); }
   try { await weeklyReport(env); } catch (e) { console.error('週のまとめのエラー', e && e.message); }
   try { await prepNotify(env); } catch (e) { console.error('仕込みメモのエラー', e && e.message); }
+  try { await tkReconcile(env, 8); } catch (e) { console.error('テイクアウトの照合のエラー', e && e.message); }
   await env.DB.prepare('DELETE FROM ai_cache WHERE at < ?').bind(addDays(jstStamp(Date.now()).slice(0, 10), -60)).run();
   await env.DB.prepare('DELETE FROM events WHERE date < ?').bind(addDays(jstStamp(Date.now()).slice(0, 10), -180)).run();
   await env.DB.prepare('DELETE FROM login_fail WHERE until < ?').bind(Date.now()).run();
@@ -2353,6 +2374,7 @@ async function pushOwner(env, text) {
 }
 
 /*__SERVICES__*/
+/*__WEB__*/
 
 /* =========================================================
  * 署名付きの通行証
